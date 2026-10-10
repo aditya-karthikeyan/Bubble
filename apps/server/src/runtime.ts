@@ -2,7 +2,7 @@
  * Runtime: the database, event bus, timers, plan store, and candidate index wired together.
  * The HTTP app and every script build one of these.
  */
-import type { Fact } from '@bubbleworks/shared';
+import type { Fact, Venue } from '@bubbleworks/shared';
 import type { Config } from './config.js';
 import { openDb, type DbHandle } from './db/client.js';
 import {
@@ -40,6 +40,9 @@ export interface Runtime {
   crews: DbCrewDirectory;
   seed: SeedResult | null;
   log: Logger;
+  /** Replace the hard-facts source (P3's BubbleService) and drop cached candidate sets. */
+  setHardFacts(fn: (userId: string) => Promise<Fact[]>): void;
+  venues(): Venue[];
   close(): void;
 }
 
@@ -62,11 +65,15 @@ export function createRuntime(config: Config, options: RuntimeOptions = {}): Run
   const plans = new PlanStore(db, bus, { log });
   const crews = new DbCrewDirectory(db);
   let venueCache: ReturnType<typeof listVenues> | null = null;
+  // Late-bound so P3's BubbleService can replace the facts-table read after the runtime exists.
+  const hardFactsRef = {
+    fn: options.hardFacts ?? (async (userId: string) => factsForUser(db, userId)),
+  };
   const candidates = new CandidateIndex({
     venues: () => (venueCache ??= listVenues(db)),
     group: (groupId) => groupById(db, groupId),
     memberIds: (groupId) => groupMemberIds(db, groupId),
-    hardFacts: options.hardFacts ?? (async (userId) => factsForUser(db, userId)),
+    hardFacts: (userId) => hardFactsRef.fn(userId),
     log,
   });
 
@@ -80,6 +87,11 @@ export function createRuntime(config: Config, options: RuntimeOptions = {}): Run
     crews,
     seed,
     log,
+    setHardFacts: (fn) => {
+      hardFactsRef.fn = fn;
+      candidates.invalidate();
+    },
+    venues: () => (venueCache ??= listVenues(db)),
     close: () => {
       timers.stop();
       handle.close();

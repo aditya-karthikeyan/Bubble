@@ -21,7 +21,8 @@
     "p4:agent": "tsx --env-file-if-exists=../../.env scripts/voice/agent.ts",
     "p4:number": "tsx --env-file-if-exists=../../.env scripts/voice/number.ts",
     "p4:testcall": "tsx --env-file-if-exists=../../.env scripts/voice/testcall.ts",
-    "p4:phase0": "tsx --env-file-if-exists=../../.env scripts/voice/phase0.ts"
+    "p4:phase0": "tsx --env-file-if-exists=../../.env scripts/voice/phase0.ts",
+    "sim": "tsx --env-file-if-exists=../../.env scripts/sim.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

@@ -1,6 +1,10 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
+import { FakeCaller, FakeDoers } from '@bubbleworks/shared/fakes';
+import { createBubbles } from './bubbles/index.js';
 import { registerDevRoutes } from './dev/routes.js';
+import { parseCommand } from './engine/intent.js';
+import { BubbleworksEngine } from './engine/plan-engine.js';
 import { createMessaging, loadMessagingConfig } from './messaging/index.js';
 import { createRuntime } from './runtime.js';
 
@@ -32,8 +36,55 @@ async function main(): Promise<void> {
   const messagingConfig = loadMessagingConfig();
   const messaging = createMessaging({ config: messagingConfig, runtime });
   const startMessaging = messagingConfig.SPECTRUM_PROVIDER === 'imessage' || process.stdin.isTTY;
+
+  // P3 bubbles: facts, onboarding, crews over DM. They replace the facts-table read.
+  const bubbles = createBubbles({ runtime, messaging: messaging.port });
+  runtime.setHardFacts((userId) => bubbles.service.getHardLimits(userId));
+  bubbles.registerRoutes(app.fastify);
+
+  // P1 engine. Caller and doers are fakes until P4's ElevenLabs caller and P3's doers merge.
+  const engineRef: { engine: BubbleworksEngine | null } = { engine: null };
+  const caller = new FakeCaller((result) => engineRef.engine!.handleCallResult(result), {
+    delayMs: 3000,
+    log: (line) => app.fastify.log.info(line),
+  });
+  const doers = new FakeDoers();
+  const engine = new BubbleworksEngine({
+    runtime,
+    bubbles: bubbles.service,
+    messaging: messaging.port,
+    caller,
+    doers,
+    webPublicUrl: config.WEB_PUBLIC_URL ?? null,
+    log: app.fastify.log,
+  });
+  engineRef.engine = engine;
+  const intake = messaging.attachEngine(engine);
+  engine.setIntake(intake);
+
+  // Private DMs: the bubble answers first; what it does not handle may be a plan command.
+  messaging.port.onPrivateMessage(async (m) => {
+    const { handled } = await bubbles.service.onPrivateMessage(m);
+    if (handled) return;
+    const command = parseCommand(m.text);
+    if (!command) return;
+    const crews = await runtime.crews.crewsOf(m.userId);
+    const chatId = crews.find((c) => c.status === 'active')?.chatId ?? crews[0]?.chatId;
+    if (!chatId) return;
+    await engine.handleCommand({
+      chatId,
+      userId: m.userId,
+      command,
+      messageId: m.messageId,
+      at: m.at,
+    });
+  });
+
   if (startMessaging) await messaging.start();
   else app.fastify.log.info('messaging transport not started: terminal provider without a TTY');
+
+  // Plans in flight resume from their persisted state and timers.
+  for (const plan of runtime.plans.findAllActive()) await engine.kick(plan.id);
 
   if (config.DEV_ROUTES_SECRET) {
     registerDevRoutes(app.fastify, {
