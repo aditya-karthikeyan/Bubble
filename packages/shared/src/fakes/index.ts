@@ -13,3 +13,4 @@ export {
   factsFor,
   personaById,
 } from './personas.js';
+export { FakeCrewDirectory } from './fake-crew-directory.js';

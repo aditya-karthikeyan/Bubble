@@ -2,16 +2,18 @@
  * Five seeded personas and one group with stable ids. The Phase 1 seed script and every
  * fake use these, so simulations and the demo reset agree.
  */
-import type { Fact, Group, GroupMember, User } from '../types.js';
+import { crewChatId, type Fact, type Group, type GroupMember, type User } from '../types.js';
 
 const T0 = '2026-10-10T12:00:00.000Z';
 
 export const DEMO_GROUP: Group = {
   id: 'group_demo',
   name: 'the usual suspects',
-  chatId: 'chat_demo',
-  // Chapel Hill, NC. Replaced by the hackathon address in Phase 1.
-  center: { lat: 35.9132, lng: -79.0558 },
+  chatId: crewChatId('group_demo'),
+  status: 'active',
+  createdByUserId: 'user_ava',
+  // Fetzer Gym, Chapel Hill (the hackathon address).
+  center: { lat: 35.9097, lng: -79.0475 },
   timezone: 'America/New_York',
   createdAt: T0,
 };
@@ -21,6 +23,9 @@ export const PERSONAS: User[] = [
     id: 'user_ava',
     displayName: 'Ava',
     handle: '+10000000001',
+    email: null,
+    bubbleNumber: null,
+    onboardedAt: T0,
     timezone: 'America/New_York',
     createdAt: T0,
   },
@@ -28,6 +33,9 @@ export const PERSONAS: User[] = [
     id: 'user_ben',
     displayName: 'Ben',
     handle: '+10000000002',
+    email: null,
+    bubbleNumber: null,
+    onboardedAt: T0,
     timezone: 'America/New_York',
     createdAt: T0,
   },
@@ -35,6 +43,9 @@ export const PERSONAS: User[] = [
     id: 'user_chloe',
     displayName: 'Chloe',
     handle: '+10000000003',
+    email: null,
+    bubbleNumber: null,
+    onboardedAt: T0,
     timezone: 'America/New_York',
     createdAt: T0,
   },
@@ -42,6 +53,9 @@ export const PERSONAS: User[] = [
     id: 'user_dev',
     displayName: 'Dev',
     handle: '+10000000004',
+    email: null,
+    bubbleNumber: null,
+    onboardedAt: T0,
     timezone: 'America/New_York',
     createdAt: T0,
   },
@@ -49,6 +63,9 @@ export const PERSONAS: User[] = [
     id: 'user_eli',
     displayName: 'Eli',
     handle: '+10000000005',
+    email: null,
+    bubbleNumber: null,
+    onboardedAt: T0,
     timezone: 'America/New_York',
     createdAt: T0,
   },
@@ -58,6 +75,7 @@ export const DEMO_MEMBERS: GroupMember[] = PERSONAS.map((u) => ({
   groupId: DEMO_GROUP.id,
   userId: u.id,
   joinedAt: T0,
+  confirmedAt: T0,
 }));
 
 function fact(

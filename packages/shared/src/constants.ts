@@ -42,7 +42,7 @@ export const SPEED_TARGETS_MS = {
   booked_after_lock: 90_000,
 } as const;
 
-/** Maximum group messages the agent sends for one plan. Private asks do not count. */
+/** Maximum messages the agent sends to one member for one plan. Private asks do not count. */
 export const PLAN_MESSAGE_BUDGET = 8;
 
 /** Aggregates about members appear only when at least this many people are included. */

@@ -25,14 +25,15 @@ Every domain type is a zod schema with the same name as its inferred type:
 
 ## Ports (packages/shared/src/ports.ts)
 
-| Port            | Owner | Implemented in                        | Fake                                      |
-| --------------- | ----- | ------------------------------------- | ----------------------------------------- |
-| `PlanEngine`    | P1    | `apps/server/src/engine` (Phase 1)    | none; use the sim CLI                     |
-| `EventBus`      | P1    | `apps/server/src/events` (Phase 1)    | none; in-memory bus ships with the server |
-| `MessagingPort` | P2    | `apps/server/src/adapters/spectrum`   | `FakeMessaging`                           |
-| `BubbleService` | P3    | `apps/server/src/bubbles`             | `FakeBubbles` (five personas)             |
-| `DoerPorts`     | P3    | `apps/server/src/doers`               | `FakeDoers`                               |
-| `CallerPort`    | P4    | `apps/server/src/adapters/elevenlabs` | `FakeCaller` (booked after 3 s)           |
+| Port            | Owner | Implemented in                           | Fake                                       |
+| --------------- | ----- | ---------------------------------------- | ------------------------------------------ |
+| `PlanEngine`    | P1    | `apps/server/src/engine` (Phase 1)       | none; use the sim CLI                      |
+| `EventBus`      | P1    | `apps/server/src/events` (Phase 1)       | none; in-memory bus ships with the server  |
+| `MessagingPort` | P2    | `apps/server/src/adapters/spectrum`      | `FakeMessaging`                            |
+| `BubbleService` | P3    | `apps/server/src/bubbles`                | `FakeBubbles` (five personas)              |
+| `DoerPorts`     | P3    | `apps/server/src/doers`                  | `FakeDoers`                                |
+| `CallerPort`    | P4    | `apps/server/src/adapters/elevenlabs`    | `FakeCaller` (booked after 3 s)            |
+| `CrewDirectory` | P1    | `apps/server/src/crew` (DbCrewDirectory) | `FakeCrewDirectory` (personas + demo crew) |
 
 Rules that apply to every port:
 
@@ -41,6 +42,32 @@ Rules that apply to every port:
 2. Every inbound handler tolerates duplicate events.
 3. Inbound payloads (Spectrum events, webhooks, LLM output) are validated with zod at the boundary.
 4. Adapters resolve provider handles to internal `userId`s before calling the engine.
+
+### Crews over DMs (decided by P2 in Phase 1)
+
+Photon cannot join iMessage group chats. Every person texts their own bubble number, and the
+adapter fans group messages out to each member's DM. Consequences, all inside the existing
+port shapes:
+
+1. A `Group` is a crew. `Group.chatId` is virtual: `crew:<groupId>` (`crewChatId()`,
+   `groupIdFromChatId()`). `Group.status` is `pending` until every `GroupMember.confirmedAt` is
+   set, then `active`.
+2. `sendGroupText`, `sendPoll`, `sendRichLink`, `upsertLiveCard` on a crew chatId fan out to each
+   member with a per-member idempotency key derived from the caller's. `renameGroup` and
+   `setBackground` are no-ops. `closePoll` sends a "Voting closed" message.
+3. Inbound plan-related DMs arrive through `onGroupMessage` with the member's crew chatId; other
+   DMs go to `onPrivateMessage`. Votes arrive as per-voter state in `PollVote.choices`.
+4. The message budget (`PLAN_MESSAGE_BUDGET`, 8) is per member per plan
+   (`PlanMember.messagesUsed`); `PlanStore.spendMessage(planId, userId)` enforces it.
+5. The adapter may only text people who have texted their bubble first (`User.onboardedAt`).
+
+### CrewDirectory (P1)
+
+`userByHandle`, `userById`, `createUser` (idempotent by handle), `updateUser`, `crewsOf`,
+`crewById`, `crewByChatId`, `membersOf`, `createCrew` (pending; creator pre-confirmed),
+`confirmMember` (active once all confirmed), `addMember`, `removeMember`. P2's signup route
+calls `createUser` after Photon registration; P3's onboarding calls `createCrew` and
+`confirmMember`.
 
 ### MessagingPort (P2)
 
@@ -129,7 +156,7 @@ the plan closes, and an unknown token gets `{ ok: false }`.
 
 ## Personas (packages/shared/src/fakes/personas.ts)
 
-Stable ids used by every fake, the seed script, and the demo reset: `group_demo` / `chat_demo`,
+Stable ids used by every fake, the seed script, and the demo reset: `group_demo` / `crew:group_demo`,
 `user_ava` (vegetarian, $25), `user_ben` (peanut allergy, $40), `user_chloe` (halal, $20),
 `user_dev` (no limits, $50, favorite `venue_demo`), `user_eli` (wheelchair, $30).
 

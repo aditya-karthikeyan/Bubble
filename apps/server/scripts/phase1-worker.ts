@@ -7,6 +7,7 @@
  */
 import { parseArgs } from 'node:util';
 import type { PlanEvent } from '@bubbleworks/shared';
+import { DEMO_GROUP } from '@bubbleworks/shared/fakes';
 import { loadConfig } from '../src/config.js';
 import type { Logger } from '../src/events/bus.js';
 import { createRuntime, type Runtime } from '../src/runtime.js';
@@ -63,7 +64,7 @@ async function fresh(): Promise<void> {
   const today = new Date().toISOString().slice(0, 10);
   const plan = rt.plans.create({
     groupId: 'group_demo',
-    chatId: 'chat_demo',
+    chatId: DEMO_GROUP.chatId,
     intent: {
       meal: 'dinner',
       date: today,
@@ -296,7 +297,7 @@ async function resume(): Promise<void> {
   };
   const c = rt.plans.create({
     groupId: 'group_demo',
-    chatId: 'chat_demo',
+    chatId: DEMO_GROUP.chatId,
     intent,
     createdByUserId: 'user_ben',
   });
@@ -304,7 +305,7 @@ async function resume(): Promise<void> {
   await rt.plans.transition(c.id, 'CANCELLED', { reason: 'command: cancel' });
   const f = rt.plans.create({
     groupId: 'group_demo',
-    chatId: 'chat_demo',
+    chatId: DEMO_GROUP.chatId,
     intent,
     createdByUserId: 'user_dev',
   });

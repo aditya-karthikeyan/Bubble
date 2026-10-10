@@ -95,6 +95,9 @@ export class FakeBubbles implements BubbleService {
         id: input.userId,
         displayName: input.userId,
         handle: input.userId,
+        email: null,
+        bubbleNumber: null,
+        onboardedAt: null,
         timezone: 'America/New_York',
         createdAt: new Date().toISOString(),
       });
