@@ -1,0 +1,17 @@
+{
+  "name": "@bubbleworks/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Bubbleworks shared contracts: domain types, event contract, port interfaces, constants, fakes.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./fakes": "./src/fakes/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  }
+}
