@@ -25,7 +25,11 @@
     "p3:phase3": "tsx --env-file-if-exists=../../.env scripts/p3/phase3.ts",
     "edge": "tsx --env-file-if-exists=../../.env scripts/edge.ts",
     "speed": "tsx --env-file-if-exists=../../.env scripts/speed.ts",
-    "p3:phase4": "tsx --env-file-if-exists=../../.env scripts/p3/phase4.ts"
+    "p3:phase4": "tsx --env-file-if-exists=../../.env scripts/p3/phase4.ts",
+    "p4:agent": "tsx --env-file-if-exists=../../.env scripts/voice/agent.ts",
+    "p4:number": "tsx --env-file-if-exists=../../.env scripts/voice/number.ts",
+    "p4:testcall": "tsx --env-file-if-exists=../../.env scripts/voice/testcall.ts",
+    "p4:phase0": "tsx --env-file-if-exists=../../.env scripts/voice/phase0.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

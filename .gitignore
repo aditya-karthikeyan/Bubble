@@ -27,3 +27,7 @@ data/*.db-*
 # railway / vercel local state
 .railway/
 .vercel/
+
+# next.js generated types
+next-env.d.ts
+*.tsbuildinfo
