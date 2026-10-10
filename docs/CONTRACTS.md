@@ -160,20 +160,32 @@ Stable ids used by every fake, the seed script, and the demo reset: `group_demo`
 `user_ava` (vegetarian, $25), `user_ben` (peanut allergy, $40), `user_chloe` (halal, $20),
 `user_dev` (no limits, $50, favorite `venue_demo`), `user_eli` (wheelchair, $30).
 
+## Polls (packages/shared/src/polls.ts)
+
+`isPollDecided(counts, remainingVoters)` returns `{ decided, leader, margin }`: decided when the
+leader's margin over the runner-up exceeds the votes still out (or nobody is left and the top is
+not tied). `tallyChoices(choicesByVoter, optionKeys)` turns per-voter choices into counts. The
+engine uses both for early close; P2 may use them for the "Voting closed" message.
+
 ## Server internals (P1, apps/server/src)
 
 Not contracts, but the pieces other roles call from inside the server process:
 
-| Module                     | What it gives you                                                                            |
-| -------------------------- | -------------------------------------------------------------------------------------------- |
-| `runtime.ts` createRuntime | db, `bus` (SqliteEventBus), `timers`, `plans` (PlanStore), `candidates` (CandidateIndex)     |
-| `engine/state-machine.ts`  | `canTransition(to, ctx)`, transition table, `IllegalTransitionError`, `isTerminal`           |
-| `engine/plan-store.ts`     | `create`, `transition` (persists + audits + publishes `plan_state_changed`), members, budget |
-| `events/bus.ts`            | `publish`, `subscribe`, `replay`, `replayForToken` (null when unknown or expired)            |
-| `timers/service.ts`        | `schedule({ planId, kind, payload, delayMs? })`, `on(kind, handler)`, `cancel`, `pending`    |
-| `venues/candidates.ts`     | `forGroup({ groupId, date, startMinutes, memberIds })`, `invalidate(groupId)`                |
-| `venues/compat.ts`         | `isCompatible(venue, facts)` for diet, allergy, religious_diet, accessibility                |
-| `db/seed.ts`               | idempotent seed of personas, demo group (center: Fetzer Gym), data/venues.json               |
+| Module                      | What it gives you                                                                            |
+| --------------------------- | -------------------------------------------------------------------------------------------- |
+| `runtime.ts` createRuntime  | db, `bus` (SqliteEventBus), `timers`, `plans` (PlanStore), `candidates` (CandidateIndex)     |
+| `engine/state-machine.ts`   | `canTransition(to, ctx)`, transition table, `IllegalTransitionError`, `isTerminal`           |
+| `engine/plan-store.ts`      | `create`, `transition` (persists + audits + publishes `plan_state_changed`), members, budget |
+| `events/bus.ts`             | `publish`, `subscribe`, `replay`, `replayForToken` (null when unknown or expired)            |
+| `timers/service.ts`         | `schedule({ planId, kind, payload, delayMs? })`, `on(kind, handler)`, `cancel`, `pending`    |
+| `venues/candidates.ts`      | `forGroup({ groupId, date, startMinutes, memberIds })`, `invalidate(groupId)`                |
+| `venues/compat.ts`          | `isCompatible(venue, facts)` for diet, allergy, religious_diet, accessibility                |
+| `db/seed.ts`                | idempotent seed of personas, demo group (center: Fetzer Gym), data/venues.json               |
+| `engine/plan-engine.ts`     | `BubbleworksEngine implements PlanEngine`; `setIntake(P2 PlanIntake)`, `kick(planId)`        |
+| `engine/intent.ts`          | `parseIntent(text)` (meal, date, time, cuisine), `parseCommand(text)`                        |
+| `engine/question-policy.ts` | `decideCuisineQuestion`, `decideStartTime`, `zonedInstant`                                   |
+| `solver/`                   | `solve({ venues, members, ctx, vetoedVenueIds })`: filter, score, elimination rounds         |
+| `dev/routes.ts`             | `/api/dev/plans` (create, step, inspect) behind `DEV_ROUTES_SECRET`                          |
 
 Timer kinds: `poll_deadline`, `ask_timeout`, `veto_window`, `call_timeout` use `DEADLINES` (or
 `DEMO_DEADLINES` when DEMO_MODE); `day_of`, `page_token_expiry`, `custom` take `delayMs`.
@@ -183,8 +195,17 @@ Venue conventions: `dietTags` may include `<allergen>_free`; `accessibilityTags`
 `wheelchair` / `step_free` / `no_wheelchair` (absent means unknown and passes). The demo venue
 is `venue_demo`; its phone comes from `DEMO_VENUE_PHONE`, never from the repo.
 
-P3: `createRuntime({ hardFacts })` is where `BubbleService.getHardLimits` replaces the facts
-table read in Phase 3.
+P3: `runtime.setHardFacts(fn)` points the candidate precompute at `BubbleService.getHardLimits`
+(wired in `index.ts`).
+
+Engine flow: `handleIntent` -> DETECTED -> question policy -> bundle (P2 `renderBundle`) ->
+GATHERING -> headcount and votes (`isPollDecided` early close, else `poll_deadline`) ->
+silent members represented (Focus, sleep, driving, with confirmed hard facts) or dropped ->
+DELIBERATING -> solver rounds (`candidate_added`, `round_complete`, `candidate_eliminated`,
+`bubble_merged`) -> LOCKED (`plan_locked`, group text with the veto window) -> `veto_window` ->
+BOOKING (`CallerPort.book`, `doer_status`) -> `handleCallResult` -> BOOKED (`booking_confirmed`,
+inviter, splitter, watcher) | declined/no answer -> rerun with the venue removed. No feasible
+venue -> DEADLOCK (Phase 3 breaker). Commands: wait, resume, cancel, veto, why.
 
 ## Invariants every module keeps
 
