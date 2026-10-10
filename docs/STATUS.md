@@ -2,12 +2,12 @@
 
 One row per role. Update your row at the end of every phase.
 
-| Role                      | Person | Phase | State       | PR                                                  | Known issues                                                                                                                |
-| ------------------------- | ------ | ----- | ----------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| P1 Core and Integration   | Aditya | 0     | done        | https://github.com/aditya-karthikeyan/Bubble/pull/1 | railway.json config-as-code deprecated 2026-12-01 (fine for the hackathon); deploys via `railway up` by P1 after each merge |
-| P2 Messaging and Surfaces | Pranav | 0     | not started |                                                     |                                                                                                                             |
-| P3 Bubbles and Context    | Soham  | 0     | not started |                                                     |                                                                                                                             |
-| P4 Voice and Live Page    | Mahil  | 0     | not started |                                                     |                                                                                                                             |
+| Role                      | Person | Phase | State       | PR                                                  | Known issues                                                                                                                                      |
+| ------------------------- | ------ | ----- | ----------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1 Core and Integration   | Aditya | 1     | in review   | https://github.com/aditya-karthikeyan/Bubble/pull/2 | OSM wheelchair tags mostly missing (unknown passes, caller confirms); halal satisfied by vegetarian-capable venues; deploy to Railway after merge |
+| P2 Messaging and Surfaces | Pranav | 0     | not started |                                                     |                                                                                                                                                   |
+| P3 Bubbles and Context    | Soham  | 0     | not started |                                                     |                                                                                                                                                   |
+| P4 Voice and Live Page    | Mahil  | 0     | not started |                                                     |                                                                                                                                                   |
 
 ## Checkpoints
 

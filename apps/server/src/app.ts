@@ -6,8 +6,10 @@ import { attachLiveBridge, type LiveBridge } from './live/socket.js';
 
 export interface AppDeps {
   config: Config;
-  /** Phase 1 wires this to the EventBus. Until then, every token replays nothing. */
+  /** Resolve a live page token to its replay; null means unknown or expired. */
   replayForToken?: (token: string) => Promise<PlanEvent[] | null>;
+  /** Extra fields merged into GET /health (active plans, pending timers, ...). */
+  health?: () => Record<string, unknown>;
 }
 
 export interface App {
@@ -38,6 +40,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     demoMode: config.DEMO_MODE,
     startedAt,
     now: new Date().toISOString(),
+    ...(deps.health?.() ?? {}),
   }));
 
   const live = attachLiveBridge(fastify.server, {
