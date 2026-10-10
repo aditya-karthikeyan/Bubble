@@ -285,9 +285,79 @@ export const events = sqliteTable(
   (t) => [uniqueIndex('events_plan_seq_idx').on(t.planId, t.seq)],
 );
 
+// ---------------------------------------------------------------------------
+// Bubbles (P3). Server-internal; nothing here reaches the page or another member.
+// ---------------------------------------------------------------------------
+
+/** What a bubble is waiting for from its person. At most one pending question at a time. */
+export type BubblePending =
+  | { kind: 'allergy_confirm'; factIds: string[] }
+  | { kind: 'crew_confirm'; groupId: string }
+  | { kind: 'forget_me_confirm'; expiresAt: string };
+
+/** Per-person conversation state: onboarding progress and the pending yes/no question. */
+export const bubbleState = sqliteTable('bubble_state', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  /** Current onboarding question, null before start and after completion. */
+  onboardingStep: text('onboarding_step'),
+  onboardingStartedAt: text('onboarding_started_at'),
+  onboardingCompletedAt: text('onboarding_completed_at'),
+  pending: text('pending', { mode: 'json' }).$type<BubblePending | null>(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+/** Inbound DMs a bubble has processed, so a redelivered message is answered once. */
+export const bubbleInbox = sqliteTable(
+  'bubble_inbox',
+  {
+    messageId: text('message_id').primaryKey(),
+    userId: text('user_id').notNull(),
+    handled: integer('handled', { mode: 'boolean' }).notNull(),
+    at: text('at').notNull(),
+  },
+  (t) => [index('bubble_inbox_user_idx').on(t.userId)],
+);
+
+/** Crew invitations. An invite waits until its person has finished onboarding. */
+export const crewInvites = sqliteTable(
+  'crew_invites',
+  {
+    groupId: text('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    invitedByUserId: text('invited_by_user_id').notNull(),
+    status: text('status').$type<'waiting' | 'sent' | 'accepted' | 'declined'>().notNull(),
+    sentAt: text('sent_at'),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.groupId, t.userId] })],
+);
+
+/** Google OAuth tokens for calendar free/busy. Never logged. */
+export const googleTokens = sqliteTable('google_tokens', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  refreshToken: text('refresh_token'),
+  accessToken: text('access_token'),
+  /** Epoch milliseconds. */
+  expiryDate: integer('expiry_date'),
+  scope: text('scope'),
+  updatedAt: text('updated_at').notNull(),
+});
+
 export const schema = {
   users,
   facts,
+  bubbleState,
+  bubbleInbox,
+  crewInvites,
+  googleTokens,
   groups,
   groupMembers,
   plans,

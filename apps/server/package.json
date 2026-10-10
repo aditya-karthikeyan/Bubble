@@ -15,7 +15,8 @@
     "db:seed": "tsx --env-file-if-exists=../../.env -e \"import('./src/config.js').then(async ({loadConfig})=>{const {createRuntime}=await import('./src/runtime.js');const rt=createRuntime(loadConfig(),{seed:true});console.log(rt.seed);rt.close();})\"",
     "p2:phase1": "tsx --env-file-if-exists=../../.env scripts/p2-phase1.ts",
     "p3:phase0": "tsx --env-file-if-exists=../../.env scripts/p3/phase0.ts",
-    "p3:oauth": "tsx --env-file-if-exists=../../.env scripts/p3/calendar.ts"
+    "p3:oauth": "tsx --env-file-if-exists=../../.env scripts/p3/calendar.ts",
+    "p3:phase1": "tsx --env-file-if-exists=../../.env scripts/p3/phase1.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

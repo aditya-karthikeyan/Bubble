@@ -24,7 +24,8 @@
     "db:seed": "pnpm --filter @bubbleworks/server db:seed",
     "p2:phase1": "pnpm --filter @bubbleworks/server p2:phase1",
     "p3:phase0": "pnpm --filter @bubbleworks/server p3:phase0",
-    "p3:oauth": "pnpm --filter @bubbleworks/server p3:oauth"
+    "p3:oauth": "pnpm --filter @bubbleworks/server p3:oauth",
+    "p3:phase1": "pnpm --filter @bubbleworks/server p3:phase1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
