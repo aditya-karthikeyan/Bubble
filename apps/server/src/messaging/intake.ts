@@ -1,0 +1,244 @@
+/**
+ * PlanIntake: inbound messaging -> PlanEngine, and the engine's question decision -> the bundle.
+ *
+ *   text arrives     -> plan words? typing bubble in the sender's DM right away (pre-batch)
+ *   group message    -> open plan in that crew? parse RSVP (rules, then Haiku) -> handleHeadcount
+ *                       else detect (rules; Haiku for weak) -> handleIntent
+ *   👍 on headcount  -> handleHeadcount(in)       👎 -> handleHeadcount(out)
+ *   poll vote        -> handleVote(choices)
+ *   renderBundle()   -> poll + headcount + link to every member, typing off
+ *
+ * Timing marks (structured logs): t_detect, t_typing, t_poll_posted, in ms since the message
+ * reached the server (and lagMs: phone send time to receipt).
+ */
+import { type PlanEngine } from '@bubbleworks/shared';
+import type { Logger } from '../events/bus.js';
+import { dmChatId, type SpectrumMessaging } from './adapter.js';
+import {
+  renderBundle,
+  type BundleResult,
+  type BundleStore,
+  type QuestionDecision,
+} from './bundle.js';
+import type { Classifier } from './classifier.js';
+import { detectPlan, parseRsvp, stanceFromEmoji, type RsvpStance } from './detect.js';
+
+export interface PlanIntakeOptions {
+  port: SpectrumMessaging;
+  engine: PlanEngine;
+  bundles: BundleStore;
+  classifier: Classifier | null;
+  log: Logger;
+  timezone?: string;
+  now?: () => Date;
+  /** Haiku must be at least this sure before a weak detection starts a plan. */
+  minConfidence?: number;
+}
+
+interface Marks {
+  receivedAt: number;
+  lagMs: number;
+  userId: string;
+  typingAt?: number;
+  detectAt?: number;
+}
+
+export class PlanIntake {
+  private readonly marks = new Map<string, Marks>(); // by userId, newest message
+  private readonly planMarks = new Map<string, Marks>(); // by planId
+  /** Marks of the intent being handled, for an engine that renders the bundle inside handleIntent. */
+  private inflight: Marks | null = null;
+  private readonly timezone: string;
+  private readonly now: () => Date;
+
+  constructor(private readonly o: PlanIntakeOptions) {
+    this.timezone = o.timezone ?? 'America/New_York';
+    this.now = o.now ?? (() => new Date());
+  }
+
+  start(): void {
+    this.o.classifier?.warm?.();
+    this.o.port.onTextReceived((userId, text, at) => this.onRawText(userId, text, at));
+    this.o.port.onGroupMessage(async (m) => this.onGroupMessage(m));
+    this.o.port.onReaction(async (r) => this.onReaction(r));
+    this.o.port.onPollVote(async (v) => this.onPollVote(v));
+  }
+
+  /** Called by the engine's question policy once it knows what to ask. */
+  async renderBundle(decision: QuestionDecision): Promise<BundleResult> {
+    const result = await renderBundle(this.o.port, this.o.bundles, decision);
+    const marks = this.planMarks.get(decision.planId) ?? this.inflight;
+    if (marks) {
+      this.planMarks.set(decision.planId, marks);
+      void this.o.port.setTyping({ chatId: dmChatId(marks.userId), typing: false });
+      this.o.log.info(
+        {
+          planId: decision.planId,
+          mark: 't_poll_posted',
+          ms: Date.now() - marks.receivedAt,
+          lagMs: marks.lagMs,
+          bundleMs: result.ms,
+        },
+        'timing',
+      );
+    }
+    return result;
+  }
+
+  /** Engine signals the plan stopped collecting answers (decided, closed, cancelled). */
+  closePlan(planId: string): void {
+    this.o.bundles.close(planId);
+    this.planMarks.delete(planId);
+  }
+
+  // -- inbound ---------------------------------------------------------------
+
+  private onRawText(userId: string, text: string, at: string): void {
+    const receivedAt = Date.now();
+    const marks: Marks = { receivedAt, lagMs: Math.max(0, receivedAt - Date.parse(at)), userId };
+    this.marks.set(userId, marks);
+    const detection = detectPlan(text);
+    if (detection.level === 'none') return;
+    // "I'm in" is an RSVP, not a plan; "down for dinner tonight?" names a meal, so it is a plan.
+    if (detection.meal === null && parseRsvp(text) !== 'unclear') return;
+    marks.typingAt = Date.now();
+    void this.o.port.setTyping({ chatId: dmChatId(userId), typing: true });
+    this.o.log.info({ userId, mark: 't_typing', ms: marks.typingAt - receivedAt }, 'timing');
+  }
+
+  private async onGroupMessage(m: {
+    chatId: string;
+    userId: string;
+    messageId: string;
+    text: string;
+    at: string;
+  }): Promise<void> {
+    const open = this.o.bundles.openForChat(m.chatId);
+    if (open) {
+      const stance = await this.rsvpStance(m.text, open.organizerName, open.meal);
+      if (stance !== 'unclear') {
+        await this.o.engine.handleHeadcount({
+          planId: open.planId,
+          userId: m.userId,
+          in: stance === 'in',
+          at: m.at,
+        });
+        this.o.log.info(
+          { planId: open.planId, userId: m.userId, stance, via: 'reply' },
+          'headcount',
+        );
+        return;
+      }
+    }
+
+    const marks = this.marks.get(m.userId);
+    const isPlan = await this.isPlanIntent(m.text);
+    if (!isPlan) {
+      if (marks?.typingAt)
+        void this.o.port.setTyping({ chatId: dmChatId(m.userId), typing: false });
+      return;
+    }
+    if (marks) {
+      marks.detectAt = Date.now();
+      this.o.log.info(
+        {
+          userId: m.userId,
+          mark: 't_detect',
+          ms: marks.detectAt - marks.receivedAt,
+          lagMs: marks.lagMs,
+        },
+        'timing',
+      );
+    }
+    this.inflight = marks ?? null;
+    const result = await this.o.engine
+      .handleIntent({
+        chatId: m.chatId,
+        userId: m.userId,
+        messageId: m.messageId,
+        text: m.text,
+        at: m.at,
+      })
+      .finally(() => {
+        this.inflight = null;
+      });
+    if (result.planId && marks && !this.planMarks.has(result.planId)) {
+      this.planMarks.set(result.planId, marks);
+    } else if (!result.planId && marks?.typingAt) {
+      void this.o.port.setTyping({ chatId: dmChatId(m.userId), typing: false });
+    }
+  }
+
+  private async onReaction(r: {
+    messageId: string;
+    userId: string;
+    emoji: string;
+    removed: boolean;
+    at: string;
+  }): Promise<void> {
+    const bundle = this.o.bundles.byHeadcountMessage(r.messageId);
+    if (!bundle) return;
+    const stance = r.removed ? 'out' : stanceFromEmoji(r.emoji);
+    if (stance === 'unclear') return;
+    await this.o.engine.handleHeadcount({
+      planId: bundle.planId,
+      userId: r.userId,
+      in: stance === 'in',
+      at: r.at,
+    });
+    this.o.log.info(
+      { planId: bundle.planId, userId: r.userId, stance, via: 'tapback' },
+      'headcount',
+    );
+  }
+
+  private async onPollVote(v: {
+    pollId: string;
+    userId: string;
+    choices: string[];
+    at: string;
+  }): Promise<void> {
+    const bundle = this.o.bundles.byPollId(v.pollId);
+    if (!bundle) return;
+    await this.o.engine.handleVote({
+      planId: bundle.planId,
+      pollId: v.pollId,
+      userId: v.userId,
+      choices: v.choices,
+      at: v.at,
+    });
+  }
+
+  // -- decisions -------------------------------------------------------------
+
+  /** Rules decide strong and none; Haiku decides weak; rules fall back when Haiku is unavailable. */
+  private async isPlanIntent(text: string): Promise<boolean> {
+    const detection = detectPlan(text);
+    if (detection.level === 'strong') return true;
+    if (detection.level === 'none') return false;
+    const judgement = await this.o.classifier?.intent(text, {
+      today: this.today(),
+      timezone: this.timezone,
+    });
+    if (judgement)
+      return judgement.isPlanIntent && judgement.confidence >= (this.o.minConfidence ?? 0.6);
+    return text.includes('?');
+  }
+
+  private async rsvpStance(
+    text: string,
+    organizer: string,
+    meal: string | null,
+  ): Promise<RsvpStance> {
+    const rule = parseRsvp(text);
+    if (rule !== 'unclear' || text.length > 120 || detectPlan(text).level === 'strong') return rule;
+    const judgement = await this.o.classifier?.rsvp(text, {
+      planSummary: `${organizer} is planning ${meal ?? 'a meal'}`,
+    });
+    return judgement && judgement.confidence >= 0.7 ? judgement.stance : 'unclear';
+  }
+
+  private today(): string {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: this.timezone }).format(this.now());
+  }
+}

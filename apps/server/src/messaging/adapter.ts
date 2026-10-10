@@ -108,6 +108,7 @@ export class SpectrumMessaging implements MessagingPort {
     reaction: [],
     member: [],
   };
+  private readonly rawText: Array<(userId: string, text: string, at: string) => void> = [];
   private readonly batcher: Batcher;
   private readonly retry: { attempts: number; baseDelayMs: number };
 
@@ -275,6 +276,14 @@ export class SpectrumMessaging implements MessagingPort {
   onReaction(handler: (r: Reaction) => Promise<void>): Unsubscribe {
     return add(this.handlers.reaction, handler);
   }
+  /**
+   * Called for every inbound text before batching, so detection can show the typing bubble
+   * within a second instead of after the debounce window. Not part of MessagingPort.
+   */
+  onTextReceived(handler: (userId: string, text: string, at: string) => void): Unsubscribe {
+    return add(this.rawText, handler);
+  }
+
   /** Crew membership changes come from P3's declaration flow, so this never fires. */
   onMemberChange(handler: (c: MemberChange) => Promise<void>): Unsubscribe {
     return add(this.handlers.member, handler);
@@ -297,6 +306,13 @@ export class SpectrumMessaging implements MessagingPort {
 
     switch (event.kind) {
       case 'text':
+        for (const handler of this.rawText) {
+          try {
+            handler(user.id, event.text, event.at);
+          } catch (err) {
+            this.o.log.error({ err: String(err) }, 'raw text handler threw');
+          }
+        }
         this.batcher.add(user.id, {
           providerId: event.providerId,
           text: event.text,
