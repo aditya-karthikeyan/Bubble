@@ -26,7 +26,9 @@
     "p3:phase0": "pnpm --filter @bubbleworks/server p3:phase0",
     "p3:oauth": "pnpm --filter @bubbleworks/server p3:oauth",
     "p3:phase1": "pnpm --filter @bubbleworks/server p3:phase1",
-    "p2:phase2": "pnpm --filter @bubbleworks/server p2:phase2"
+    "p2:phase2": "pnpm --filter @bubbleworks/server p2:phase2",
+    "sim": "pnpm --filter @bubbleworks/server sim",
+    "p1:phase2": "pnpm --filter @bubbleworks/server sim basic"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

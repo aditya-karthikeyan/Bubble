@@ -64,6 +64,32 @@ export const CONCESSION_STEPS = {
   time_max_min: 60,
 } as const;
 
+/** Solver tuning. Deterministic; change here, never per request. */
+export const SOLVER = {
+  /** A bubble approves a venue when its normalized score reaches this. */
+  approve_threshold: 0.5,
+  /** Walking minutes a member is expected to travel before the distance filter bites. */
+  travel_limit_min: 20,
+  /** Score weights. Each component is 0..1 before weighting. */
+  weights: {
+    cuisine_like: 0.3,
+    cuisine_avoid: 0.35,
+    poll_vote: 0.3,
+    favorite: 0.25,
+    distance: 0.15,
+    recent_visit: 0.2,
+    budget_headroom: 0.1,
+  },
+  /** Fairness: each recent compromise adds this much weight to a member's vote. */
+  fairness_step: 0.25,
+  fairness_max: 2,
+  /** Candidate windows for the inferred start time, local minutes since midnight. */
+  time_windows_min: [17 * 60 + 30, 18 * 60, 18 * 60 + 30, 19 * 60, 19 * 60 + 30, 20 * 60],
+  default_start_min: 19 * 60,
+  /** How long dinner is assumed to take when checking hours and free/busy. */
+  meal_duration_min: 90,
+} as const;
+
 /** Venue search radius from the hackathon address. */
 export const VENUE_RADIUS_M = 1_500;
 
