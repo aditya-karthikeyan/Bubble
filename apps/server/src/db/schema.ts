@@ -292,6 +292,8 @@ export const events = sqliteTable(
 /** What a bubble is waiting for from its person. At most one pending question at a time. */
 export type BubblePending =
   | { kind: 'allergy_confirm'; factIds: string[] }
+  /** A hard fact learned from chat, waiting for a yes before it counts as confirmed. */
+  | { kind: 'fact_confirm'; factIds: string[] }
   | { kind: 'crew_confirm'; groupId: string }
   | { kind: 'forget_me_confirm'; expiresAt: string };
 
@@ -305,6 +307,9 @@ export const bubbleState = sqliteTable('bubble_state', {
   onboardingStartedAt: text('onboarding_started_at'),
   onboardingCompletedAt: text('onboarding_completed_at'),
   pending: text('pending', { mode: 'json' }).$type<BubblePending | null>(),
+  /** Presence the person set with a command (busy, sleeping, driving), until presenceUntil. */
+  presence: text('presence').$type<'focus' | 'sleep' | 'driving'>(),
+  presenceUntil: text('presence_until'),
   updatedAt: text('updated_at').notNull(),
 });
 

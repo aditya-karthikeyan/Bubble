@@ -18,6 +18,7 @@
     "p3:oauth": "tsx --env-file-if-exists=../../.env scripts/p3/calendar.ts",
     "p3:phase1": "tsx --env-file-if-exists=../../.env scripts/p3/phase1.ts",
     "p2:phase2": "tsx --env-file-if-exists=../../.env scripts/p2-phase2.ts",
+    "p3:phase2": "tsx --env-file-if-exists=../../.env scripts/p3/phase2.ts",
     "sim": "tsx --env-file-if-exists=../../.env scripts/sim.ts"
   },
   "dependencies": {

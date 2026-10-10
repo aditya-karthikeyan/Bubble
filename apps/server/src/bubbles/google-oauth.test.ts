@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Runtime } from '../runtime.js';
@@ -114,6 +115,26 @@ describe('FactStore merge rules', () => {
     const budgets = store.active('user_ava').filter((f) => f.type === 'budget_max');
     expect(budgets.map((f) => f.value)).toEqual(['15', '35']);
     expect(store.current('user_ava', 'budget_max')?.value).toBe('15');
+  });
+
+  it('picks the temporary value deterministically even when written in the same millisecond', () => {
+    for (let i = 0; i < 25; i++) {
+      const userId = `user_tie_${i}`;
+      rt.db.run(
+        sql`insert into users (id, display_name, handle, timezone, created_at) values (${userId}, 'T', ${`+1919555${String(1000 + i)}`}, 'America/New_York', '2026-10-10T00:00:00Z')`,
+      );
+      store.record({ ...base, userId, type: 'budget_max', value: '30', hard: true });
+      store.record({
+        ...base,
+        userId,
+        type: 'budget_max',
+        value: '15',
+        hard: true,
+        expiresAt: '2026-10-17T03:59:59.000Z',
+      });
+      expect(store.current(userId, 'budget_max')?.value).toBe('15');
+      expect(store.deleteLatest(userId)?.value).toBe('15');
+    }
   });
 
   it('dedupes multi-valued facts and lets like/avoid cancel', () => {

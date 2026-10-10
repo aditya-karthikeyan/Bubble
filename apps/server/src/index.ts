@@ -37,10 +37,12 @@ async function main(): Promise<void> {
   const messaging = createMessaging({ config: messagingConfig, runtime });
   const startMessaging = messagingConfig.SPECTRUM_PROVIDER === 'imessage' || process.stdin.isTTY;
 
-  // P3 bubbles: facts, onboarding, crews over DM. They replace the facts-table read.
+  // P3 bubbles: facts, onboarding, crews over DM, passive learning, calendar connect. They
+  // replace the facts-table read for the candidate precompute.
   const bubbles = createBubbles({ runtime, messaging: messaging.port });
   runtime.setHardFacts((userId) => bubbles.service.getHardLimits(userId));
   bubbles.registerRoutes(app.fastify);
+  bubbles.attachLearner();
 
   // P1 engine. Caller and doers are fakes until P4's ElevenLabs caller and P3's doers merge.
   const engineRef: { engine: BubbleworksEngine | null } = { engine: null };
@@ -116,6 +118,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     app.fastify.log.info({ signal }, 'shutting down');
     if (startMessaging) await messaging.stop().catch(() => undefined);
+    await bubbles.close().catch(() => undefined);
     runtime.close();
     await app.fastify.close();
     process.exit(0);

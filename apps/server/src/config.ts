@@ -26,7 +26,9 @@ const Env = z.object({
 export type Config = z.infer<typeof Env>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const result = Env.safeParse(env);
+  // A blank line copied from .env.example (SERVER_PUBLIC_URL=) means unset, not an invalid value.
+  const set = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== ''));
+  const result = Env.safeParse(set);
   if (!result.success) {
     const issues = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     throw new Error(`Invalid environment: ${issues}`);
