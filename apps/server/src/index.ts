@@ -1,6 +1,6 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
-import { FakeCaller, FakeDoers } from '@bubbleworks/shared/fakes';
+import { FakeCaller, FakeDoers, FakeMessaging } from '@bubbleworks/shared/fakes';
 import { createBubbles } from './bubbles/index.js';
 import { registerDevRoutes } from './dev/routes.js';
 import { parseCommand } from './engine/intent.js';
@@ -51,10 +51,16 @@ async function main(): Promise<void> {
     log: (line) => app.fastify.log.info(line),
   });
   const doers = new FakeDoers();
+  // With the transport off (headless, no line lock) the engine talks to a silent fake so plans
+  // started from the dev routes still run end to end for the live page.
+  const enginePort = startMessaging
+    ? messaging.port
+    : new FakeMessaging({ print: false, log: (line) => app.fastify.log.debug(line) });
+  if (!startMessaging) app.fastify.log.info('engine messaging: silent fake (transport off)');
   const engine = new BubbleworksEngine({
     runtime,
     bubbles: bubbles.service,
-    messaging: messaging.port,
+    messaging: enginePort,
     caller,
     doers,
     webPublicUrl: config.WEB_PUBLIC_URL ?? null,
