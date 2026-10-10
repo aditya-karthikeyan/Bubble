@@ -11,6 +11,11 @@ const Env = z.object({
   DEMO_MODE: z.stringbool().default(false),
   /** Upsert personas, the demo group, and venues at boot. Idempotent. */
   SEED_ON_BOOT: z.stringbool().default(true),
+  /**
+   * Enables POST /api/dev/* (create and step a demo plan) when set; requests must send the
+   * same value in the x-dev-secret header. Unset = routes absent.
+   */
+  DEV_ROUTES_SECRET: z.string().min(16).optional(),
   /** E.164 number of the teammate who plays the demo venue. Never committed. */
   DEMO_VENUE_PHONE: z
     .string()
