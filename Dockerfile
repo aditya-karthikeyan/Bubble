@@ -14,6 +14,8 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/server/package.json apps/server/
+# pnpm patchedDependencies (spectrum-ts poll-vote fix) must be present at install time.
+COPY patches patches
 RUN pnpm install --frozen-lockfile --filter @bubbleworks/server...
 
 COPY tsconfig.base.json ./
