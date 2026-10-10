@@ -15,6 +15,13 @@
       "when": 1791669669372,
       "tag": "0001_crew_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791672548186,
+      "tag": "0002_bubbles",
+      "breakpoints": true
     }
   ]
 }

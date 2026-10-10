@@ -1,0 +1,838 @@
+/**
+ * DbBubbleService: the BubbleService port over SQLite. Owner: P3.
+ *
+ * Inbound non-plan DMs arrive at onPrivateMessage. In order, a bubble handles:
+ *   1. "forget me" / "forget that"
+ *   2. the one pending yes/no question (allergy check, crew invite, forget-me confirm)
+ *   3. onboarding, five short questions, for anyone who has not finished it
+ *   4. crew declarations ("my crew is Ava, Ben, +19195551234")
+ * Anything else returns handled = false so the engine can treat it as a command.
+ *
+ * Privacy: a bubble only ever DMs its own person about their own facts. Crew invites and
+ * crew updates carry names only. Logs carry ids and kinds, never message text or fact values.
+ */
+import { and, eq, inArray, sql } from 'drizzle-orm';
+import {
+  idempotencyKey,
+  type BubbleProfile,
+  type BubbleService,
+  type BusyInterval,
+  type CrewDirectory,
+  type Fact,
+  type GeoPoint,
+  type Group,
+  type InboundPrivateMessage,
+  type IsoDateTime,
+  type MessagingPort,
+  type NewFact,
+  type Presence,
+  type User,
+} from '@bubbleworks/shared';
+import type { Db } from '../db/client.js';
+import {
+  asks,
+  bubbleInbox,
+  bubbleState,
+  crewInvites,
+  ledger,
+  planMembers,
+  users,
+  venues,
+  votes,
+  type BubblePending,
+} from '../db/schema.js';
+import { silentLogger, type Logger } from '../events/bus.js';
+import {
+  HARD_FACT_TYPES,
+  isSkip,
+  resolveUntil,
+  splitList,
+  type ExtractedFact,
+  type ExtractHint,
+  type FactExtractor,
+} from './extract.js';
+import { describeFact, FactStore } from './facts.js';
+
+export const ONBOARDING_STEPS = [
+  'diet_allergy',
+  'budget',
+  'neighborhood',
+  'favorites',
+  'venmo',
+] as const satisfies readonly ExtractHint[];
+export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
+
+const QUESTIONS: Record<OnboardingStep, string> = {
+  diet_allergy: "1/5 Anything you don't eat? Diet, allergies, halal, kosher, or just say none.",
+  budget: '2/5 Usual budget per person for dinner? Like $20 or $30.',
+  neighborhood: '3/5 What area are you usually in? Like Franklin St or Southpoint.',
+  favorites: '4/5 Two favorite spots around here?',
+  venmo: '5/5 Venmo handle, for splitting the bill? Or say skip.',
+};
+
+const FORGET_ME_WINDOW_MS = 5 * 60_000;
+
+export interface BubbleServiceDeps {
+  db: Db;
+  crews: CrewDirectory;
+  messaging: Pick<MessagingPort, 'sendPrivateText'>;
+  extractor: FactExtractor;
+  /** Short calendar connect link for a user, or null when Google is not configured. */
+  calendarLink?: (userId: string) => string | null;
+  /** Signup page for people who are not registered yet (WEB_PUBLIC_URL landing page). */
+  signupUrl?: string | null;
+  /** The engine's "crew changed, rerun" hook (PlanEngine.handleMemberChange). */
+  onCrewChanged?: (input: {
+    chatId: string;
+    userId: string;
+    change: 'joined' | 'left';
+  }) => Promise<void>;
+  now?: () => Date;
+  log?: Logger;
+}
+
+type Reply = (text: string) => Promise<void>;
+
+export class DbBubbleService implements BubbleService {
+  readonly facts: FactStore;
+  private readonly db: Db;
+  private readonly crews: CrewDirectory;
+  private readonly now: () => Date;
+  private readonly log: Logger;
+
+  constructor(private readonly deps: BubbleServiceDeps) {
+    this.db = deps.db;
+    this.crews = deps.crews;
+    this.now = deps.now ?? (() => new Date());
+    this.log = deps.log ?? silentLogger;
+    this.facts = new FactStore(this.db, this.now);
+  }
+
+  // -- BubbleService reads ---------------------------------------------------
+
+  async getProfile(userId: string): Promise<BubbleProfile> {
+    const user = await this.crews.userById(userId);
+    if (!user) throw new Error(`user ${userId} not found`);
+    const since = new Date(this.now().getTime() - 30 * 86_400_000).toISOString();
+    const compromised = this.db
+      .select({ n: sql<number>`count(*)` })
+      .from(ledger)
+      .where(
+        and(
+          eq(ledger.userId, userId),
+          eq(ledger.kind, 'compromised'),
+          sql`${ledger.at} >= ${since}`,
+        ),
+      )
+      .get();
+    return {
+      user,
+      facts: this.facts.active(userId),
+      recentVenueIds: [],
+      recentCompromiseCount: Number(compromised?.n ?? 0),
+    };
+  }
+
+  async getHardLimits(userId: string): Promise<Fact[]> {
+    return this.facts.active(userId).filter((f) => f.hard);
+  }
+
+  async getSoftPrefs(userId: string): Promise<Fact[]> {
+    return this.facts.active(userId).filter((f) => !f.hard);
+  }
+
+  /** Phase 2 adds the presence cache (commands, calendar, quiet hours). */
+  async getPresence(_userId: string): Promise<Presence> {
+    return 'available';
+  }
+
+  /** Phase 2 adds the Find My cache. */
+  async getLocation(_userId: string): Promise<GeoPoint | null> {
+    return null;
+  }
+
+  /** Phase 2 adds Google free/busy with a cache. */
+  async getFreeBusy(
+    _userId: string,
+    _range: { start: IsoDateTime; end: IsoDateTime },
+  ): Promise<BusyInterval[]> {
+    return [];
+  }
+
+  async recordFact(fact: NewFact): Promise<Fact> {
+    return this.facts.record(fact);
+  }
+
+  /** A member was added to a crew from outside the DM flow: start onboarding if needed. */
+  async onNewMember(input: { groupId: string; chatId: string; userId: string }): Promise<void> {
+    const state = this.state(input.userId);
+    if (state.onboardingCompletedAt || state.onboardingStep) return;
+    await this.startOnboarding(input.userId, this.replier(input.userId, `member:${input.groupId}`));
+  }
+
+  isOnboarded(userId: string): boolean {
+    return this.state(userId).onboardingCompletedAt !== null;
+  }
+
+  // -- inbound DMs -----------------------------------------------------------
+
+  async onPrivateMessage(message: InboundPrivateMessage): Promise<{ handled: boolean }> {
+    // Claim the message id first so a concurrent redelivery cannot double-answer.
+    const claimed = this.db
+      .insert(bubbleInbox)
+      .values({
+        messageId: message.messageId,
+        userId: message.userId,
+        handled: true,
+        at: this.now().toISOString(),
+      })
+      .onConflictDoNothing()
+      .run();
+    if (claimed.changes === 0) {
+      const prior = this.db
+        .select()
+        .from(bubbleInbox)
+        .where(eq(bubbleInbox.messageId, message.messageId))
+        .get();
+      return { handled: prior?.handled ?? true };
+    }
+
+    const t0 = performance.now();
+    let handled: boolean;
+    try {
+      handled = await this.route(message);
+    } catch (err) {
+      this.log.error(
+        { userId: message.userId, messageId: message.messageId, err: (err as Error).message },
+        'bubble failed to handle a DM',
+      );
+      handled = false;
+    }
+    this.db
+      .update(bubbleInbox)
+      .set({ handled })
+      .where(eq(bubbleInbox.messageId, message.messageId))
+      .run();
+    this.log.info(
+      { userId: message.userId, handled, ms: Math.round(performance.now() - t0) },
+      'bubble dm',
+    );
+    return { handled };
+  }
+
+  private async route(m: InboundPrivateMessage): Promise<boolean> {
+    const user = await this.crews.userById(m.userId);
+    if (!user) return false;
+    const text = m.text.trim();
+    const reply = this.replier(user.id, m.messageId);
+
+    if (/^forget me\b/i.test(text)) {
+      this.setPending(user.id, {
+        kind: 'forget_me_confirm',
+        expiresAt: new Date(this.now().getTime() + FORGET_ME_WINDOW_MS).toISOString(),
+      });
+      await reply(
+        'This deletes everything I know about you and takes you out of your crews. ' +
+          'Reply yes to confirm.',
+      );
+      return true;
+    }
+    if (/^forget (that|it|the last thing)\b/i.test(text)) {
+      const gone = this.facts.deleteLatest(user.id);
+      await reply(
+        gone ? `Done, I forgot that ${this.describe(gone)}.` : "There's nothing to forget yet.",
+      );
+      return true;
+    }
+
+    const state = this.state(user.id);
+    if (state.pending && (await this.answerPending(user, state.pending, text, reply))) {
+      return true;
+    }
+
+    if (!state.onboardingCompletedAt) {
+      if (!state.onboardingStep) await this.startOnboarding(user.id, reply);
+      else if (state.onboardingStep === 'done') await this.finishOnboarding(user, reply);
+      else await this.answerOnboarding(user, state.onboardingStep as OnboardingStep, text, reply);
+      return true;
+    }
+
+    const crewNames = parseCrewDeclaration(text);
+    if (crewNames) {
+      await this.declareCrew(user, crewNames, reply);
+      return true;
+    }
+    return false;
+  }
+
+  // -- pending yes/no --------------------------------------------------------
+
+  /** Returns false when the text is not an answer, so routing continues with it. */
+  private async answerPending(
+    user: User,
+    pending: BubblePending,
+    text: string,
+    reply: Reply,
+  ): Promise<boolean> {
+    const yes = isYes(text);
+    const no = isNo(text);
+
+    switch (pending.kind) {
+      case 'forget_me_confirm': {
+        this.setPending(user.id, null);
+        if (yes && Date.parse(pending.expiresAt) > this.now().getTime()) {
+          await reply('Done. Everything I knew about you is gone. Text me anytime to start over.');
+          await this.forgetUser(user.id);
+          return true;
+        }
+        if (no) {
+          await reply('Okay, keeping everything.');
+          return true;
+        }
+        return false;
+      }
+
+      case 'allergy_confirm': {
+        if (!yes && !no) {
+          await reply('Just yes or no: is that allergy right?');
+          return true;
+        }
+        this.setPending(user.id, null);
+        if (yes) this.facts.confirm(pending.factIds);
+        else this.facts.delete(pending.factIds);
+        await reply(yes ? "Got it, that's a hard rule for every plan." : "Okay, I won't save it.");
+        await this.continueOnboarding(user, reply);
+        return true;
+      }
+
+      case 'crew_confirm': {
+        if (!yes && !no) {
+          await reply('Want in on the crew? Just yes or no.');
+          return true;
+        }
+        this.setPending(user.id, null);
+        await this.answerInvite(user, pending.groupId, yes, reply);
+        await this.deliverNextInvite(user.id);
+        return true;
+      }
+    }
+  }
+
+  // -- onboarding ------------------------------------------------------------
+
+  private async startOnboarding(userId: string, reply: Reply): Promise<void> {
+    const user = await this.crews.userById(userId);
+    const nowIso = this.now().toISOString();
+    this.upsertState(userId, {
+      onboardingStep: ONBOARDING_STEPS[0],
+      onboardingStartedAt: nowIso,
+    });
+    // First message to a new person: no links, no media (Apple deliverability rule).
+    await reply(
+      `Hey ${user?.displayName ?? 'there'}, I'm your bubble 🫧 I plan food with your crew ` +
+        "so the group chat doesn't have to. Five quick questions, about a minute.\n\n" +
+        QUESTIONS.diet_allergy,
+    );
+    this.log.info({ userId }, 'onboarding started');
+  }
+
+  private async answerOnboarding(
+    user: User,
+    step: OnboardingStep,
+    text: string,
+    reply: Reply,
+  ): Promise<void> {
+    const extracted = isSkip(text) ? [] : await this.deps.extractor.extract(text, step);
+    const saved = await this.saveExtracted(user.id, extracted, step, text);
+
+    if (step === 'budget' && !isSkip(text) && !saved.some((f) => f.type === 'budget_max')) {
+      await reply('Just a number works, like 25. Or say skip.');
+      return;
+    }
+
+    const allergies = saved.filter((f) => f.type === 'allergy' && !f.confirmed);
+    const next = ONBOARDING_STEPS[ONBOARDING_STEPS.indexOf(step) + 1] ?? null;
+    this.upsertState(user.id, { onboardingStep: next ?? 'done' });
+
+    if (allergies.length) {
+      this.setPending(user.id, { kind: 'allergy_confirm', factIds: allergies.map((f) => f.id) });
+      const list = joinNames(allergies.map((f) => f.value.replace(/_/g, ' ')));
+      await reply(
+        `Quick check, since this one is never bent for anyone: you're allergic to ${list}? (yes/no)`,
+      );
+      return;
+    }
+    await this.continueOnboarding(user, reply);
+  }
+
+  /** Asks the next question, or wraps up when every question is answered. */
+  private async continueOnboarding(user: User, reply: Reply): Promise<void> {
+    const state = this.state(user.id);
+    if (state.onboardingCompletedAt) return;
+    const step = state.onboardingStep;
+    if (step && step !== 'done') {
+      await reply(QUESTIONS[step as OnboardingStep]);
+      return;
+    }
+    await this.finishOnboarding(user, reply);
+  }
+
+  private async finishOnboarding(user: User, reply: Reply): Promise<void> {
+    const started = this.state(user.id).onboardingStartedAt;
+    this.upsertState(user.id, {
+      onboardingStep: null,
+      onboardingCompletedAt: this.now().toISOString(),
+    });
+    const known = this.summarize(user.id);
+    const summary = known.length ? `Here's what I know: ${known.join('; ')}.` : '';
+    const extras: string[] = [];
+    const cal = this.deps.calendarLink?.(user.id) ?? null;
+    if (cal) extras.push(`Calendar (I only see busy or free, never what): ${cal}`);
+    extras.push(
+      user.bubbleNumber
+        ? `Find My: People, then +, Share My Location, send to ${user.bubbleNumber}, Share Indefinitely.`
+        : 'Find My: share your location with this number from the Find My app.',
+    );
+    await reply(
+      [
+        `All set ✨ ${summary}`.trim(),
+        "Say 'forget that' anytime to drop the last thing.",
+        '',
+        'Two optional extras so plans fit your real day:',
+        ...extras.map((e) => `• ${e}`),
+        '',
+        "Next, tell me your crew: 'my crew is' plus names or numbers.",
+      ].join('\n'),
+    );
+    const seconds = started
+      ? Math.round((this.now().getTime() - Date.parse(started)) / 1000)
+      : null;
+    this.log.info({ userId: user.id, seconds, facts: known.length }, 'onboarding complete');
+    await this.deliverNextInvite(user.id);
+  }
+
+  private async saveExtracted(
+    userId: string,
+    extracted: ExtractedFact[],
+    step: ExtractHint,
+    rawText: string,
+  ): Promise<Fact[]> {
+    const out: Fact[] = [];
+    const source = step === 'chat' ? 'chat' : 'onboarding';
+    for (const e of extracted) {
+      let { type, value } = e;
+      if (type === 'favorite_venue') {
+        const venueId = this.matchVenue(value);
+        if (venueId) value = venueId;
+        else {
+          type = 'other';
+          value = `favorite spot: ${e.value}`;
+        }
+      }
+      const hard = HARD_FACT_TYPES.has(type);
+      out.push(
+        this.facts.record({
+          userId,
+          type,
+          value,
+          hard,
+          confidence: e.confidence,
+          source,
+          // Allergies wait for an explicit yes. Other onboarding answers are the person's own words.
+          confirmed: type === 'allergy' ? false : source === 'onboarding',
+          expiresAt: e.until_phrase ? resolveUntil(e.until_phrase, this.now()) : null,
+        }),
+      );
+    }
+    // A neighborhood answer the extractor could not read is still the person's own words.
+    if (step === 'neighborhood' && !out.length && !isSkip(rawText) && rawText.trim()) {
+      out.push(
+        this.facts.record({
+          userId,
+          type: 'neighborhood',
+          value: rawText.trim().slice(0, 80),
+          hard: false,
+          confidence: 0.6,
+          source,
+          confirmed: true,
+          expiresAt: null,
+        }),
+      );
+    }
+    return out;
+  }
+
+  private matchVenue(name: string): string | null {
+    const key = normalizeName(name);
+    if (!key) return null;
+    const rows = this.db.select({ id: venues.id, name: venues.name }).from(venues).all();
+    const exact = rows.find((v) => normalizeName(v.name) === key);
+    if (exact) return exact.id;
+    const partial = rows.filter((v) => {
+      const n = normalizeName(v.name);
+      return key.length >= 4 && (n.includes(key) || key.includes(n));
+    });
+    return partial.length === 1 ? partial[0]!.id : null;
+  }
+
+  /**
+   * The person's own facts, oldest first. A temporary value shows its end date and the value it
+   * falls back to: "your budget is up to $15 a person until Fri Oct 16, then $30".
+   */
+  private summarize(userId: string): string[] {
+    const all = this.facts.active(userId).slice().reverse();
+    const out: string[] = [];
+    for (const f of all) {
+      const temp = all.find((o) => o.type === f.type && o.expiresAt !== null);
+      if (f.expiresAt === null && temp && temp !== f) continue; // folded into the temporary one
+      if (f.expiresAt !== null) {
+        const usual = all.find((o) => o.type === f.type && o.expiresAt === null);
+        const then = usual
+          ? `, then ${usual.type === 'budget_max' ? `$${usual.value}` : usual.value}`
+          : '';
+        out.push(`${this.describe(f)} until ${shortDate(f.expiresAt)}${then}`);
+      } else out.push(this.describe(f));
+    }
+    return out;
+  }
+
+  private describe(f: Fact): string {
+    if (f.type === 'favorite_venue') {
+      const v = this.db
+        .select({ name: venues.name })
+        .from(venues)
+        .where(eq(venues.id, f.value))
+        .get();
+      return describeFact({ type: f.type, value: v?.name ?? 'a place you like' });
+    }
+    return describeFact(f);
+  }
+
+  // -- crews -----------------------------------------------------------------
+
+  private async declareCrew(creator: User, names: CrewDeclaration, reply: Reply): Promise<void> {
+    const found: User[] = [];
+    const missing: string[] = [];
+    const ambiguous: string[] = [];
+    for (const token of names.members) {
+      const r = await this.resolveMember(token, creator.id);
+      if (r.kind === 'found') {
+        if (!found.some((u) => u.id === r.user.id)) found.push(r.user);
+      } else if (r.kind === 'ambiguous') ambiguous.push(token);
+      else if (r.kind === 'missing') missing.push(token);
+    }
+
+    const notes: string[] = [];
+    if (missing.length) {
+      notes.push(
+        `I couldn't find ${joinNames(missing)}. They need a bubble first` +
+          (this.deps.signupUrl ? ` (${this.deps.signupUrl})` : '') +
+          ', then tell me again.',
+      );
+    }
+    if (ambiguous.length) {
+      notes.push(
+        `More than one person matches ${joinNames(ambiguous)}. Send their number instead.`,
+      );
+    }
+    if (!found.length) {
+      await reply(notes.join(' ') || "Who's in it? Like: my crew is Ava, Ben, +19195551234");
+      return;
+    }
+
+    const crew = await this.crews.createCrew({
+      name: names.name ?? `${creator.displayName}'s crew`,
+      createdByUserId: creator.id,
+      memberIds: found.map((u) => u.id),
+    });
+    const nowIso = this.now().toISOString();
+    for (const u of found) {
+      this.db
+        .insert(crewInvites)
+        .values({
+          groupId: crew.id,
+          userId: u.id,
+          invitedByUserId: creator.id,
+          status: 'waiting',
+          sentAt: null,
+          createdAt: nowIso,
+        })
+        .onConflictDoNothing()
+        .run();
+    }
+    this.log.info({ userId: creator.id, groupId: crew.id, invited: found.length }, 'crew declared');
+
+    await reply(
+      [
+        `Made ${crew.name}. I asked ${joinNames(found.map((u) => u.displayName))} to confirm, ` +
+          "and I'll tell you when everyone's in.",
+        ...notes,
+      ].join(' '),
+    );
+    for (const u of found) await this.deliverNextInvite(u.id);
+  }
+
+  private async resolveMember(
+    token: string,
+    selfId: string,
+  ): Promise<{ kind: 'found'; user: User } | { kind: 'missing' | 'ambiguous' | 'self' }> {
+    const phone = toE164(token);
+    if (phone) {
+      const user = await this.crews.userByHandle(phone);
+      if (!user) return { kind: 'missing' };
+      return user.id === selfId ? { kind: 'self' } : { kind: 'found', user };
+    }
+    const name = token.trim().toLowerCase();
+    if (/^(me|myself|i)$/.test(name)) return { kind: 'self' };
+    const rows = this.db
+      .select({ id: users.id, displayName: users.displayName })
+      .from(users)
+      .all()
+      .filter((u) => u.id !== selfId);
+    const exact = rows.filter((u) => u.displayName.toLowerCase() === name);
+    const byFirst = rows.filter((u) => u.displayName.toLowerCase().split(/\s+/)[0] === name);
+    const matches = exact.length ? exact : byFirst;
+    if (matches.length > 1) return { kind: 'ambiguous' };
+    const id = matches[0]?.id;
+    const user = id ? await this.crews.userById(id) : null;
+    return user ? { kind: 'found', user } : { kind: 'missing' };
+  }
+
+  /** Sends the oldest waiting invite once the person is onboarded and has no open question. */
+  private async deliverNextInvite(userId: string): Promise<void> {
+    const state = this.state(userId);
+    if (!state.onboardingCompletedAt || state.pending) return;
+    const invite = this.db
+      .select()
+      .from(crewInvites)
+      .where(and(eq(crewInvites.userId, userId), eq(crewInvites.status, 'waiting')))
+      .orderBy(crewInvites.createdAt)
+      .limit(1)
+      .get();
+    if (!invite) return;
+    const crew = await this.crews.crewById(invite.groupId);
+    if (!crew) return;
+    const inviter = await this.crews.userById(invite.invitedByUserId);
+    const others = (await this.crews.membersOf(crew.id))
+      .filter((u) => u.id !== userId && u.id !== invite.invitedByUserId)
+      .map((u) => u.displayName);
+    const withWhom = others.length ? ` with ${joinNames(others)}` : '';
+    this.setPending(userId, { kind: 'crew_confirm', groupId: crew.id });
+    this.db
+      .update(crewInvites)
+      .set({ status: 'sent', sentAt: this.now().toISOString() })
+      .where(and(eq(crewInvites.groupId, crew.id), eq(crewInvites.userId, userId)))
+      .run();
+    await this.replier(
+      userId,
+      `invite:${crew.id}`,
+    )(
+      `${inviter?.displayName ?? 'Someone'} added you to ${crew.name}${withWhom}. ` +
+        'Your bubble plans with theirs and never shares your details. Want in? (yes/no)',
+    );
+  }
+
+  private async answerInvite(
+    user: User,
+    groupId: string,
+    accepted: boolean,
+    reply: Reply,
+  ): Promise<void> {
+    const crew = await this.crews.crewById(groupId);
+    if (!crew) {
+      await reply('That crew is gone now.');
+      return;
+    }
+    this.db
+      .update(crewInvites)
+      .set({ status: accepted ? 'accepted' : 'declined' })
+      .where(and(eq(crewInvites.groupId, groupId), eq(crewInvites.userId, user.id)))
+      .run();
+
+    if (!accepted) {
+      const after = await this.crews.removeMember(groupId, user.id);
+      await reply("No worries, you're not in it.");
+      if (after.createdByUserId) {
+        await this.replier(
+          after.createdByUserId,
+          `declined:${groupId}:${user.id}`,
+        )(`${user.displayName} passed on ${after.name}.`);
+      }
+      await this.announceIfActive(after, crew.status);
+      await this.deps.onCrewChanged?.({ chatId: crew.chatId, userId: user.id, change: 'left' });
+      return;
+    }
+
+    const after = await this.crews.confirmMember(groupId, user.id);
+    await reply(`You're in ${after.name}.`);
+    await this.announceIfActive(after, crew.status);
+    await this.deps.onCrewChanged?.({ chatId: crew.chatId, userId: user.id, change: 'joined' });
+  }
+
+  private async announceIfActive(crew: Group, before: Group['status']): Promise<void> {
+    if (crew.status !== 'active' || before === 'active') return;
+    const members = await this.crews.membersOf(crew.id);
+    if (members.length < 2) return;
+    const names = joinNames(members.map((u) => u.displayName));
+    for (const u of members) {
+      await this.replier(
+        u.id,
+        `active:${crew.id}`,
+      )(`${crew.name} is set: ${names}. Anyone can text "dinner tonight?" to start a plan.`);
+    }
+    this.log.info({ groupId: crew.id, members: members.length }, 'crew active');
+  }
+
+  // -- forget me -------------------------------------------------------------
+
+  /** Deletes the person and every row about them. Group rows they created stay. */
+  async forgetUser(userId: string): Promise<void> {
+    const crews = await this.crews.crewsOf(userId);
+    this.db.transaction((tx) => {
+      tx.delete(ledger).where(eq(ledger.userId, userId)).run();
+      tx.delete(votes).where(eq(votes.userId, userId)).run();
+      tx.delete(asks).where(eq(asks.userId, userId)).run();
+      tx.delete(planMembers).where(eq(planMembers.userId, userId)).run();
+      tx.delete(bubbleInbox).where(eq(bubbleInbox.userId, userId)).run();
+      tx.delete(crewInvites).where(eq(crewInvites.invitedByUserId, userId)).run();
+      // Cascades: facts, group_members, bubble_state, crew_invites (as invitee), google_tokens.
+      tx.delete(users).where(eq(users.id, userId)).run();
+    });
+    this.facts.evict(userId);
+    this.log.info({ userId, crews: crews.length }, 'forget me: user deleted');
+    for (const c of crews) {
+      await this.deps.onCrewChanged?.({ chatId: c.chatId, userId, change: 'left' });
+    }
+  }
+
+  // -- state helpers ---------------------------------------------------------
+
+  private state(userId: string): typeof bubbleState.$inferSelect {
+    return (
+      this.db.select().from(bubbleState).where(eq(bubbleState.userId, userId)).get() ?? {
+        userId,
+        onboardingStep: null,
+        onboardingStartedAt: null,
+        onboardingCompletedAt: null,
+        pending: null,
+        updatedAt: this.now().toISOString(),
+      }
+    );
+  }
+
+  private upsertState(
+    userId: string,
+    patch: Partial<Omit<typeof bubbleState.$inferInsert, 'userId'>>,
+  ): void {
+    const row = { ...this.state(userId), ...patch, updatedAt: this.now().toISOString() };
+    this.db
+      .insert(bubbleState)
+      .values(row)
+      .onConflictDoUpdate({ target: bubbleState.userId, set: row })
+      .run();
+  }
+
+  private setPending(userId: string, pending: BubblePending | null): void {
+    this.upsertState(userId, { pending });
+  }
+
+  /** Outbound DM with a deterministic idempotency key per inbound message and reply index. */
+  private replier(userId: string, cause: string): Reply {
+    let n = 0;
+    return async (text: string) => {
+      await this.deps.messaging.sendPrivateText({
+        userId,
+        text,
+        idempotencyKey: idempotencyKey(`bubble:${userId}`, 'dm', cause, n++),
+      });
+    };
+  }
+
+  /** Users with onboarding finished, for the demo and tests. */
+  onboardedUserIds(): string[] {
+    return this.db
+      .select({ userId: bubbleState.userId })
+      .from(bubbleState)
+      .where(sql`${bubbleState.onboardingCompletedAt} is not null`)
+      .all()
+      .map((r) => r.userId);
+  }
+
+  /** Pending crew invites for a set of crews, for the demo. */
+  invitesFor(groupIds: string[]): Array<typeof crewInvites.$inferSelect> {
+    if (!groupIds.length) return [];
+    return this.db.select().from(crewInvites).where(inArray(crewInvites.groupId, groupIds)).all();
+  }
+}
+
+// -- parsing helpers ---------------------------------------------------------
+
+export interface CrewDeclaration {
+  members: string[];
+  name: string | null;
+}
+
+/** "my crew is Ava, Ben and +19195551234 called Thursday Eats" -> names + optional crew name. */
+export function parseCrewDeclaration(text: string): CrewDeclaration | null {
+  const m =
+    /^(?:my |our |the )?crew\s*(?:is|=|:|-|with)\s+(.+)$/i.exec(text.trim()) ??
+    /^(?:make|start|create|new)\s+(?:a\s+)?crew\s+(?:with|of|:)?\s*(.+)$/i.exec(text.trim());
+  if (!m?.[1]) return null;
+  let body = m[1];
+  let name: string | null = null;
+  const named = /\s+(?:called|named)\s+(.+)$/i.exec(body);
+  if (named?.[1]) {
+    name = named[1].trim().replace(/[.!]+$/, '');
+    body = body.slice(0, named.index);
+  }
+  const members = splitList(body.replace(/[.!]+$/, ''));
+  return members.length ? { members, name } : null;
+}
+
+export function toE164(token: string): string | null {
+  const digits = token.replace(/[^\d+]/g, '');
+  if (/^\+[1-9]\d{7,14}$/.test(digits)) return digits;
+  const bare = digits.replace(/\+/g, '');
+  if (/^\d{10}$/.test(bare)) return `+1${bare}`;
+  if (/^1\d{10}$/.test(bare)) return `+${bare}`;
+  return null;
+}
+
+export function isYes(text: string): boolean {
+  return (
+    /^\s*(y|yes|yeah|yea|yep|yup|ya|sure|correct|right|ok|okay|confirm|in|i'?m in|👍)\b[\s!.]*$/i.test(
+      text,
+    ) || /^\s*👍/.test(text)
+  );
+}
+
+export function isNo(text: string): boolean {
+  return (
+    /^\s*(n|no|nope|nah|wrong|not really|pass|i'?m out|out)\b[\s!.]*$/i.test(text) ||
+    /^\s*👎/.test(text)
+  );
+}
+
+/** "Fri Oct 16" in New York time. */
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+function normalizeName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/['’`]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\b(the|restaurant|cafe|bar|grill|kitchen)\b/g, '')
+    .trim();
+}
