@@ -1,5 +1,6 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
+import { registerDevRoutes } from './dev/routes.js';
 import { createMessaging, loadMessagingConfig } from './messaging/index.js';
 import { createRuntime } from './runtime.js';
 
@@ -33,6 +34,15 @@ async function main(): Promise<void> {
   const startMessaging = messagingConfig.SPECTRUM_PROVIDER === 'imessage' || process.stdin.isTTY;
   if (startMessaging) await messaging.start();
   else app.fastify.log.info('messaging transport not started: terminal provider without a TTY');
+
+  if (config.DEV_ROUTES_SECRET) {
+    registerDevRoutes(app.fastify, {
+      secret: config.DEV_ROUTES_SECRET,
+      runtime,
+      webPublicUrl: config.WEB_PUBLIC_URL,
+    });
+    app.fastify.log.info('dev routes enabled at /api/dev/*');
+  }
 
   app.fastify.post('/api/signup', async (request, reply) => {
     try {
