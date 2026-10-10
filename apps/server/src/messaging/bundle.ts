@@ -39,6 +39,9 @@ export interface BundleResult {
   headcountMessageId: string;
   pollMessageId: string | null;
   linkMessageId: string | null;
+  /** Bundle start to poll sent, when there was a poll. */
+  pollMs: number | null;
+  /** Bundle start to everything sent. */
   ms: number;
 }
 
@@ -166,30 +169,40 @@ export async function renderBundle(
     closesAt: decision.headcount.closesAt,
   });
 
-  const poll = decision.cuisinePoll
-    ? await port.sendPoll({
-        chatId: decision.chatId,
-        planId: decision.planId,
-        pollId: decision.cuisinePoll.pollId,
-        question: decision.cuisinePoll.question ?? 'What are we eating?',
-        options: decision.cuisinePoll.options,
-        idempotencyKey: key('poll'),
-      })
-    : null;
-
-  const link = decision.pageUrl
-    ? await port.sendRichLink({
-        chatId: decision.chatId,
-        url: decision.pageUrl,
-        title: 'Watch the bubbles decide',
-        idempotencyKey: key('link'),
-      })
-    : null;
+  // Poll and link go out together: the rich link takes ~2.6 s on Photon (preview fetch), so
+  // waiting on it would push the bundle past 5 s. The poll still lands first in practice.
+  let pollMs: number | null = null;
+  const [poll, link] = await Promise.all([
+    decision.cuisinePoll
+      ? port
+          .sendPoll({
+            chatId: decision.chatId,
+            planId: decision.planId,
+            pollId: decision.cuisinePoll.pollId,
+            question: decision.cuisinePoll.question ?? 'What are we eating?',
+            options: decision.cuisinePoll.options,
+            idempotencyKey: key('poll'),
+          })
+          .then((r) => {
+            pollMs = Math.round(performance.now() - started);
+            return r;
+          })
+      : null,
+    decision.pageUrl
+      ? port.sendRichLink({
+          chatId: decision.chatId,
+          url: decision.pageUrl,
+          title: 'Watch the bubbles decide',
+          idempotencyKey: key('link'),
+        })
+      : null,
+  ]);
 
   return {
     headcountMessageId: headcount.messageId,
     pollMessageId: poll?.messageId ?? null,
     linkMessageId: link?.messageId ?? null,
+    pollMs,
     ms: Math.round(performance.now() - started),
   };
 }

@@ -66,18 +66,20 @@ export class PlanIntake {
 
   /** Called by the engine's question policy once it knows what to ask. */
   async renderBundle(decision: QuestionDecision): Promise<BundleResult> {
-    const result = await renderBundle(this.o.port, this.o.bundles, decision);
     const marks = this.planMarks.get(decision.planId) ?? this.inflight;
+    const bundleStart = Date.now();
+    const result = await renderBundle(this.o.port, this.o.bundles, decision);
     if (marks) {
       this.planMarks.set(decision.planId, marks);
       void this.o.port.setTyping({ chatId: dmChatId(marks.userId), typing: false });
+      const sinceReceipt = (ms: number) => bundleStart - marks.receivedAt + ms;
       this.o.log.info(
         {
           planId: decision.planId,
           mark: 't_poll_posted',
-          ms: Date.now() - marks.receivedAt,
+          ms: sinceReceipt(result.pollMs ?? result.ms),
+          bundleDoneMs: sinceReceipt(result.ms),
           lagMs: marks.lagMs,
-          bundleMs: result.ms,
         },
         'timing',
       );
@@ -93,17 +95,19 @@ export class PlanIntake {
 
   // -- inbound ---------------------------------------------------------------
 
-  private onRawText(userId: string, text: string, at: string): void {
+  /** Returns true to skip the batch window: a clear plan should not wait 1.5 s. */
+  private onRawText(userId: string, text: string, at: string): boolean {
     const receivedAt = Date.now();
     const marks: Marks = { receivedAt, lagMs: Math.max(0, receivedAt - Date.parse(at)), userId };
     this.marks.set(userId, marks);
     const detection = detectPlan(text);
-    if (detection.level === 'none') return;
+    if (detection.level === 'none') return false;
     // "I'm in" is an RSVP, not a plan; "down for dinner tonight?" names a meal, so it is a plan.
-    if (detection.meal === null && parseRsvp(text) !== 'unclear') return;
+    if (detection.meal === null && parseRsvp(text) !== 'unclear') return false;
     marks.typingAt = Date.now();
     void this.o.port.setTyping({ chatId: dmChatId(userId), typing: true });
     this.o.log.info({ userId, mark: 't_typing', ms: marks.typingAt - receivedAt }, 'timing');
+    return detection.level === 'strong';
   }
 
   private async onGroupMessage(m: {

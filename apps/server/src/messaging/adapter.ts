@@ -108,7 +108,8 @@ export class SpectrumMessaging implements MessagingPort {
     reaction: [],
     member: [],
   };
-  private readonly rawText: Array<(userId: string, text: string, at: string) => void> = [];
+  private readonly rawText: Array<(userId: string, text: string, at: string) => boolean | void> =
+    [];
   private readonly batcher: Batcher;
   private readonly retry: { attempts: number; baseDelayMs: number };
 
@@ -278,9 +279,12 @@ export class SpectrumMessaging implements MessagingPort {
   }
   /**
    * Called for every inbound text before batching, so detection can show the typing bubble
-   * within a second instead of after the debounce window. Not part of MessagingPort.
+   * within a second instead of after the debounce window. Returning true delivers the
+   * sender's batch now instead of waiting out the window. Not part of MessagingPort.
    */
-  onTextReceived(handler: (userId: string, text: string, at: string) => void): Unsubscribe {
+  onTextReceived(
+    handler: (userId: string, text: string, at: string) => boolean | void,
+  ): Unsubscribe {
     return add(this.rawText, handler);
   }
 
@@ -305,10 +309,11 @@ export class SpectrumMessaging implements MessagingPort {
     }
 
     switch (event.kind) {
-      case 'text':
+      case 'text': {
+        let flushNow = false;
         for (const handler of this.rawText) {
           try {
-            handler(user.id, event.text, event.at);
+            if (handler(user.id, event.text, event.at) === true) flushNow = true;
           } catch (err) {
             this.o.log.error({ err: String(err) }, 'raw text handler threw');
           }
@@ -319,7 +324,9 @@ export class SpectrumMessaging implements MessagingPort {
           at: event.at,
           ...(event.replyToMessageId ? { replyToMessageId: event.replyToMessageId } : {}),
         });
+        if (flushNow) this.batcher.flushNow(user.id);
         return;
+      }
       case 'reaction': {
         const copy = this.o.store.copy(event.targetMessageId);
         await this.emit(this.handlers.reaction, {
