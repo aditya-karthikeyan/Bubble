@@ -11,7 +11,7 @@
  *
  * Profiles are cached in memory and rebuilt on every write for that user.
  */
-import { and, desc, eq, isNull, or, gt, inArray } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 import {
   Fact as FactSchema,
   NewFact as NewFactSchema,
@@ -29,6 +29,9 @@ const SINGLE_VALUED: ReadonlySet<FactType> = new Set<FactType>([
   'venmo_handle',
   'diet',
 ]);
+
+/** Newest first. Same-millisecond writes break ties by insertion order, never by random id. */
+const NEWEST_FIRST = [desc(facts.createdAt), desc(sql`rowid`)] as const;
 
 const OPPOSITE: Partial<Record<FactType, FactType>> = {
   cuisine_like: 'cuisine_avoid',
@@ -51,16 +54,20 @@ export class FactStore {
       .select()
       .from(facts)
       .where(eq(facts.userId, userId))
-      .orderBy(desc(facts.createdAt), desc(facts.id))
+      .orderBy(...NEWEST_FIRST)
       .all()
       .map((r) => FactSchema.parse(r));
     this.cache.set(userId, rows);
     return rows.filter((f) => !this.expired(f));
   }
 
-  /** For single-valued types, the newest active value; budget_max picks the newest unexpired. */
+  /**
+   * The value in force for a single-valued type. An unexpired temporary value ("broke till
+   * Friday") wins over the permanent one; otherwise the newest.
+   */
   current(userId: string, type: FactType): Fact | null {
-    return this.active(userId).find((f) => f.type === type) ?? null;
+    const ofType = this.active(userId).filter((f) => f.type === type);
+    return ofType.find((f) => f.expiresAt !== null) ?? ofType[0] ?? null;
   }
 
   get(factId: string): Fact | null {
@@ -151,7 +158,7 @@ export class FactStore {
           or(isNull(facts.expiresAt), gt(facts.expiresAt, this.now().toISOString())),
         ),
       )
-      .orderBy(desc(facts.createdAt), desc(facts.id))
+      .orderBy(...NEWEST_FIRST)
       .limit(1)
       .get();
     if (!row) return null;
