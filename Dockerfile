@@ -1,6 +1,11 @@
 # apps/server image for Railway. Built from the repo root so the workspace resolves.
 FROM node:22-slim
 
+# better-sqlite3 compiles from source when no prebuilt binary matches, so node-gyp needs these.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
 RUN npm install -g pnpm@10.33.0
 
 WORKDIR /app
