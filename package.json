@@ -26,7 +26,11 @@
     "p3:phase0": "pnpm --filter @bubbleworks/server p3:phase0",
     "p3:oauth": "pnpm --filter @bubbleworks/server p3:oauth",
     "p3:phase1": "pnpm --filter @bubbleworks/server p3:phase1",
-    "p2:phase2": "pnpm --filter @bubbleworks/server p2:phase2"
+    "p2:phase2": "pnpm --filter @bubbleworks/server p2:phase2",
+    "p4:agent": "pnpm --filter @bubbleworks/server p4:agent",
+    "p4:number": "pnpm --filter @bubbleworks/server p4:number",
+    "p4:testcall": "pnpm --filter @bubbleworks/server p4:testcall",
+    "p4:phase0": "pnpm --filter @bubbleworks/server p4:phase0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

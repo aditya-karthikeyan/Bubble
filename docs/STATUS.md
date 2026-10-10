@@ -23,7 +23,7 @@ One row per role. Update your row at the end of every phase.
 | Service          | URL                                           |
 | ---------------- | --------------------------------------------- |
 | Railway server   | https://server-production-6ba5.up.railway.app |
-| Vercel live page |                                               |
+| Vercel live page | https://bubbleworks-eosin.vercel.app          |
 
 ## Line lock
 
