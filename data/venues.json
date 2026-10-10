@@ -1,0 +1,1774 @@
+[
+  {
+    "id": "venue_demo",
+    "name": "The Demo Table",
+    "cuisine": "american",
+    "dietTags": [
+      "vegetarian",
+      "vegan",
+      "halal",
+      "gluten_free",
+      "peanut_free"
+    ],
+    "accessibilityTags": [
+      "wheelchair",
+      "step_free"
+    ],
+    "priceLevel": 2,
+    "typicalCostUsd": 18,
+    "hours": [
+      [
+        {
+          "open": 660,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1380
+        }
+      ]
+    ],
+    "phone": "+10000000000",
+    "location": {
+      "lat": 35.9101,
+      "lng": -79.0481
+    },
+    "address": "South Rd, Chapel Hill, NC 27514",
+    "neighborhood": "UNC campus",
+    "isDemo": true
+  },
+  {
+    "id": "venue_osm_n11943143457",
+    "name": "Bonchon Chicken",
+    "cuisine": "american",
+    "dietTags": [],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1320
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1320
+        }
+      ]
+    ],
+    "phone": "+19842340788",
+    "location": {
+      "lat": 35.9145113,
+      "lng": -79.0526575
+    },
+    "address": "205 East Franklin Street, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n12646554200",
+    "name": "Wheat 麦茶",
+    "cuisine": "chinese",
+    "dietTags": [],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [
+        {
+          "open": 675,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 675,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 675,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 675,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 675,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 675,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 675,
+          "close": 1260
+        }
+      ]
+    ],
+    "phone": "+19192404155",
+    "location": {
+      "lat": 35.9138935,
+      "lng": -79.0543521
+    },
+    "address": "143 East Franklin Street",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n13256222785",
+    "name": "Alpha Pie",
+    "cuisine": "pizza",
+    "dietTags": [
+      "vegetarian"
+    ],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [],
+      [],
+      [],
+      [
+        {
+          "open": 1080,
+          "close": 1560
+        }
+      ],
+      [
+        {
+          "open": 1080,
+          "close": 1620
+        }
+      ],
+      [
+        {
+          "open": 1080,
+          "close": 1620
+        }
+      ],
+      [
+        {
+          "open": 1080,
+          "close": 1620
+        }
+      ]
+    ],
+    "phone": "+19192405794",
+    "location": {
+      "lat": 35.9151753,
+      "lng": -79.0540312
+    },
+    "address": "157 East Rosemary Street, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n1512497927",
+    "name": "Four Corners",
+    "cuisine": "other",
+    "dietTags": [],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [
+        {
+          "open": 660,
+          "close": 1320
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1440
+        }
+      ]
+    ],
+    "phone": "+19195378230",
+    "location": {
+      "lat": 35.9142522,
+      "lng": -79.0533616
+    },
+    "address": "175 East Franklin Street, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n1546998787",
+    "name": "Sutton's Drug Store",
+    "cuisine": "american",
+    "dietTags": [],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [
+        {
+          "open": 540,
+          "close": 840
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 840
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 840
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 840
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 840
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 840
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 840
+        }
+      ]
+    ],
+    "phone": "+19199425161",
+    "location": {
+      "lat": 35.9140624,
+      "lng": -79.0538591
+    },
+    "address": "159 East Franklin Street, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n2681997236",
+    "name": "Al's Burger Shack",
+    "cuisine": "american",
+    "dietTags": [],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [],
+      [],
+      [
+        {
+          "open": 660,
+          "close": 1200
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1200
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1200
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1200
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1200
+        }
+      ]
+    ],
+    "phone": "+19199047659",
+    "location": {
+      "lat": 35.9101103,
+      "lng": -79.0640683
+    },
+    "address": "516 West Franklin Street, Chapel Hill, NC, 27516",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n2694104383",
+    "name": "Italian Pizzeria III",
+    "cuisine": "pizza",
+    "dietTags": [
+      "vegetarian"
+    ],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [
+        {
+          "open": 720,
+          "close": 1320
+        }
+      ],
+      [
+        {
+          "open": 630,
+          "close": 1320
+        }
+      ],
+      [
+        {
+          "open": 630,
+          "close": 1320
+        }
+      ],
+      [
+        {
+          "open": 630,
+          "close": 1320
+        }
+      ],
+      [
+        {
+          "open": 630,
+          "close": 1320
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1350
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1350
+        }
+      ]
+    ],
+    "phone": "+19199684671",
+    "location": {
+      "lat": 35.9101467,
+      "lng": -79.0639922
+    },
+    "address": "508 West Franklin Street, Chapel Hill, NC, 27516",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n2763321659",
+    "name": "Vimala's Curryblossom Cafe",
+    "cuisine": "indian",
+    "dietTags": [
+      "vegan",
+      "vegetarian"
+    ],
+    "accessibilityTags": [
+      "wheelchair",
+      "step_free"
+    ],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ]
+    ],
+    "phone": "+19199293833",
+    "location": {
+      "lat": 35.9097731,
+      "lng": -79.0627364
+    },
+    "address": null,
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n2763321664",
+    "name": "Kipos Greek Taverna",
+    "cuisine": "mediterranean",
+    "dietTags": [
+      "vegetarian"
+    ],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [
+        {
+          "open": 1020,
+          "close": 1260
+        }
+      ],
+      [],
+      [
+        {
+          "open": 690,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 690,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 690,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 690,
+          "close": 1350
+        }
+      ],
+      [
+        {
+          "open": 690,
+          "close": 1350
+        }
+      ]
+    ],
+    "phone": "+19194250760",
+    "location": {
+      "lat": 35.9101744,
+      "lng": -79.0628881
+    },
+    "address": "431 West Franklin Street, Chapel Hill, NC, 27516",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n2805273060",
+    "name": "Moge Tea",
+    "cuisine": "coffee",
+    "dietTags": [
+      "vegetarian"
+    ],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [
+        {
+          "open": 630,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 630,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 630,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 630,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 630,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 630,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 630,
+          "close": 1290
+        }
+      ]
+    ],
+    "phone": "+19177672888",
+    "location": {
+      "lat": 35.9139654,
+      "lng": -79.054113
+    },
+    "address": "151 East Franklin Street, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n3316380561",
+    "name": "Hibachi & Company",
+    "cuisine": "asian",
+    "dietTags": [],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ]
+    ],
+    "phone": "+19199038428",
+    "location": {
+      "lat": 35.9139856,
+      "lng": -79.0540474
+    },
+    "address": "153 East Franklin Street, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n3316380634",
+    "name": "Raising Cane's",
+    "cuisine": "american",
+    "dietTags": [],
+    "accessibilityTags": [],
+    "priceLevel": 1,
+    "typicalCostUsd": 12,
+    "hours": [
+      [
+        {
+          "open": 660,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1470
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1470
+        }
+      ]
+    ],
+    "phone": "+19199672678",
+    "location": {
+      "lat": 35.9133706,
+      "lng": -79.0556864
+    },
+    "address": "101 East Franklin Street, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n3316380638",
+    "name": "Waffle House",
+    "cuisine": "american",
+    "dietTags": [],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [
+        {
+          "open": 0,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 0,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 0,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 0,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 0,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 0,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 0,
+          "close": 1440
+        }
+      ]
+    ],
+    "phone": "+19199606770",
+    "location": {
+      "lat": 35.9136903,
+      "lng": -79.0548338
+    },
+    "address": "127 East Franklin Street, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n3316380639",
+    "name": "[B]SKI'S The Wrap Redefined",
+    "cuisine": "sandwich",
+    "dietTags": [
+      "vegetarian"
+    ],
+    "accessibilityTags": [],
+    "priceLevel": 1,
+    "typicalCostUsd": 12,
+    "hours": [
+      [
+        {
+          "open": 660,
+          "close": 1620
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1320
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1620
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1620
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1680
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1680
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1680
+        }
+      ]
+    ],
+    "phone": "+19199699727",
+    "location": {
+      "lat": 35.9139117,
+      "lng": -79.0542539
+    },
+    "address": null,
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n4243856770",
+    "name": "Cosmic Cantina",
+    "cuisine": "mexican",
+    "dietTags": [
+      "vegetarian"
+    ],
+    "accessibilityTags": [
+      "wheelchair",
+      "step_free"
+    ],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [
+        {
+          "open": 660,
+          "close": 1680
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1680
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1680
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1680
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1680
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1680
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1680
+        }
+      ]
+    ],
+    "phone": "+19199603955",
+    "location": {
+      "lat": 35.9132113,
+      "lng": -79.0550938
+    },
+    "address": "118 East Franklin Street, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n5076295871",
+    "name": "Starbucks",
+    "cuisine": "coffee",
+    "dietTags": [
+      "vegan",
+      "vegetarian"
+    ],
+    "accessibilityTags": [
+      "wheelchair",
+      "step_free"
+    ],
+    "priceLevel": 1,
+    "typicalCostUsd": 12,
+    "hours": [
+      [
+        {
+          "open": 420,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1440
+        }
+      ]
+    ],
+    "phone": "+19195904925",
+    "location": {
+      "lat": 35.911932,
+      "lng": -79.0583162
+    },
+    "address": "143 West Franklin Street, Chapel Hill, NC, 27516",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n536179106",
+    "name": "Saladelia Cafe",
+    "cuisine": "coffee",
+    "dietTags": [
+      "vegetarian"
+    ],
+    "accessibilityTags": [],
+    "priceLevel": 1,
+    "typicalCostUsd": 12,
+    "hours": [
+      [],
+      [
+        {
+          "open": 480,
+          "close": 840
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 840
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 840
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 840
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 840
+        }
+      ],
+      []
+    ],
+    "phone": "+19194895776",
+    "location": {
+      "lat": 35.908137,
+      "lng": -79.0540659
+    },
+    "address": "301 Pittsboro Street, Chapel Hill, NC, 27516",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n564718036",
+    "name": "Buns",
+    "cuisine": "american",
+    "dietTags": [],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1260
+        }
+      ]
+    ],
+    "phone": "+19192404746",
+    "location": {
+      "lat": 35.913453,
+      "lng": -79.0561971
+    },
+    "address": "107 North Columbia Street, Chapel Hill, NC, 27516",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n564718038",
+    "name": "Starbucks",
+    "cuisine": "coffee",
+    "dietTags": [
+      "vegetarian"
+    ],
+    "accessibilityTags": [],
+    "priceLevel": 1,
+    "typicalCostUsd": 12,
+    "hours": [
+      [
+        {
+          "open": 390,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1380
+        }
+      ]
+    ],
+    "phone": "+19199323824",
+    "location": {
+      "lat": 35.9130553,
+      "lng": -79.0554276
+    },
+    "address": "103;100 East Franklin Street, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n5731523887",
+    "name": "Cat Tales Cat Café",
+    "cuisine": "coffee",
+    "dietTags": [
+      "vegetarian"
+    ],
+    "accessibilityTags": [],
+    "priceLevel": 1,
+    "typicalCostUsd": 12,
+    "hours": [
+      [
+        {
+          "open": 720,
+          "close": 1440
+        }
+      ],
+      [],
+      [
+        {
+          "open": 720,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 720,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 720,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 720,
+          "close": 1440
+        }
+      ],
+      [
+        {
+          "open": 720,
+          "close": 1440
+        }
+      ]
+    ],
+    "phone": "+18433455289",
+    "location": {
+      "lat": 35.9102805,
+      "lng": -79.0626724
+    },
+    "address": "431 West Franklin Street, Chapel Hill, NC, 27516",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n5731523903",
+    "name": "McDonald's",
+    "cuisine": "american",
+    "dietTags": [],
+    "accessibilityTags": [],
+    "priceLevel": 1,
+    "typicalCostUsd": 12,
+    "hours": [
+      [
+        {
+          "open": 360,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1500
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1500
+        }
+      ]
+    ],
+    "phone": "+19199675788",
+    "location": {
+      "lat": 35.9108049,
+      "lng": -79.0611625
+    },
+    "address": "409 West Franklin Street, Chapel Hill, NC, 27516",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n5731528569",
+    "name": "Bandido's",
+    "cuisine": "mexican",
+    "dietTags": [
+      "vegetarian"
+    ],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [],
+      [],
+      [
+        {
+          "open": 1020,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 1020,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 690,
+          "close": 870
+        },
+        {
+          "open": 1020,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 690,
+          "close": 870
+        },
+        {
+          "open": 1020,
+          "close": 1320
+        }
+      ],
+      [
+        {
+          "open": 1020,
+          "close": 1320
+        }
+      ]
+    ],
+    "phone": "+19199675048",
+    "location": {
+      "lat": 35.9141406,
+      "lng": -79.0539438
+    },
+    "address": "159 East Franklin Street, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n6279336658",
+    "name": "Roots Natural Kitchen",
+    "cuisine": "healthy",
+    "dietTags": [
+      "gluten_free",
+      "vegan",
+      "vegetarian"
+    ],
+    "accessibilityTags": [
+      "wheelchair",
+      "step_free"
+    ],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [
+        {
+          "open": 480,
+          "close": 1200
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 1260
+        }
+      ]
+    ],
+    "phone": "+19843225600",
+    "location": {
+      "lat": 35.912126,
+      "lng": -79.0578558
+    },
+    "address": "133 West Franklin Street, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_n8083291362",
+    "name": "Saladelia Cafe",
+    "cuisine": "coffee",
+    "dietTags": [
+      "gluten_free",
+      "vegan",
+      "vegetarian"
+    ],
+    "accessibilityTags": [],
+    "priceLevel": 1,
+    "typicalCostUsd": 12,
+    "hours": [
+      [],
+      [
+        {
+          "open": 480,
+          "close": 900
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 900
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 900
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 900
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 900
+        }
+      ],
+      []
+    ],
+    "phone": "+19199670537",
+    "location": {
+      "lat": 35.902421,
+      "lng": -79.0540223
+    },
+    "address": "125 Mason Farm Road, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_w324952854",
+    "name": "Sup Dogs",
+    "cuisine": "american",
+    "dietTags": [
+      "vegetarian"
+    ],
+    "accessibilityTags": [],
+    "priceLevel": 1,
+    "typicalCostUsd": 12,
+    "hours": [
+      [
+        {
+          "open": 660,
+          "close": 1590
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1590
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1590
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1590
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1620
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1620
+        }
+      ],
+      [
+        {
+          "open": 660,
+          "close": 1620
+        }
+      ]
+    ],
+    "phone": "+19199039566",
+    "location": {
+      "lat": 35.9135985,
+      "lng": -79.0555196
+    },
+    "address": "107 East Franklin Street, Chapel Hill, NC, 27514",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_w44343001",
+    "name": "Mama Dip's",
+    "cuisine": "american",
+    "dietTags": [],
+    "accessibilityTags": [],
+    "priceLevel": 2,
+    "typicalCostUsd": 22,
+    "hours": [
+      [
+        {
+          "open": 480,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 1290
+        }
+      ],
+      [
+        {
+          "open": 480,
+          "close": 1290
+        }
+      ]
+    ],
+    "phone": "+19199425837",
+    "location": {
+      "lat": 35.9116042,
+      "lng": -79.063383
+    },
+    "address": "408 West Rosemary Street, Chapel Hill, NC, 27516",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_w44343153",
+    "name": "Panera Bread",
+    "cuisine": "sandwich",
+    "dietTags": [
+      "vegetarian"
+    ],
+    "accessibilityTags": [],
+    "priceLevel": 1,
+    "typicalCostUsd": 12,
+    "hours": [
+      [
+        {
+          "open": 420,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 420,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1260
+        }
+      ],
+      [
+        {
+          "open": 360,
+          "close": 1260
+        }
+      ]
+    ],
+    "phone": "+19199299189",
+    "location": {
+      "lat": 35.9114005,
+      "lng": -79.0589901
+    },
+    "address": "213 West Franklin Street, Chapel Hill, NC, 27516",
+    "neighborhood": null,
+    "isDemo": false
+  },
+  {
+    "id": "venue_osm_w44343155",
+    "name": "Chipotle",
+    "cuisine": "mexican",
+    "dietTags": [
+      "vegan",
+      "vegetarian"
+    ],
+    "accessibilityTags": [
+      "wheelchair",
+      "step_free"
+    ],
+    "priceLevel": 1,
+    "typicalCostUsd": 12,
+    "hours": [
+      [
+        {
+          "open": 645,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 645,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 645,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 645,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 645,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 645,
+          "close": 1380
+        }
+      ],
+      [
+        {
+          "open": 645,
+          "close": 1380
+        }
+      ]
+    ],
+    "phone": "+19199422091",
+    "location": {
+      "lat": 35.9113991,
+      "lng": -79.0595866
+    },
+    "address": "301 West Franklin Street, Chapel Hill, NC, 27516",
+    "neighborhood": null,
+    "isDemo": false
+  }
+]

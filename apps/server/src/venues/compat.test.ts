@@ -1,0 +1,66 @@
+import { describe, expect, it } from 'vitest';
+import type { Fact, Venue } from '@bubbleworks/shared';
+import { PERSONA_FACTS, factsFor } from '@bubbleworks/shared/fakes';
+import { allWeek } from './hours.js';
+import { incompatibilities, isCompatible } from './compat.js';
+
+const venue = (over: Partial<Venue>): Venue => ({
+  id: 'v',
+  name: 'V',
+  cuisine: 'american',
+  dietTags: [],
+  accessibilityTags: [],
+  priceLevel: 2,
+  typicalCostUsd: 22,
+  hours: allWeek({ open: 0, close: 1440 }),
+  phone: '+19195550000',
+  location: { lat: 0, lng: 0 },
+  address: null,
+  neighborhood: null,
+  isDemo: false,
+  ...over,
+});
+
+describe('hard fact compatibility', () => {
+  it('vegetarian needs a vegetarian or vegan tag', () => {
+    const ava = factsFor('user_ava');
+    expect(isCompatible(venue({ dietTags: [] }), ava)).toBe(false);
+    expect(isCompatible(venue({ dietTags: ['vegan'] }), ava)).toBe(true);
+    expect(isCompatible(venue({ dietTags: ['vegetarian'] }), ava)).toBe(true);
+  });
+
+  it('halal accepts tagged halal or vegetarian-capable venues', () => {
+    const chloe = factsFor('user_chloe');
+    expect(isCompatible(venue({ dietTags: [] }), chloe)).toBe(false);
+    expect(isCompatible(venue({ dietTags: ['halal'] }), chloe)).toBe(true);
+    expect(isCompatible(venue({ dietTags: ['vegetarian'] }), chloe)).toBe(true);
+  });
+
+  it('peanut allergy excludes risky cuisines unless peanut_free', () => {
+    const ben = factsFor('user_ben');
+    expect(isCompatible(venue({ cuisine: 'thai' }), ben)).toBe(false);
+    expect(isCompatible(venue({ cuisine: 'thai', dietTags: ['peanut_free'] }), ben)).toBe(true);
+    expect(isCompatible(venue({ cuisine: 'pizza' }), ben)).toBe(true);
+    expect(incompatibilities(venue({ cuisine: 'chinese' }), ben)).toEqual([
+      { factType: 'allergy', value: 'peanut', reason: 'allergen_risk' },
+    ]);
+  });
+
+  it('wheelchair excludes only an explicit no', () => {
+    const eli = factsFor('user_eli');
+    expect(isCompatible(venue({ accessibilityTags: [] }), eli)).toBe(true);
+    expect(isCompatible(venue({ accessibilityTags: ['wheelchair'] }), eli)).toBe(true);
+    expect(isCompatible(venue({ accessibilityTags: ['no_wheelchair'] }), eli)).toBe(false);
+  });
+
+  it('ignores soft facts and budget', () => {
+    const soft: Fact[] = PERSONA_FACTS.filter((f) => !f.hard);
+    expect(isCompatible(venue({ cuisine: 'thai' }), soft)).toBe(true);
+    expect(
+      isCompatible(
+        venue({ typicalCostUsd: 500 }),
+        factsFor('user_chloe').filter((f) => f.type === 'budget_max'),
+      ),
+    ).toBe(true);
+  });
+});

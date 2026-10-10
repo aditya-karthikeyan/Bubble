@@ -9,6 +9,13 @@ const Env = z.object({
   WEB_PUBLIC_URL: z.url().optional(),
   DATABASE_PATH: z.string().default('./data/bubbleworks.db'),
   DEMO_MODE: z.stringbool().default(false),
+  /** Upsert personas, the demo group, and venues at boot. Idempotent. */
+  SEED_ON_BOOT: z.stringbool().default(true),
+  /** E.164 number of the teammate who plays the demo venue. Never committed. */
+  DEMO_VENUE_PHONE: z
+    .string()
+    .regex(/^\+[1-9]\d{7,14}$/, 'E.164, e.g. +17045551234')
+    .optional(),
 });
 
 export type Config = z.infer<typeof Env>;

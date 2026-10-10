@@ -133,6 +133,32 @@ Stable ids used by every fake, the seed script, and the demo reset: `group_demo`
 `user_ava` (vegetarian, $25), `user_ben` (peanut allergy, $40), `user_chloe` (halal, $20),
 `user_dev` (no limits, $50, favorite `venue_demo`), `user_eli` (wheelchair, $30).
 
+## Server internals (P1, apps/server/src)
+
+Not contracts, but the pieces other roles call from inside the server process:
+
+| Module                     | What it gives you                                                                            |
+| -------------------------- | -------------------------------------------------------------------------------------------- |
+| `runtime.ts` createRuntime | db, `bus` (SqliteEventBus), `timers`, `plans` (PlanStore), `candidates` (CandidateIndex)     |
+| `engine/state-machine.ts`  | `canTransition(to, ctx)`, transition table, `IllegalTransitionError`, `isTerminal`           |
+| `engine/plan-store.ts`     | `create`, `transition` (persists + audits + publishes `plan_state_changed`), members, budget |
+| `events/bus.ts`            | `publish`, `subscribe`, `replay`, `replayForToken` (null when unknown or expired)            |
+| `timers/service.ts`        | `schedule({ planId, kind, payload, delayMs? })`, `on(kind, handler)`, `cancel`, `pending`    |
+| `venues/candidates.ts`     | `forGroup({ groupId, date, startMinutes, memberIds })`, `invalidate(groupId)`                |
+| `venues/compat.ts`         | `isCompatible(venue, facts)` for diet, allergy, religious_diet, accessibility                |
+| `db/seed.ts`               | idempotent seed of personas, demo group (center: Fetzer Gym), data/venues.json               |
+
+Timer kinds: `poll_deadline`, `ask_timeout`, `veto_window`, `call_timeout` use `DEADLINES` (or
+`DEMO_DEADLINES` when DEMO_MODE); `day_of`, `page_token_expiry`, `custom` take `delayMs`.
+Timers live in SQLite and fire after a restart.
+
+Venue conventions: `dietTags` may include `<allergen>_free`; `accessibilityTags` is
+`wheelchair` / `step_free` / `no_wheelchair` (absent means unknown and passes). The demo venue
+is `venue_demo`; its phone comes from `DEMO_VENUE_PHONE`, never from the repo.
+
+P3: `createRuntime({ hardFacts })` is where `BubbleService.getHardLimits` replaces the facts
+table read in Phase 3.
+
 ## Invariants every module keeps
 
 1. No bubble reveals another person's constraint anywhere.

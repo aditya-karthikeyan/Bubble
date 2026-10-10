@@ -14,6 +14,7 @@ RUN pnpm install --frozen-lockfile --filter @bubbleworks/server...
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY apps/server apps/server
+COPY data/venues.json data/venues.json
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
