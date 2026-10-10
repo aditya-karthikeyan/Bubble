@@ -198,6 +198,17 @@ is `venue_demo`; its phone comes from `DEMO_VENUE_PHONE`, never from the repo.
 P3: `runtime.setHardFacts(fn)` points the candidate precompute at `BubbleService.getHardLimits`
 (wired in `index.ts`).
 
+Deadlock breaker (`engine/deadlock.ts`, `engine/wording.ts`): when the solver finds no feasible
+venue, `analyzeDeadlock` computes, per member, the smallest budget (+5/+10/+15) or distance
+(+10/+20 min) stretch that would make a venue feasible for the whole table, costs it by steps
+times (1 + recent compromises), and `pickAsks` takes the two cheapest for two different people.
+Each ask is a row in `asks`, a `private_ask_sent` event (id only), and one `sendPrivateText`
+worded by Haiku (template fallback; drafts naming anyone else are rejected). A yes/no DM from
+that person reaches `handleAskAnswer`; the first yes is recorded on the ledger as `compromised`,
+cancels the other ask with a thank-you, and reruns the solver with the accepted slack. Declines
+or the `ask_timeout` fall back to a time shift (30/60 min either way) or a takeout close.
+Allergy, religious diet, accessibility, and diet are never relaxed.
+
 Engine flow: `handleIntent` -> DETECTED -> question policy -> bundle (P2 `renderBundle`) ->
 GATHERING -> headcount and votes (`isPollDecided` early close, else `poll_deadline`) ->
 silent members represented (Focus, sleep, driving, with confirmed hard facts) or dropped ->
@@ -205,7 +216,7 @@ DELIBERATING -> solver rounds (`candidate_added`, `round_complete`, `candidate_e
 `bubble_merged`) -> LOCKED (`plan_locked`, group text with the veto window) -> `veto_window` ->
 BOOKING (`CallerPort.book`, `doer_status`) -> `handleCallResult` -> BOOKED (`booking_confirmed`,
 inviter, splitter, watcher) | declined/no answer -> rerun with the venue removed. No feasible
-venue -> DEADLOCK (Phase 3 breaker). Commands: wait, resume, cancel, veto, why.
+venue -> DEADLOCK -> breaker (above). Commands: wait, resume, cancel, veto, why.
 
 ## Invariants every module keeps
 

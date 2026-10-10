@@ -8,6 +8,7 @@ import {
   PERSONA_FACTS,
 } from '@bubbleworks/shared/fakes';
 import { loadConfig } from '../config.js';
+import { ledger } from '../db/schema.js';
 import { createRuntime, type Runtime } from '../runtime.js';
 import { VENUES_FIXTURE } from '../test-helpers.js';
 import { BubbleworksEngine } from './plan-engine.js';
@@ -155,26 +156,134 @@ describe('BubbleworksEngine', () => {
     expect(h.messaging.sent.some((s) => s.kind === 'poll')).toBe(false);
   });
 
-  it('deadlocks when no venue fits and reruns after a veto', async () => {
-    const broke = new FakeBubbles(
-      undefined,
-      PERSONA_FACTS.map((f) => (f.id === 'fact_chloe_budget' ? { ...f, value: '5' } : f)),
-    );
-    h.caller.dispose();
-    h.rt.close();
-    h = harness({ bubbles: broke });
-    const { planId } = await h.engine.handleIntent({
-      chatId: CHAT,
-      userId: 'user_ava',
-      messageId: 'm1',
-      text: 'dinner?',
-      at: h.at(),
+  describe('deadlock breaker', () => {
+    const tight = (chloe: string, ava: string) =>
+      new FakeBubbles(
+        undefined,
+        PERSONA_FACTS.map((f) =>
+          f.id === 'fact_chloe_budget'
+            ? { ...f, value: chloe }
+            : f.id === 'fact_ava_budget'
+              ? { ...f, value: ava }
+              : f,
+        ),
+      );
+
+    async function toDeadlock(bubbles: FakeBubbles) {
+      h.caller.dispose();
+      h.rt.close();
+      h = harness({ bubbles });
+      const { planId } = await h.engine.handleIntent({
+        chatId: CHAT,
+        userId: 'user_ava',
+        messageId: 'm1',
+        text: 'dinner?',
+        at: h.at(),
+      });
+      await h.engine.handleHeadcount({
+        planId: planId!,
+        userId: 'user_chloe',
+        in: true,
+        at: h.at(),
+      });
+      for (const u of ['user_ben', 'user_dev', 'user_eli'])
+        await h.engine.handleHeadcount({ planId: planId!, userId: u, in: false, at: h.at() });
+      // With no feasible venue the policy skips the poll, so the plan deliberates as soon as
+      // everyone has answered; only wait for the deadline when it is still gathering.
+      if (h.rt.plans.get(planId!)?.state === 'GATHERING') await h.advance(DEADLINES.poll_ms + 1);
+      return planId!;
+    }
+
+    it('sends a private ask to the one person who can give and locks on yes', async () => {
+      // Chloe at $10 blocks every dinner venue (cheapest $12); Ava at $25 has nothing to give.
+      const planId = await toDeadlock(tight('10', '25'));
+      expect(h.rt.plans.get(planId)?.state).toBe('DEADLOCK');
+      const asks = h.messaging.sent.filter((s) => s.kind === 'private_text');
+      expect(asks).toHaveLength(1);
+      const ask = asks[0]!;
+      expect('input' in ask ? ask.input.userId : '').toBe('user_chloe');
+      const text = 'input' in ask ? ask.input.text : '';
+      expect(text).toContain('Chloe');
+      expect(text).not.toContain('Ava');
+      expect(text).toMatch(/yes or no/);
+      expect(h.events.filter((e) => e.type === 'private_ask_sent')).toHaveLength(1);
+      expect(h.rt.timers.pending(planId).map((t) => t.kind)).toEqual(['ask_timeout']);
+      // The group only hears that something is being checked, nothing about who or what.
+      const groupTexts = h.messaging.sent
+        .filter((s) => s.kind === 'group_text')
+        .map((s) => ('input' in s ? s.input.text : ''));
+      expect(groupTexts.some((t) => /privately/.test(t))).toBe(true);
+      expect(groupTexts.join(' ')).not.toMatch(/Chloe|\$1[05]|budget/);
+
+      const pending = h.engine.pendingAskFor('user_chloe')!;
+      await h.engine.handleAskAnswer({
+        askId: pending.askId,
+        userId: 'user_chloe',
+        answer: 'yes',
+        rawText: 'yes',
+        at: h.at(),
+      });
+      expect(h.rt.plans.get(planId)?.state).toBe('LOCKED');
+      const outcomes = h.events
+        .filter((e) => e.type === 'private_ask_resolved')
+        .map((e) => (e.type === 'private_ask_resolved' ? e.outcome : ''));
+      expect(outcomes).toEqual(['accepted']);
+      expect(h.engine.pendingAskFor('user_chloe')).toBeNull();
+      expect(h.rt.timers.pending(planId).map((t) => t.kind)).toEqual(['veto_window']);
+      // The compromise is on the ledger so fairness weighting sees it next time.
+      expect(
+        h.rt.db
+          .select()
+          .from(ledger)
+          .all()
+          .some((r) => r.userId === 'user_chloe' && r.kind === 'compromised'),
+      ).toBe(true);
+      for (const e of h.events) expect(JSON.stringify(e)).not.toMatch(/budget|\$1[05]/);
     });
-    await h.engine.handleHeadcount({ planId: planId!, userId: 'user_chloe', in: true, at: h.at() });
-    for (const u of ['user_ben', 'user_dev', 'user_eli'])
-      await h.engine.handleHeadcount({ planId: planId!, userId: u, in: false, at: h.at() });
-    await h.advance(DEADLINES.poll_ms + 1);
-    expect(h.rt.plans.get(planId!)?.state).toBe('DEADLOCK');
+
+    it('falls back on a decline: a time shift or a takeout close', async () => {
+      const planId = await toDeadlock(tight('10', '25'));
+      for (const u of ['user_chloe', 'user_ava']) {
+        const pending = h.engine.pendingAskFor(u);
+        if (pending)
+          await h.engine.handleAskAnswer({
+            askId: pending.askId,
+            userId: u,
+            answer: 'no',
+            rawText: 'no',
+            at: h.at(),
+          });
+      }
+      const plan = h.rt.plans.get(planId)!;
+      expect(plan.state).not.toBe('DEADLOCK');
+      if (plan.state === 'CLOSED') {
+        expect(h.events.some((e) => e.type === 'plan_closed' && e.reason === 'failed')).toBe(true);
+        expect(
+          h.messaging.sent.some(
+            (s) => s.kind === 'group_text' && 'input' in s && /takeout/i.test(s.input.text),
+          ),
+        ).toBe(true);
+      }
+      expect(h.rt.timers.pending(planId).map((t) => t.kind)).not.toContain('ask_timeout');
+    });
+
+    it('expires unanswered asks and falls back', async () => {
+      const planId = await toDeadlock(tight('10', '25'));
+      await h.advance(DEADLINES.private_ask_ms + 1);
+      const outcomes = h.events
+        .filter((e) => e.type === 'private_ask_resolved')
+        .map((e) => (e.type === 'private_ask_resolved' ? e.outcome : ''));
+      expect(outcomes).toEqual(['expired']);
+      expect(h.rt.plans.get(planId)?.state).not.toBe('DEADLOCK');
+    });
+
+    it('gives up without asking when two people would both have to stretch', async () => {
+      // Both at $10: no single concession unlocks a venue, so nobody is asked and the plan falls back.
+      const planId = await toDeadlock(tight('10', '10'));
+      expect(h.messaging.sent.filter((s) => s.kind === 'private_text')).toHaveLength(0);
+      expect(h.events.filter((e) => e.type === 'private_ask_sent')).toHaveLength(0);
+      expect(h.rt.plans.get(planId)?.state).not.toBe('DEADLOCK');
+    });
   });
 
   it('veto during the window eliminates the pick and locks another', async () => {

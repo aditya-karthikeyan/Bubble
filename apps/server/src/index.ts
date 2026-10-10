@@ -4,6 +4,7 @@ import { FakeCaller, FakeDoers, FakeMessaging } from '@bubbleworks/shared/fakes'
 import { createBubbles } from './bubbles/index.js';
 import { registerDevRoutes } from './dev/routes.js';
 import { parseCommand } from './engine/intent.js';
+import { HaikuAskWriter } from './engine/wording.js';
 import { BubbleworksEngine } from './engine/plan-engine.js';
 import { createMessaging, loadMessagingConfig } from './messaging/index.js';
 import { createRuntime } from './runtime.js';
@@ -65,6 +66,9 @@ async function main(): Promise<void> {
     doers,
     webPublicUrl: config.WEB_PUBLIC_URL ?? null,
     log: app.fastify.log,
+    ...(process.env['ANTHROPIC_API_KEY']
+      ? { askWriter: new HaikuAskWriter({ apiKey: process.env['ANTHROPIC_API_KEY'] }) }
+      : {}),
   });
   engineRef.engine = engine;
   const intake = messaging.attachEngine(engine);
@@ -72,6 +76,23 @@ async function main(): Promise<void> {
 
   // Private DMs: the bubble answers first; what it does not handle may be a plan command.
   messaging.port.onPrivateMessage(async (m) => {
+    // A pending concession ask takes the next yes/no from that person.
+    const pending = engine.pendingAskFor(m.userId);
+    const yn = /^\s*(y|yes|yeah|yep|sure|ok|okay|fine|deal)\b/i.test(m.text)
+      ? 'yes'
+      : /^\s*(n|no|nope|nah|can'?t|cannot|rather not)\b/i.test(m.text)
+        ? 'no'
+        : null;
+    if (pending && yn) {
+      await engine.handleAskAnswer({
+        askId: pending.askId,
+        userId: m.userId,
+        answer: yn,
+        rawText: m.text,
+        at: m.at,
+      });
+      return;
+    }
     const { handled } = await bubbles.service.onPrivateMessage(m);
     if (handled) return;
     const command = parseCommand(m.text);
