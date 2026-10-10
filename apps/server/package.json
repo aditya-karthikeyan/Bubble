@@ -13,9 +13,11 @@
     "venues:import": "tsx scripts/import-venues.ts",
     "db:generate": "drizzle-kit generate",
     "db:seed": "tsx --env-file-if-exists=../../.env -e \"import('./src/config.js').then(async ({loadConfig})=>{const {createRuntime}=await import('./src/runtime.js');const rt=createRuntime(loadConfig(),{seed:true});console.log(rt.seed);rt.close();})\"",
-    "p2:phase1": "tsx --env-file-if-exists=../../.env scripts/p2-phase1.ts"
+    "p2:phase1": "tsx --env-file-if-exists=../../.env scripts/p2-phase1.ts",
+    "p2:phase2": "tsx --env-file-if-exists=../../.env scripts/p2-phase2.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "@bubbleworks/shared": "workspace:*",
     "@fastify/cors": "^11.3.1",
     "better-sqlite3": "^13.0.3",

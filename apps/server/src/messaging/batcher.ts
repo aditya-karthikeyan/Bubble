@@ -38,6 +38,15 @@ export class Batcher {
     this.pending.set(key, { items, timer });
   }
 
+  /** Deliver one sender's batch now, e.g. a clear plan intent that should not wait. */
+  flushNow(key: string): void {
+    const pending = this.pending.get(key);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pending.delete(key);
+    void this.flush({ key, items: pending.items });
+  }
+
   /** Deliver everything now, e.g. on shutdown. */
   async drain(): Promise<void> {
     const batches = [...this.pending.entries()].map(([key, p]) => {
