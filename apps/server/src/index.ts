@@ -1,4 +1,5 @@
 import { buildApp } from './app.js';
+import { createBubbles, type Bubbles } from './bubbles/index.js';
 import { loadConfig } from './config.js';
 import { registerDevRoutes } from './dev/routes.js';
 import { createMessaging, loadMessagingConfig } from './messaging/index.js';
@@ -21,7 +22,12 @@ async function main(): Promise<void> {
           }
         : {},
   });
-  const runtime = createRuntime(config, { log: app.fastify.log });
+  // Hard facts come from P3's bubbles once they exist (created right below, before any plan).
+  const p3: { bubbles: Bubbles | null } = { bubbles: null };
+  const runtime = createRuntime(config, {
+    log: app.fastify.log,
+    hardFacts: async (userId) => (p3.bubbles ? p3.bubbles.service.getHardLimits(userId) : []),
+  });
   pending.runtime = runtime;
   runtime.bus.setBroadcaster((token, event) => app.live.broadcast(token, event));
   runtime.timers.start();
@@ -31,6 +37,17 @@ async function main(): Promise<void> {
   // is set on the process holding the LINE LOCK. Signup works either way.
   const messagingConfig = loadMessagingConfig();
   const messaging = createMessaging({ config: messagingConfig, runtime });
+
+  // P3 bubbles: onboarding, crews, facts, signals, and calendar connect. Non-plan DMs go to the
+  // bubble; handled = false means it was not for the bubble (engine commands land here later).
+  const bubbles = createBubbles({ runtime, messaging: messaging.port });
+  p3.bubbles = bubbles;
+  bubbles.registerRoutes(app.fastify);
+  bubbles.attachLearner();
+  messaging.port.onPrivateMessage(async (m) => {
+    await bubbles.service.onPrivateMessage(m);
+  });
+
   const startMessaging = messagingConfig.SPECTRUM_PROVIDER === 'imessage' || process.stdin.isTTY;
   if (startMessaging) await messaging.start();
   else app.fastify.log.info('messaging transport not started: terminal provider without a TTY');
@@ -65,6 +82,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     app.fastify.log.info({ signal }, 'shutting down');
     if (startMessaging) await messaging.stop().catch(() => undefined);
+    await bubbles.close().catch(() => undefined);
     runtime.close();
     await app.fastify.close();
     process.exit(0);
