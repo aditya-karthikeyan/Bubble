@@ -13,11 +13,13 @@
   "dependencies": {
     "@bubbleworks/shared": "workspace:*",
     "next": "16.4.0",
+    "qrcode": "1.5.4",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "socket.io-client": "^4.8.4"
   },
   "devDependencies": {
+    "@types/qrcode": "1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0"
   }
