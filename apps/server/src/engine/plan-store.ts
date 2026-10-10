@@ -180,9 +180,7 @@ export class PlanStore {
       if (to === 'LOCKED') patch.lockedAt = at;
       if (isTerminal(to)) {
         patch.closedAt = at;
-        patch.pageTokenExpiresAt = new Date(
-          this.now().getTime() + this.pageTokenTtlMs,
-        ).toISOString();
+        patch.pageTokenExpiresAt = new Date(Date.parse(at) + this.pageTokenTtlMs).toISOString();
       }
       tx.update(plans).set(patch).where(eq(plans.id, planId)).run();
       tx.insert(audit)
