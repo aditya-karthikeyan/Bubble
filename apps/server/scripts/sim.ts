@@ -1,5 +1,5 @@
 /**
- * pnpm sim <basic|tie|deadlock|absent|veto>
+ * pnpm sim <basic|tie|deadlock|deadlock-decline|absent|veto>
  * Drives the real engine with every fake, short deadlines, and real time. Prints a timeline:
  * state transitions, page events, outbound messages, and the timing marks
  * (t_detect, t_poll_posted, t_lock, t_dial, t_booked) relative to the intent.
@@ -44,10 +44,10 @@ const log: Logger = {
 };
 
 async function main(): Promise<void> {
-  const facts =
-    scenario === 'deadlock'
-      ? PERSONA_FACTS.map((f) => (f.id === 'fact_chloe_budget' ? { ...f, value: '5' } : f))
-      : PERSONA_FACTS;
+  const deadlock = scenario.startsWith('deadlock');
+  const facts = deadlock
+    ? PERSONA_FACTS.map((f) => (f.id === 'fact_chloe_budget' ? { ...f, value: '10' } : f))
+    : PERSONA_FACTS;
   const bubbles = new FakeBubbles(undefined, facts);
   if (scenario === 'absent') bubbles.setPresence('user_eli', 'focus');
   const config = loadConfig({ NODE_ENV: 'test', SEED_ON_BOOT: 'true', DEMO_MODE: 'true' });
@@ -76,19 +76,23 @@ async function main(): Promise<void> {
   ref.engine = engine;
   rt.bus.subscribe('*', (e: PlanEvent) => {
     const extra =
-      e.type === 'round_complete'
-        ? ` round ${e.round} leader=${e.leaderVenueId} bubbles=${e.bubbles.map((b) => `${b.displayName}:${b.status}`).join(',')}`
-        : e.type === 'candidate_eliminated'
-          ? ` ${e.venueId} (${e.reason})`
-          : e.type === 'plan_locked'
-            ? ` ${e.venue.name} @ ${e.startAt} backup=${e.backup?.name ?? 'none'} party=${e.partySize}`
-            : e.type === 'doer_status'
-              ? ` ${e.doer} ${e.state} ${e.detail ?? ''}`
-              : e.type === 'bubble_joined'
-                ? ` ${e.bubble.displayName} (${e.bubble.status})`
-                : e.type === 'candidate_added'
-                  ? ` ${e.venue.name}`
-                  : '';
+      e.type === 'private_ask_sent'
+        ? ` ${e.askId}`
+        : e.type === 'private_ask_resolved'
+          ? ` ${e.askId} ${e.outcome}`
+          : e.type === 'round_complete'
+            ? ` round ${e.round} leader=${e.leaderVenueId} bubbles=${e.bubbles.map((b) => `${b.displayName}:${b.status}`).join(',')}`
+            : e.type === 'candidate_eliminated'
+              ? ` ${e.venueId} (${e.reason})`
+              : e.type === 'plan_locked'
+                ? ` ${e.venue.name} @ ${e.startAt} backup=${e.backup?.name ?? 'none'} party=${e.partySize}`
+                : e.type === 'doer_status'
+                  ? ` ${e.doer} ${e.state} ${e.detail ?? ''}`
+                  : e.type === 'bubble_joined'
+                    ? ` ${e.bubble.displayName} (${e.bubble.status})`
+                    : e.type === 'candidate_added'
+                      ? ` ${e.venue.name}`
+                      : '';
     say(`  event #${e.seq} ${e.type}${extra}`);
   });
   rt.timers.start();
@@ -109,13 +113,13 @@ async function main(): Promise<void> {
   const inUsers =
     scenario === 'absent'
       ? ['user_ben', 'user_chloe']
-      : scenario === 'deadlock'
+      : deadlock
         ? ['user_chloe']
         : ['user_ben', 'user_chloe', 'user_dev'];
   const outUsers =
     scenario === 'absent'
       ? ['user_dev']
-      : scenario === 'deadlock'
+      : deadlock
         ? ['user_ben', 'user_dev', 'user_eli']
         : ['user_eli'];
   for (const u of inUsers) await engine.handleHeadcount({ planId, userId: u, in: true, at: now() });
@@ -154,6 +158,43 @@ async function main(): Promise<void> {
     const check = setInterval(() => {
       const p = rt.plans.get(planId);
       if (!p) return;
+      if (deadlock && p.state === 'DEADLOCK' && !marks['ask_answered']) {
+        const who = engine.pendingAskFor('user_chloe')
+          ? 'user_chloe'
+          : engine.pendingAskFor('user_ava')
+            ? 'user_ava'
+            : null;
+        const pending = who ? engine.pendingAskFor(who) : null;
+        if (who && pending) {
+          marks['ask_answered'] = 1;
+          const answer = scenario === 'deadlock-decline' ? 'no' : 'yes';
+          say(`ANSWER ${who} says ${answer}`);
+          void engine
+            .handleAskAnswer({
+              askId: pending.askId,
+              userId: who,
+              answer,
+              rawText: answer,
+              at: now(),
+            })
+            .then(async () => {
+              if (scenario !== 'deadlock-decline') return;
+              const other = who === 'user_chloe' ? 'user_ava' : 'user_chloe';
+              const second = engine.pendingAskFor(other);
+              if (second) {
+                say(`ANSWER ${other} says no`);
+                await engine.handleAskAnswer({
+                  askId: second.askId,
+                  userId: other,
+                  answer: 'no',
+                  rawText: 'no',
+                  at: now(),
+                });
+              }
+            });
+        }
+        return;
+      }
       if (scenario === 'veto' && p.state === 'LOCKED' && !marks['veto_sent']) {
         marks['veto_sent'] = 1;
         void engine.handleCommand({
@@ -165,7 +206,7 @@ async function main(): Promise<void> {
         });
         return;
       }
-      if (['BOOKED', 'DEADLOCK', 'CLOSED', 'FAILED', 'CANCELLED'].includes(p.state)) {
+      if (['BOOKED', 'CLOSED', 'FAILED', 'CANCELLED'].includes(p.state)) {
         clearInterval(check);
         resolve();
       }
@@ -188,7 +229,10 @@ async function main(): Promise<void> {
   );
   caller.dispose();
   rt.close();
-  const ok = scenario === 'deadlock' ? plan.state === 'DEADLOCK' : plan.state === 'BOOKED';
+  const ok =
+    scenario === 'deadlock-decline'
+      ? ['CLOSED', 'BOOKED'].includes(plan.state)
+      : plan.state === 'BOOKED';
   console.log(ok ? `SIM ${scenario} OK` : `SIM ${scenario} UNEXPECTED STATE ${plan.state}`);
   process.exit(ok ? 0 : 1);
 }

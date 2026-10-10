@@ -40,14 +40,16 @@ import {
   type VoteInput,
 } from '@bubbleworks/shared';
 import { and, eq } from 'drizzle-orm';
-import { bookings, events, votes } from '../db/schema.js';
+import { asks, bookings, events, ledger, votes } from '../db/schema.js';
 import { groupById } from '../db/seed.js';
 import { silentLogger, type Logger } from '../events/bus.js';
 import type { Runtime } from '../runtime.js';
 import { solve } from '../solver/rounds.js';
 import type { SolverContext, SolverMember } from '../solver/types.js';
 import { dayOfWeek } from '../venues/hours.js';
+import { analyzeDeadlock, pickAsks } from './deadlock.js';
 import { parseIntent } from './intent.js';
+import { noFitText, TemplateAskWriter, thankYouText, type AskWriter } from './wording.js';
 import {
   cuisineLabel,
   decideCuisineQuestion,
@@ -82,6 +84,8 @@ export interface EngineDeps {
   doers: DoerPorts;
   /** P2's PlanIntake. Without it the engine renders a plain bundle through MessagingPort. */
   intake?: BundleRenderer | null;
+  /** Writes the private concession asks. Defaults to the template writer. */
+  askWriter?: AskWriter;
   webPublicUrl?: string | null;
   timezone?: string;
   log?: Logger;
@@ -116,7 +120,11 @@ export class BubbleworksEngine implements PlanEngine {
     this.rt.timers.on('poll_deadline', (t) => this.onPollDeadline(t));
     this.rt.timers.on('veto_window', (t) => this.onVetoWindow(t));
     this.rt.timers.on('call_timeout', (t) => this.onCallTimeout(t));
+    this.rt.timers.on('ask_timeout', (t) => this.onAskTimeout(t));
+    this.askWriter = deps.askWriter ?? new TemplateAskWriter();
   }
+
+  private readonly askWriter: AskWriter;
 
   // -- PlanEngine ----------------------------------------------------------------
 
@@ -278,10 +286,97 @@ export class BubbleworksEngine implements PlanEngine {
     await this.maybeAdvance(plan.id);
   }
 
+  /** The pending concession ask addressed to this person, if any (for DM routing). */
+  pendingAskFor(userId: string): { askId: string; planId: string } | null {
+    const row = this.rt.db
+      .select({ id: asks.id, planId: asks.planId })
+      .from(asks)
+      .where(and(eq(asks.userId, userId), eq(asks.status, 'pending')))
+      .get();
+    return row ? { askId: row.id, planId: row.planId } : null;
+  }
+
   async handleAskAnswer(input: AskAnswerInput): Promise<void> {
-    // Phase 3: deadlock breaker resolves concession asks here.
-    this.rt.plans.audit(null, 'ask_answer_unhandled', { askId: input.askId, answer: input.answer });
-    this.log.warn({ askId: input.askId }, 'ask answer received before the deadlock breaker exists');
+    const ask = this.rt.db.select().from(asks).where(eq(asks.id, input.askId)).get();
+    if (!ask || ask.status !== 'pending' || ask.userId !== input.userId) return;
+    const plan = this.rt.plans.get(ask.planId);
+    if (!plan) return;
+    const at = this.now().toISOString();
+    if (input.answer === 'no') {
+      this.rt.db
+        .update(asks)
+        .set({ status: 'declined', resolvedAt: at })
+        .where(eq(asks.id, ask.id))
+        .run();
+      await this.publish(plan.id, {
+        type: 'private_ask_resolved',
+        askId: ask.id,
+        outcome: 'declined',
+      });
+      await this.deps.messaging.sendPrivateText({
+        userId: ask.userId,
+        text: 'No problem, thanks for the quick answer.',
+        idempotencyKey: idempotencyKey(plan.id, 'ask_declined', ask.id),
+      });
+      await this.afterAsksResolved(plan.id);
+      return;
+    }
+    // First yes wins.
+    this.rt.db
+      .update(asks)
+      .set({ status: 'accepted', resolvedAt: at })
+      .where(eq(asks.id, ask.id))
+      .run();
+    await this.publish(plan.id, {
+      type: 'private_ask_resolved',
+      askId: ask.id,
+      outcome: 'accepted',
+    });
+    if (ask.concession) {
+      this.rt.db
+        .insert(ledger)
+        .values({
+          id: newId('ledger'),
+          groupId: plan.groupId,
+          planId: plan.id,
+          userId: ask.userId,
+          kind: 'compromised',
+          amount: ask.concession.cost,
+          note: `${ask.kind} ${ask.concession.from} -> ${ask.concession.to}`,
+          at,
+        })
+        .run();
+    }
+    const others = this.rt.db
+      .select()
+      .from(asks)
+      .where(and(eq(asks.planId, plan.id), eq(asks.status, 'pending')))
+      .all();
+    for (const other of others) {
+      this.rt.db
+        .update(asks)
+        .set({ status: 'cancelled', resolvedAt: at })
+        .where(eq(asks.id, other.id))
+        .run();
+      await this.publish(plan.id, {
+        type: 'private_ask_resolved',
+        askId: other.id,
+        outcome: 'cancelled',
+      });
+      const user = await this.rt.crews.userById(other.userId);
+      await this.deps.messaging.sendPrivateText({
+        userId: other.userId,
+        text: thankYouText(user?.displayName ?? 'there'),
+        idempotencyKey: idempotencyKey(plan.id, 'ask_thanks', other.id),
+      });
+    }
+    this.rt.timers.cancel(plan.id, 'ask_timeout');
+    await this.deps.messaging.sendPrivateText({
+      userId: ask.userId,
+      text: 'Thank you! Locking it in.',
+      idempotencyKey: idempotencyKey(plan.id, 'ask_accepted', ask.id),
+    });
+    if (plan.state === 'DEADLOCK') await this.deliberate(plan.id);
   }
 
   async handleMemberChange(input: MemberChangeInput): Promise<void> {
@@ -756,15 +851,7 @@ export class BubbleworksEngine implements PlanEngine {
 
     if (!result.winner) {
       await this.rt.plans.transition(planId, 'DEADLOCK', { reason: 'no venue fits everyone' });
-      await this.groupText(
-        plan,
-        'deadlock',
-        'Nothing fits everyone yet. Checking privately whether something small can give.',
-      );
-      this.log.warn(
-        { planId, infeasible: result.infeasible.length },
-        'deadlock: Phase 3 breaker takes over',
-      );
+      await this.breakDeadlock(planId, members, ctx);
       return;
     }
 
@@ -922,6 +1009,174 @@ export class BubbleworksEngine implements PlanEngine {
     await this.groupText(r.plan, 'failed', 'I could not get a table tonight. Sorry.');
   }
 
+  // -- deadlock breaker ----------------------------------------------------------
+
+  private async breakDeadlock(
+    planId: string,
+    members: SolverMember[],
+    ctx: SolverContext,
+  ): Promise<void> {
+    const plan = this.rt.plans.mustGet(planId);
+    const vetoed = this.vetoed.get(planId) ?? new Set<string>();
+    const analysis = analyzeDeadlock(
+      this.rt.venues().filter((v) => !vetoed.has(v.id)),
+      members,
+      ctx,
+    );
+    const picks = pickAsks(analysis);
+    this.rt.plans.audit(planId, 'deadlock_analysis', {
+      concessions: analysis.concessions.map((c) => ({
+        userId: c.userId,
+        kind: c.kind,
+        steps: c.steps,
+        cost: c.cost,
+      })),
+      timeShift: analysis.timeShift ? analysis.timeShift.startMinutes : null,
+      asked: picks.map((c) => c.userId),
+    });
+    if (picks.length === 0) {
+      await this.noFit(
+        planId,
+        analysis.timeShift ? { startMinutes: analysis.timeShift.startMinutes } : null,
+      );
+      return;
+    }
+    await this.groupText(
+      plan,
+      'deadlock',
+      'Nothing fits everyone yet. Checking privately whether something small can give.',
+    );
+    const names = new Map(members.map((m) => [m.userId, m.displayName]));
+    const at = this.now().toISOString();
+    const expiresAt = new Date(
+      this.now().getTime() + this.rt.timers.deadlines.private_ask_ms,
+    ).toISOString();
+    for (const c of picks) {
+      const venue = this.rt.venues().find((v) => v.id === c.enablesVenueIds[0]);
+      const text = await this.askWriter.write({
+        kind: c.kind,
+        from: c.from,
+        to: c.to,
+        venueName: venue?.name ?? 'a place nearby',
+        meal: plan.intent.meal,
+        firstName: names.get(c.userId) ?? 'there',
+        forbiddenNames: [...names.entries()].filter(([id]) => id !== c.userId).map(([, n]) => n),
+      });
+      const askId = newId('ask');
+      const key = idempotencyKey(planId, 'ask', askId);
+      this.rt.db
+        .insert(asks)
+        .values({
+          id: askId,
+          planId,
+          userId: c.userId,
+          kind: c.kind,
+          concession: {
+            factType: c.kind === 'budget' ? 'budget_max' : 'other',
+            from: String(c.from),
+            to: String(c.to),
+            cost: c.cost,
+          },
+          text,
+          status: 'pending',
+          idempotencyKey: key,
+          sentAt: at,
+          expiresAt,
+        })
+        .run();
+      await this.publish(planId, { type: 'private_ask_sent', askId });
+      await this.deps.messaging.sendPrivateText({ userId: c.userId, text, idempotencyKey: key });
+    }
+    this.rt.timers.schedule({ planId, kind: 'ask_timeout', replace: true });
+  }
+
+  private async onAskTimeout(t: FiredTimer): Promise<void> {
+    const plan = this.rt.plans.get(t.planId);
+    if (!plan || plan.state !== 'DEADLOCK') return;
+    const at = this.now().toISOString();
+    const pending = this.rt.db
+      .select()
+      .from(asks)
+      .where(and(eq(asks.planId, plan.id), eq(asks.status, 'pending')))
+      .all();
+    for (const a of pending) {
+      this.rt.db
+        .update(asks)
+        .set({ status: 'expired', resolvedAt: at })
+        .where(eq(asks.id, a.id))
+        .run();
+      await this.publish(plan.id, {
+        type: 'private_ask_resolved',
+        askId: a.id,
+        outcome: 'expired',
+      });
+    }
+    await this.afterAsksResolved(plan.id);
+  }
+
+  /** When no ask is pending any more and none was accepted, fall back to a time shift or takeout. */
+  private async afterAsksResolved(planId: string): Promise<void> {
+    const plan = this.rt.plans.get(planId);
+    if (!plan || plan.state !== 'DEADLOCK') return;
+    const all = this.rt.db.select().from(asks).where(eq(asks.planId, planId)).all();
+    if (all.some((a) => a.status === 'pending')) return;
+    if (all.some((a) => a.status === 'accepted')) return;
+    this.rt.timers.cancel(planId, 'ask_timeout');
+    const participants = this.rt.plans
+      .members(planId)
+      .filter((m) => m.status === 'in' || m.status === 'represented');
+    const members = await this.solverMembers(
+      plan,
+      participants.map((m) => m.userId),
+      new Set(participants.filter((m) => m.status === 'represented').map((m) => m.userId)),
+    );
+    const startMinutes = plan.startAt
+      ? this.minutesOf(plan.startAt)
+      : (plan.intent.startMinutes ?? SOLVER.default_start_min);
+    const analysis = analyzeDeadlock(this.rt.venues(), members, this.ctx(plan, startMinutes));
+    await this.noFit(
+      planId,
+      analysis.timeShift ? { startMinutes: analysis.timeShift.startMinutes } : null,
+    );
+  }
+
+  private async noFit(planId: string, shift: { startMinutes: number } | null): Promise<void> {
+    const plan = this.rt.plans.mustGet(planId);
+    if (shift) {
+      const startAt = this.startAtIso(plan.intent.date, shift.startMinutes);
+      this.rt.plans.setChoice(planId, { chosenVenueId: null, backupVenueId: null, startAt });
+      await this.groupText(plan, 'time_shift', noFitText('time', this.localClock(startAt)));
+      await this.rt.plans.transition(planId, 'DELIBERATING', {
+        reason: `time shifted to ${this.localClock(startAt)}`,
+      });
+      await this.deliberate(planId);
+      return;
+    }
+    await this.groupText(plan, 'no_fit', noFitText('takeout'));
+    await this.rt.plans.transition(planId, 'CLOSED', {
+      reason: 'no venue fits and nobody could stretch',
+    });
+    await this.publish(planId, { type: 'plan_closed', reason: 'failed' });
+    this.deps.intake?.closePlan(planId);
+  }
+
+  private acceptedSlack(planId: string, userId: string): SolverMember['slack'] {
+    const rows = this.rt.db
+      .select()
+      .from(asks)
+      .where(and(eq(asks.planId, planId), eq(asks.userId, userId), eq(asks.status, 'accepted')))
+      .all();
+    let budgetUsd = 0;
+    let travelMin = 0;
+    for (const r of rows) {
+      if (!r.concession) continue;
+      const delta = Number(r.concession.to) - Number(r.concession.from);
+      if (r.kind === 'budget') budgetUsd = Math.max(budgetUsd, delta);
+      if (r.kind === 'distance') travelMin = Math.max(travelMin, delta);
+    }
+    return budgetUsd || travelMin ? { budgetUsd, travelMin } : undefined;
+  }
+
   // -- helpers -------------------------------------------------------------------
 
   private async solverMembers(
@@ -959,6 +1214,7 @@ export class BubbleworksEngine implements PlanEngine {
         recentVenueIds: profile.recentVenueIds,
         recentCompromiseCount: profile.recentCompromiseCount,
         represented: represented.has(userId),
+        slack: this.acceptedSlack(plan.id, userId),
         busy,
       });
     }

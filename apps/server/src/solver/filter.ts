@@ -41,7 +41,9 @@ export function memberInfeasibilities(
     });
   }
   const budget = budgetOf(member);
-  if (budget !== null && venue.typicalCostUsd > budget + (options.budgetSlackUsd ?? 0)) {
+  const budgetSlack = options.budgetSlackUsd ?? member.slack?.budgetUsd ?? 0;
+  const travelSlack = options.travelSlackMin ?? member.slack?.travelMin ?? 0;
+  if (budget !== null && venue.typicalCostUsd > budget + budgetSlack) {
     out.push({
       venueId: venue.id,
       userId: member.userId,
@@ -50,7 +52,7 @@ export function memberInfeasibilities(
     });
   }
   const minutes = travelMinutes(member, venue, ctx);
-  if (minutes !== null && minutes > SOLVER.travel_limit_min + (options.travelSlackMin ?? 0)) {
+  if (minutes !== null && minutes > SOLVER.travel_limit_min + travelSlack) {
     out.push({
       venueId: venue.id,
       userId: member.userId,

@@ -12,6 +12,8 @@ export interface SolverMember {
   recentVenueIds: string[];
   recentCompromiseCount: number;
   represented: boolean;
+  /** Accepted concessions from the deadlock breaker: how far this member agreed to stretch. */
+  slack?: { budgetUsd?: number; travelMin?: number };
 }
 
 export interface SolverContext {
