@@ -21,7 +21,8 @@
     "p1:phase0": "pnpm --filter @bubbleworks/server phase0",
     "p1:phase1": "pnpm --filter @bubbleworks/server phase1",
     "venues:import": "pnpm --filter @bubbleworks/server venues:import",
-    "db:seed": "pnpm --filter @bubbleworks/server db:seed"
+    "db:seed": "pnpm --filter @bubbleworks/server db:seed",
+    "p2:phase1": "pnpm --filter @bubbleworks/server p2:phase1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -38,6 +39,9 @@
     "onlyBuiltDependencies": [
       "better-sqlite3",
       "esbuild"
-    ]
+    ],
+    "patchedDependencies": {
+      "@spectrum-ts/imessage@12.10.1": "patches/@spectrum-ts__imessage@12.10.1.patch"
+    }
   }
 }
