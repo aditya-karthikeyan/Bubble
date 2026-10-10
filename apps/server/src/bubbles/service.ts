@@ -52,6 +52,17 @@ import {
   type FactExtractor,
 } from './extract.js';
 import { describeFact, FactStore } from './facts.js';
+import { PassiveLearner, type LearnInput } from './learner.js';
+import {
+  inQuietHours,
+  parsePresenceCommand,
+  presenceUntil,
+  SignalCache,
+  type CachedRead,
+  type FreeBusySource,
+  type LocationFix,
+  type LocationSource,
+} from './signals.js';
 
 export const ONBOARDING_STEPS = [
   'diet_allergy',
@@ -87,14 +98,26 @@ export interface BubbleServiceDeps {
     userId: string;
     change: 'joined' | 'left';
   }) => Promise<void>;
+  /** Find My. Absent: getLocation falls back to the onboarding neighborhood. */
+  locations?: LocationSource | null;
+  /** Google free/busy. Absent: no calendar signal. */
+  freeBusy?: FreeBusySource | null;
+  /** Per-signal read budget; 300 ms in production. */
+  signalBudgetMs?: number;
   now?: () => Date;
   log?: Logger;
 }
 
 type Reply = (text: string) => Promise<void>;
 
+const LOCATION_TTL_MS = 5 * 60_000;
+const FREEBUSY_TTL_MS = 5 * 60_000;
+
 export class DbBubbleService implements BubbleService {
   readonly facts: FactStore;
+  readonly learner: PassiveLearner;
+  readonly locationCache: SignalCache<LocationFix>;
+  readonly busyCache: SignalCache<BusyInterval[]>;
   private readonly db: Db;
   private readonly crews: CrewDirectory;
   private readonly now: () => Date;
@@ -106,6 +129,18 @@ export class DbBubbleService implements BubbleService {
     this.now = deps.now ?? (() => new Date());
     this.log = deps.log ?? silentLogger;
     this.facts = new FactStore(this.db, this.now);
+    this.learner = new PassiveLearner({
+      extractor: deps.extractor,
+      apply: (input, found) => this.applyLearned(input, found),
+      log: this.log,
+    });
+    const cacheOpts = {
+      budgetMs: deps.signalBudgetMs ?? 300,
+      now: () => this.now().getTime(),
+      log: this.log,
+    };
+    this.locationCache = new SignalCache('location', LOCATION_TTL_MS, cacheOpts);
+    this.busyCache = new SignalCache('freebusy', FREEBUSY_TTL_MS, cacheOpts);
   }
 
   // -- BubbleService reads ---------------------------------------------------
@@ -141,22 +176,110 @@ export class DbBubbleService implements BubbleService {
     return this.facts.active(userId).filter((f) => !f.hard);
   }
 
-  /** Phase 2 adds the presence cache (commands, calendar, quiet hours). */
-  async getPresence(_userId: string): Promise<Presence> {
+  /**
+   * Presence, in order: a command the person sent ("busy", "sleeping", "driving") until it
+   * expires; a calendar busy block covering now (focus); quiet hours 23:00 to 07:00 (sleep);
+   * otherwise available. Focus is not readable on Photon Pro (docs/spikes/context.md).
+   */
+  async getPresence(userId: string): Promise<Presence> {
+    const nowMs = this.now().getTime();
+    const state = this.state(userId);
+    if (state.presence && state.presenceUntil && Date.parse(state.presenceUntil) > nowMs) {
+      return state.presence;
+    }
+    const day = this.localDayRange(this.now());
+    const busy = await this.readBusy(userId, day);
+    if (busy.value?.some((b) => Date.parse(b.start) <= nowMs && Date.parse(b.end) > nowMs)) {
+      return 'focus';
+    }
+    if (inQuietHours(this.now())) return 'sleep';
     return 'available';
   }
 
-  /** Phase 2 adds the Find My cache. */
-  async getLocation(_userId: string): Promise<GeoPoint | null> {
-    return null;
+  /**
+   * Find My fix (cached up to 5 minutes), else the center of seeded venues matching the
+   * person's onboarding neighborhood, else null.
+   */
+  async getLocation(userId: string): Promise<GeoPoint | null> {
+    const read = await this.readLocation(userId);
+    if (read.value) return { lat: read.value.lat, lng: read.value.lng };
+    return this.neighborhoodCenter(userId);
   }
 
-  /** Phase 2 adds Google free/busy with a cache. */
   async getFreeBusy(
-    _userId: string,
-    _range: { start: IsoDateTime; end: IsoDateTime },
+    userId: string,
+    range: { start: IsoDateTime; end: IsoDateTime },
   ): Promise<BusyInterval[]> {
-    return [];
+    const read = await this.readBusy(userId, range);
+    const start = Date.parse(range.start);
+    const end = Date.parse(range.end);
+    return (read.value ?? []).filter((b) => Date.parse(b.end) > start && Date.parse(b.start) < end);
+  }
+
+  /** Warm every member's signals when a plan starts, so the first reads hit the cache. */
+  prefetchSignals(userIds: string[]): void {
+    const day = this.localDayRange(this.now());
+    for (const id of userIds) {
+      void this.readLocation(id);
+      void this.readBusy(id, day);
+    }
+  }
+
+  async readLocation(userId: string): Promise<CachedRead<LocationFix>> {
+    const source = this.deps.locations;
+    if (!source) return { value: null, from: 'none', ageMs: null, ms: 0 };
+    const user = await this.crews.userById(userId);
+    if (!user) return { value: null, from: 'none', ageMs: null, ms: 0 };
+    return this.locationCache.read(userId, () => source.get(user.handle));
+  }
+
+  async readBusy(
+    userId: string,
+    range: { start: string; end: string },
+  ): Promise<CachedRead<BusyInterval[]>> {
+    const source = this.deps.freeBusy;
+    if (!source) return { value: null, from: 'none', ageMs: null, ms: 0 };
+    return this.busyCache.read(`${userId}|${range.start}|${range.end}`, () =>
+      source.busy(userId, range),
+    );
+  }
+
+  private localDayRange(d: Date): { start: string; end: string } {
+    const ymd = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    const start = new Date(`${ymd}T00:00:00Z`);
+    // Offset of New York from UTC at this moment, in ms.
+    const offset =
+      new Date(d.toLocaleString('en-US', { timeZone: 'UTC' })).getTime() -
+      new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' })).getTime();
+    const s = new Date(start.getTime() + offset);
+    return { start: s.toISOString(), end: new Date(s.getTime() + 86_400_000).toISOString() };
+  }
+
+  private neighborhoodCenter(userId: string): GeoPoint | null {
+    const hood = this.facts.current(userId, 'neighborhood')?.value;
+    if (!hood) return null;
+    const words = streetKey(hood)
+      .split(' ')
+      .filter((w) => w.length > 3 && !STOP_WORDS.has(w));
+    if (!words.length) return null;
+    const rows = this.db
+      .select({
+        lat: venues.lat,
+        lng: venues.lng,
+        address: venues.address,
+        hood: venues.neighborhood,
+      })
+      .from(venues)
+      .all()
+      .filter((v) => {
+        const hay = streetKey(`${v.address ?? ''} ${v.hood ?? ''}`);
+        return words.every((w) => hay.includes(w));
+      });
+    if (!rows.length) return null;
+    return {
+      lat: rows.reduce((a, v) => a + v.lat, 0) / rows.length,
+      lng: rows.reduce((a, v) => a + v.lng, 0) / rows.length,
+    };
   }
 
   async recordFact(fact: NewFact): Promise<Fact> {
@@ -250,6 +373,12 @@ export class DbBubbleService implements BubbleService {
       return true;
     }
 
+    const presence = parsePresenceCommand(text);
+    if (presence) {
+      await this.setPresence(user.id, presence, reply);
+      return true;
+    }
+
     if (!state.onboardingCompletedAt) {
       if (!state.onboardingStep) await this.startOnboarding(user.id, reply);
       else if (state.onboardingStep === 'done') await this.finishOnboarding(user, reply);
@@ -262,7 +391,63 @@ export class DbBubbleService implements BubbleService {
       await this.declareCrew(user, crewNames, reply);
       return true;
     }
+    // Not for the bubble: the engine gets it, and the learner reads it in the background.
+    this.learn({ messageId: m.messageId, userId: user.id, text, at: m.at });
     return false;
+  }
+
+  /** Feed any message the person wrote (DM or crew plan thread) to the background learner. */
+  learn(input: LearnInput): void {
+    this.learner.enqueue(input);
+  }
+
+  private async setPresence(
+    userId: string,
+    command: ReturnType<typeof parsePresenceCommand> & string,
+    reply: Reply,
+  ): Promise<void> {
+    if (command === 'available') {
+      this.upsertState(userId, { presence: null, presenceUntil: null });
+      await reply("Welcome back. I'll include you in plans again.");
+      return;
+    }
+    const until = presenceUntil(command, this.now());
+    this.upsertState(userId, { presence: command, presenceUntil: until });
+    const when = new Date(until).toLocaleTimeString('en-US', {
+      timeZone: 'America/New_York',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+    const what = { focus: 'busy', sleep: 'asleep', driving: 'driving' }[command];
+    await reply(
+      `Got it, you're ${what} until ${when}. No pings till then; your bubble can still plan for ` +
+        "you within your hard limits. Say 'back' anytime.",
+    );
+    this.log.info({ userId, presence: command, until }, 'presence set');
+  }
+
+  /**
+   * Saves facts the learner found. Soft facts save directly. Hard facts save unconfirmed (they
+   * still filter, so a learned allergy is never ignored) and get one private yes/no.
+   */
+  private async applyLearned(input: LearnInput, found: ExtractedFact[]): Promise<void> {
+    const state = this.state(input.userId);
+    if (!state.onboardingCompletedAt) return; // onboarding answers are handled in the DM flow
+    const saved = await this.saveExtracted(input.userId, found, 'chat', input.text);
+    const ask = saved.filter((f) => f.hard && !f.confirmed);
+    this.log.info(
+      { userId: input.userId, messageId: input.messageId, saved: saved.length, ask: ask.length },
+      'facts learned from chat',
+    );
+    if (!ask.length || this.state(input.userId).pending) return;
+    this.setPending(input.userId, { kind: 'fact_confirm', factIds: ask.map((f) => f.id) });
+    const list = ask
+      .map((f) => this.describe(f) + (f.expiresAt ? ` until ${shortDate(f.expiresAt)}` : ''))
+      .join(' and ');
+    await this.replier(
+      input.userId,
+      `learned:${input.messageId}`,
+    )(`Noticed ${list}. Should I treat that as a hard rule for plans? (yes/no)`);
   }
 
   // -- pending yes/no --------------------------------------------------------
@@ -302,6 +487,16 @@ export class DbBubbleService implements BubbleService {
         else this.facts.delete(pending.factIds);
         await reply(yes ? "Got it, that's a hard rule for every plan." : "Okay, I won't save it.");
         await this.continueOnboarding(user, reply);
+        return true;
+      }
+
+      case 'fact_confirm': {
+        this.setPending(user.id, null);
+        if (!yes && !no) return false; // moved on; the facts stay unconfirmed but still filter
+        if (yes) this.facts.confirm(pending.factIds);
+        else this.facts.delete(pending.factIds);
+        await reply(yes ? 'Locked in.' : "Okay, I'll forget it.");
+        await this.deliverNextInvite(user.id);
         return true;
       }
 
@@ -715,6 +910,8 @@ export class DbBubbleService implements BubbleService {
         onboardingStartedAt: null,
         onboardingCompletedAt: null,
         pending: null,
+        presence: null,
+        presenceUntil: null,
         updatedAt: this.now().toISOString(),
       }
     );
@@ -811,6 +1008,30 @@ export function isNo(text: string): boolean {
     /^\s*(n|no|nope|nah|wrong|not really|pass|i'?m out|out)\b[\s!.]*$/i.test(text) ||
     /^\s*👎/.test(text)
   );
+}
+
+const STOP_WORDS = new Set([
+  'near',
+  'around',
+  'mostly',
+  'usually',
+  'area',
+  'downtown',
+  'chapel',
+  'hill',
+]);
+
+/** Lowercase words with street suffixes spelled out, so "Franklin St" matches "Franklin Street". */
+function streetKey(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .replace(/\bst\b/g, 'street')
+    .replace(/\bave?\b/g, 'avenue')
+    .replace(/\brd\b/g, 'road')
+    .replace(/\bblvd\b/g, 'boulevard')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /** "Fri Oct 16" in New York time. */

@@ -22,6 +22,13 @@
       "when": 1791672548186,
       "tag": "0002_bubbles",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791673716975,
+      "tag": "0003_bubble_presence",
+      "breakpoints": true
     }
   ]
 }
