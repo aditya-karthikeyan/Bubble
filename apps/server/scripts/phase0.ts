@@ -41,7 +41,9 @@ async function main(): Promise<void> {
   const join = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
     socket.emit(SOCKET.join, { token: 'phase0-probe-token' }, resolve);
   });
-  console.log(`join with unknown token -> ${JSON.stringify(join)} (refusal expected)`);
+  console.log(
+    `join -> ${JSON.stringify(join)} (any token is accepted until the EventBus lands in Phase 1)`,
+  );
 
   socket.disconnect();
   console.log('PHASE 0 OK');
