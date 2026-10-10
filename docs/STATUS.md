@@ -2,12 +2,12 @@
 
 One row per role. Update your row at the end of every phase.
 
-| Role                      | Person | Phase | State       | PR                                                  | Known issues                                                                                                                                      |
-| ------------------------- | ------ | ----- | ----------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P1 Core and Integration   | Aditya | 2a    | in review   | PR #2 (Phase 1), PR #4 (crew contract)              | OSM wheelchair tags mostly missing (unknown passes, caller confirms); halal satisfied by vegetarian-capable venues; deploy to Railway after merge |
-| P2 Messaging and Surfaces | Pranav | 0     | in review   | https://github.com/aditya-karthikeyan/Bubble/pull/3 | Photon Pro: no group chats, no Spectrum SIP; crew over DMs. Poll votes need an SDK patch. Poll close unsupported.                                 |
-| P3 Bubbles and Context    | Soham  | 0     | not started |                                                     |                                                                                                                                                   |
-| P4 Voice and Live Page    | Mahil  | 0     | not started |                                                     |                                                                                                                                                   |
+| Role                      | Person | Phase | State       | PR                                     | Known issues                                                                                                                                                                       |
+| ------------------------- | ------ | ----- | ----------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1 Core and Integration   | Aditya | 2a    | in review   | PR #2 (Phase 1), PR #4 (crew contract) | OSM wheelchair tags mostly missing (unknown passes, caller confirms); halal satisfied by vegetarian-capable venues; deploy to Railway after merge                                  |
+| P2 Messaging and Surfaces | Pranav | 1     | in review   | PR_LINK                                | Tapback removal not exposed by spectrum-ts. Server wiring (createMessaging in index.ts, POST /api/signup) left to P1. Phase 0: https://github.com/aditya-karthikeyan/Bubble/pull/3 |
+| P3 Bubbles and Context    | Soham  | 0     | not started |                                        |                                                                                                                                                                                    |
+| P4 Voice and Live Page    | Mahil  | 0     | not started |                                        |                                                                                                                                                                                    |
 
 ## Checkpoints
 
