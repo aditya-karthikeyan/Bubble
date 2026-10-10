@@ -1,5 +1,6 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
+import { createMessaging, loadMessagingConfig } from './messaging/index.js';
 import { createRuntime } from './runtime.js';
 
 async function main(): Promise<void> {
@@ -24,6 +25,25 @@ async function main(): Promise<void> {
   runtime.bus.setBroadcaster((token, event) => app.live.broadcast(token, event));
   runtime.timers.start();
 
+  // P2 messaging adapter. The terminal provider is Spectrum's local TUI, so it only starts
+  // when there is a terminal to draw on; the real line starts only when SPECTRUM_PROVIDER=imessage
+  // is set on the process holding the LINE LOCK. Signup works either way.
+  const messagingConfig = loadMessagingConfig();
+  const messaging = createMessaging({ config: messagingConfig, runtime });
+  const startMessaging = messagingConfig.SPECTRUM_PROVIDER === 'imessage' || process.stdin.isTTY;
+  if (startMessaging) await messaging.start();
+  else app.fastify.log.info('messaging transport not started: terminal provider without a TTY');
+
+  app.fastify.post('/api/signup', async (request, reply) => {
+    try {
+      const result = await messaging.signup(request.body);
+      return { ok: true, bubbleNumber: result.bubbleNumber, smsLink: result.smsLink };
+    } catch (err) {
+      request.log.warn({ err: String(err) }, 'signup rejected');
+      return reply.code(400).send({ ok: false, error: 'invalid signup' });
+    }
+  });
+
   const active = runtime.plans.findAllActive();
   if (active.length) {
     app.fastify.log.info(
@@ -34,6 +54,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string) => {
     app.fastify.log.info({ signal }, 'shutting down');
+    if (startMessaging) await messaging.stop().catch(() => undefined);
     runtime.close();
     await app.fastify.close();
     process.exit(0);
@@ -49,6 +70,7 @@ async function main(): Promise<void> {
       publicUrl: config.SERVER_PUBLIC_URL ?? null,
       db: config.DATABASE_PATH,
       venues: runtime.seed?.venues ?? null,
+      messaging: startMessaging ? messagingConfig.SPECTRUM_PROVIDER : 'off',
     },
     'bubbleworks server up',
   );
