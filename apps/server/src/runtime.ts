@@ -12,6 +12,7 @@ import {
   seedDatabase,
   type SeedResult,
 } from './db/seed.js';
+import { DbCrewDirectory } from './crew/directory.js';
 import { PlanStore } from './engine/plan-store.js';
 import { silentLogger, SqliteEventBus, type Logger } from './events/bus.js';
 import { TimerService, type TimerServiceOptions } from './timers/service.js';
@@ -36,6 +37,7 @@ export interface Runtime {
   timers: TimerService;
   plans: PlanStore;
   candidates: CandidateIndex;
+  crews: DbCrewDirectory;
   seed: SeedResult | null;
   log: Logger;
   close(): void;
@@ -58,6 +60,7 @@ export function createRuntime(config: Config, options: RuntimeOptions = {}): Run
   const bus = new SqliteEventBus(db, { log });
   const timers = new TimerService(db, { demoMode: config.DEMO_MODE, log, ...options.timers });
   const plans = new PlanStore(db, bus, { log });
+  const crews = new DbCrewDirectory(db);
   let venueCache: ReturnType<typeof listVenues> | null = null;
   const candidates = new CandidateIndex({
     venues: () => (venueCache ??= listVenues(db)),
@@ -74,6 +77,7 @@ export function createRuntime(config: Config, options: RuntimeOptions = {}): Run
     timers,
     plans,
     candidates,
+    crews,
     seed,
     log,
     close: () => {

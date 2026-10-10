@@ -8,6 +8,13 @@
       "when": 1791666121641,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791669669372,
+      "tag": "0001_crew_contract",
+      "breakpoints": true
     }
   ]
 }

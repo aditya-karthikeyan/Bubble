@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlanEvent, PlanState } from '@bubbleworks/shared';
+import { DEMO_GROUP } from '@bubbleworks/shared/fakes';
 import type { Runtime } from '../runtime.js';
 import { INTENT, testRuntime } from '../test-helpers.js';
 
@@ -58,7 +59,7 @@ describe('SqliteEventBus', () => {
     rt.bus.setBroadcaster(broadcast);
     const plan = rt.plans.create({
       groupId: 'group_demo',
-      chatId: 'chat_demo',
+      chatId: DEMO_GROUP.chatId,
       intent: INTENT,
       createdByUserId: 'user_ava',
     });

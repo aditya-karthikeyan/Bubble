@@ -241,16 +241,39 @@ export class PlanStore {
     return this.mustGet(planId);
   }
 
-  /** Count one group message against the plan's budget. Returns remaining, or -1 if exceeded. */
-  spendMessage(planId: string): number {
+  /**
+   * Count one message to a member against that member's budget for the plan. Returns the
+   * member's remaining budget, or -1 when the message must not be sent. The plan keeps a
+   * running total across members for logs.
+   */
+  spendMessage(planId: string, userId: string): number {
     const plan = this.mustGet(planId);
-    if (plan.messagesUsed >= plan.messageBudget) return -1;
+    const at = this.now().toISOString();
+    const member = this.db
+      .select()
+      .from(planMembers)
+      .where(and(eq(planMembers.planId, planId), eq(planMembers.userId, userId)))
+      .get();
+    const used = member?.messagesUsed ?? 0;
+    if (used >= plan.messageBudget) return -1;
+    if (member) {
+      this.db
+        .update(planMembers)
+        .set({ messagesUsed: used + 1, updatedAt: at })
+        .where(and(eq(planMembers.planId, planId), eq(planMembers.userId, userId)))
+        .run();
+    } else {
+      this.db
+        .insert(planMembers)
+        .values({ planId, userId, status: 'invited', messagesUsed: 1, joinedAt: at, updatedAt: at })
+        .run();
+    }
     this.db
       .update(plans)
-      .set({ messagesUsed: plan.messagesUsed + 1, updatedAt: this.now().toISOString() })
+      .set({ messagesUsed: plan.messagesUsed + 1, updatedAt: at })
       .where(eq(plans.id, planId))
       .run();
-    return plan.messageBudget - plan.messagesUsed - 1;
+    return plan.messageBudget - used - 1;
   }
 
   // -- members -----------------------------------------------------------------

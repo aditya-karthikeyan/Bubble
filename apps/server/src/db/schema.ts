@@ -21,6 +21,7 @@ import type {
   BookingStatus,
   FactSource,
   FactType,
+  GroupStatus,
   LedgerKind,
   OpenInterval,
   PlanIntent,
@@ -33,6 +34,9 @@ export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
   displayName: text('display_name').notNull(),
   handle: text('handle').notNull().unique(),
+  email: text('email'),
+  bubbleNumber: text('bubble_number'),
+  onboardedAt: text('onboarded_at'),
   timezone: text('timezone').notNull().default('America/New_York'),
   createdAt: text('created_at').notNull(),
 });
@@ -60,6 +64,8 @@ export const groups = sqliteTable('groups', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   chatId: text('chat_id').notNull().unique(),
+  status: text('status').$type<GroupStatus>().notNull().default('pending'),
+  createdByUserId: text('created_by_user_id'),
   centerLat: real('center_lat'),
   centerLng: real('center_lng'),
   timezone: text('timezone').notNull().default('America/New_York'),
@@ -76,6 +82,7 @@ export const groupMembers = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     joinedAt: text('joined_at').notNull(),
+    confirmedAt: text('confirmed_at'),
   },
   (t) => [primaryKey({ columns: [t.groupId, t.userId] })],
 );
@@ -120,6 +127,7 @@ export const planMembers = sqliteTable(
     representedByBubble: integer('represented_by_bubble', { mode: 'boolean' })
       .notNull()
       .default(false),
+    messagesUsed: integer('messages_used').notNull().default(0),
     joinedAt: text('joined_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { PlanEvent } from '@bubbleworks/shared';
+import { DEMO_GROUP } from '@bubbleworks/shared/fakes';
 import { audit } from '../db/schema.js';
 import type { Runtime } from '../runtime.js';
 import { INTENT, testRuntime } from '../test-helpers.js';
@@ -14,7 +15,7 @@ afterEach(() => rt.close());
 const create = () =>
   rt.plans.create({
     groupId: 'group_demo',
-    chatId: 'chat_demo',
+    chatId: DEMO_GROUP.chatId,
     intent: INTENT,
     createdByUserId: 'user_ava',
   });
@@ -84,15 +85,18 @@ describe('PlanStore', () => {
     const done = await rt.plans.transition(plan.id, 'CANCELLED');
     expect(done.closedAt).not.toBeNull();
     expect(Date.parse(done.pageTokenExpiresAt!) - Date.parse(done.closedAt!)).toBe(2 * 60 * 60_000);
-    expect(rt.plans.findActiveForChat('chat_demo')).toEqual([]);
+    expect(rt.plans.findActiveForChat(DEMO_GROUP.chatId)).toEqual([]);
     expect(rt.plans.findAllActive()).toEqual([]);
   });
 
-  it('spends the message budget', () => {
+  it('spends the message budget per member', () => {
     const plan = create();
     let remaining = 0;
-    for (let i = 0; i < 8; i += 1) remaining = rt.plans.spendMessage(plan.id);
+    for (let i = 0; i < 8; i += 1) remaining = rt.plans.spendMessage(plan.id, 'user_ava');
     expect(remaining).toBe(0);
-    expect(rt.plans.spendMessage(plan.id)).toBe(-1);
+    expect(rt.plans.spendMessage(plan.id, 'user_ava')).toBe(-1);
+    expect(rt.plans.spendMessage(plan.id, 'user_ben')).toBe(7);
+    expect(rt.plans.get(plan.id)?.messagesUsed).toBe(9);
+    expect(rt.plans.members(plan.id).find((m) => m.userId === 'user_ava')?.messagesUsed).toBe(8);
   });
 });

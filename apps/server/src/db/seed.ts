@@ -41,7 +41,14 @@ export function seedDatabase(db: Db, options: SeedOptions = {}): SeedResult {
         .values(u)
         .onConflictDoUpdate({
           target: users.id,
-          set: { displayName: u.displayName, handle: u.handle, timezone: u.timezone },
+          set: {
+            displayName: u.displayName,
+            handle: u.handle,
+            email: u.email,
+            bubbleNumber: u.bubbleNumber,
+            onboardedAt: u.onboardedAt,
+            timezone: u.timezone,
+          },
         })
         .run();
     }
@@ -54,6 +61,8 @@ export function seedDatabase(db: Db, options: SeedOptions = {}): SeedResult {
         id: group.id,
         name: group.name,
         chatId: group.chatId,
+        status: group.status,
+        createdByUserId: group.createdByUserId,
         centerLat: group.center?.lat ?? null,
         centerLng: group.center?.lng ?? null,
         timezone: group.timezone,
@@ -64,6 +73,8 @@ export function seedDatabase(db: Db, options: SeedOptions = {}): SeedResult {
         set: {
           name: group.name,
           chatId: group.chatId,
+          status: group.status,
+          createdByUserId: group.createdByUserId,
           centerLat: group.center?.lat ?? null,
           centerLng: group.center?.lng ?? null,
           timezone: group.timezone,
@@ -72,7 +83,12 @@ export function seedDatabase(db: Db, options: SeedOptions = {}): SeedResult {
       .run();
     for (const m of DEMO_MEMBERS) {
       tx.insert(groupMembers)
-        .values({ groupId: group.id, userId: m.userId, joinedAt: m.joinedAt })
+        .values({
+          groupId: group.id,
+          userId: m.userId,
+          joinedAt: m.joinedAt,
+          confirmedAt: m.confirmedAt,
+        })
         .onConflictDoNothing()
         .run();
     }
@@ -108,6 +124,8 @@ export function groupById(db: Db, groupId: string): Group | null {
     id: row.id,
     name: row.name,
     chatId: row.chatId,
+    status: row.status,
+    createdByUserId: row.createdByUserId,
     center:
       row.centerLat !== null && row.centerLng !== null
         ? { lat: row.centerLat, lng: row.centerLng }

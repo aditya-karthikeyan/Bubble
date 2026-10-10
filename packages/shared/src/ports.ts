@@ -4,7 +4,8 @@
  * Modules talk only through these interfaces. Each owner ships a fake adapter first
  * (see ./fakes) so every other role builds against the fake in parallel.
  *
- *   PlanEngine, EventBus          P1 (apps/server)
+ *   PlanEngine, EventBus,
+ *   CrewDirectory                 P1 (apps/server)
  *   MessagingPort                 P2 (Spectrum adapter)
  *   BubbleService, DoerPorts      P3 (bubbles, Inviter, Splitter, Watcher)
  *   CallerPort                    P4 (ElevenLabs caller agent)
@@ -17,6 +18,7 @@ import type {
   BusyInterval,
   Fact,
   GeoPoint,
+  Group,
   IsoDateTime,
   NewFact,
   PlanMember,
@@ -139,6 +141,15 @@ export interface MemberChange {
   at: IsoDateTime;
 }
 
+/**
+ * Photon cannot join iMessage group chats. A group chatId is virtual (`crew:<groupId>`): the
+ * adapter fans sendGroupText, sendPoll, sendRichLink, and upsertLiveCard out to every member's
+ * DM with one idempotency key per member derived from the caller's. renameGroup and
+ * setBackground are no-ops on crews. closePoll sends a "Voting closed" message, because
+ * iMessage polls cannot be closed or edited. Inbound DMs that are plan-related arrive through
+ * onGroupMessage with the member's crew chatId; everything else goes to onPrivateMessage.
+ * The adapter may only text people who have texted their bubble first (User.onboardedAt).
+ */
 export interface MessagingPort {
   sendGroupText(input: GroupTextInput): Promise<SendResult>;
   sendPrivateText(input: PrivateTextInput): Promise<SendResult>;
@@ -164,6 +175,42 @@ export interface MessagingPort {
   onPollVote(handler: (vote: PollVote) => Promise<void>): Unsubscribe;
   onReaction(handler: (reaction: Reaction) => Promise<void>): Unsubscribe;
   onMemberChange(handler: (change: MemberChange) => Promise<void>): Unsubscribe;
+}
+
+// ---------------------------------------------------------------------------
+// CrewDirectory (P1)
+// ---------------------------------------------------------------------------
+
+/**
+ * People and crews, backed by the server database. P2's signup route creates users after
+ * Photon registration; P3's onboarding creates crews and confirms members; the engine and the
+ * messaging adapter read. A crew becomes active when every member has confirmed.
+ */
+export interface CrewDirectory {
+  userByHandle(handle: string): Promise<User | null>;
+  userById(userId: string): Promise<User | null>;
+  createUser(input: {
+    displayName: string;
+    /** E.164 phone. */
+    handle: string;
+    email?: string | null;
+    bubbleNumber?: string | null;
+  }): Promise<User>;
+  /** Patch bubbleNumber / onboardedAt / displayName after signup or first DM. */
+  updateUser(
+    userId: string,
+    patch: Partial<Pick<User, 'displayName' | 'email' | 'bubbleNumber' | 'onboardedAt'>>,
+  ): Promise<User>;
+  crewsOf(userId: string): Promise<Group[]>;
+  crewById(groupId: string): Promise<Group | null>;
+  crewByChatId(chatId: string): Promise<Group | null>;
+  membersOf(groupId: string): Promise<User[]>;
+  /** New crew in status pending; the creator counts as confirmed. */
+  createCrew(input: { name: string; createdByUserId: string; memberIds: string[] }): Promise<Group>;
+  /** Mark a member confirmed. Returns the crew, active once every member has confirmed. */
+  confirmMember(groupId: string, userId: string): Promise<Group>;
+  addMember(groupId: string, userId: string): Promise<Group>;
+  removeMember(groupId: string, userId: string): Promise<Group>;
 }
 
 // ---------------------------------------------------------------------------

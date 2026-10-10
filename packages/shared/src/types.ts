@@ -24,18 +24,34 @@ export type GeoPoint = z.infer<typeof GeoPoint>;
 export const User = z.object({
   id: z.string(),
   displayName: z.string(),
-  /** Messaging identity (phone number or iMessage handle) as Spectrum reports it. */
+  /** Messaging identity: the person's phone in E.164, as Spectrum reports it. */
   handle: z.string(),
+  email: z.string().nullable().default(null),
+  /** Photon-assigned number the person texts to reach their bubble. Null until signup. */
+  bubbleNumber: z.string().nullable().default(null),
+  /** Set when the person has texted their bubble at least once (the adapter may then text them). */
+  onboardedAt: IsoDateTime.nullable().default(null),
   timezone: z.string().default('America/New_York'),
   createdAt: IsoDateTime,
 });
 export type User = z.infer<typeof User>;
 
+export const GroupStatus = z.enum(['pending', 'active']);
+export type GroupStatus = z.infer<typeof GroupStatus>;
+
+/**
+ * A group is a crew: people who plan together. Photon cannot join iMessage group chats, so
+ * every member talks to their own bubble over DM and the messaging adapter fans group messages
+ * out to each member. chatId is therefore virtual: `crew:<groupId>` (see crewChatId()).
+ */
 export const Group = z.object({
   id: z.string(),
   name: z.string(),
-  /** Spectrum chat identifier for the group thread. */
+  /** Virtual chat id, `crew:<groupId>`. The adapter resolves it to member DMs. */
   chatId: z.string(),
+  /** pending until every named member has confirmed with their own bubble. */
+  status: GroupStatus.default('pending'),
+  createdByUserId: z.string().nullable().default(null),
   /** Center of the group's area, used for distance filters. */
   center: GeoPoint.nullable().default(null),
   timezone: z.string().default('America/New_York'),
@@ -43,10 +59,20 @@ export const Group = z.object({
 });
 export type Group = z.infer<typeof Group>;
 
+export const CREW_CHAT_PREFIX = 'crew:';
+export function crewChatId(groupId: string): string {
+  return `${CREW_CHAT_PREFIX}${groupId}`;
+}
+export function groupIdFromChatId(chatId: string): string | null {
+  return chatId.startsWith(CREW_CHAT_PREFIX) ? chatId.slice(CREW_CHAT_PREFIX.length) : null;
+}
+
 export const GroupMember = z.object({
   groupId: z.string(),
   userId: z.string(),
   joinedAt: IsoDateTime,
+  /** Null until the member confirmed membership with their own bubble. */
+  confirmedAt: IsoDateTime.nullable().default(null),
 });
 export type GroupMember = z.infer<typeof GroupMember>;
 
@@ -215,7 +241,9 @@ export const Plan = z.object({
   /** Chosen start time once known. */
   startAt: IsoDateTime.nullable().default(null),
   lockedAt: IsoDateTime.nullable().default(null),
+  /** Per-member budget for this plan (PLAN_MESSAGE_BUDGET unless overridden). */
   messageBudget: z.number().int().nonnegative(),
+  /** Running total across members, for logs and the speed report. */
   messagesUsed: z.number().int().nonnegative().default(0),
   demoMode: z.boolean().default(false),
   createdAt: IsoDateTime,
@@ -233,6 +261,8 @@ export const PlanMember = z.object({
   status: PlanMemberStatus,
   /** Set when the bubble answers for an absent member within confirmed hard limits. */
   representedByBubble: z.boolean().default(false),
+  /** Messages sent to this member for this plan. The budget (PLAN_MESSAGE_BUDGET) is per member. */
+  messagesUsed: z.number().int().nonnegative().default(0),
   joinedAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
