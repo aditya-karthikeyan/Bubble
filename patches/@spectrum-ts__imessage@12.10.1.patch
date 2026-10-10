@@ -1,0 +1,13 @@
+diff --git a/dist/index.js b/dist/index.js
+index 683efe97311a37180fc536889909d585f0603513..1434cfd9ea659c42becfb3c1407688e489776a3e 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -2183,7 +2183,7 @@ const isVotedPollEvent = (event) => event.delta.type === "voted";
+ const isUnvotedPollEvent = (event) => event.delta.type === "unvoted";
+ const toCachedPoll = (input) => {
+ 	const poll = asPoll({
+-		title: input.title,
++		title: input.title || "Poll",
+ 		options: input.options.map((optionInfo) => ({ title: optionInfo.text }))
+ 	});
+ 	const optionsByIdentifier = /* @__PURE__ */ new Map();

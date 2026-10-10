@@ -12,7 +12,8 @@
     "phase1": "tsx --env-file-if-exists=../../.env scripts/phase1.ts",
     "venues:import": "tsx scripts/import-venues.ts",
     "db:generate": "drizzle-kit generate",
-    "db:seed": "tsx --env-file-if-exists=../../.env -e \"import('./src/config.js').then(async ({loadConfig})=>{const {createRuntime}=await import('./src/runtime.js');const rt=createRuntime(loadConfig(),{seed:true});console.log(rt.seed);rt.close();})\""
+    "db:seed": "tsx --env-file-if-exists=../../.env -e \"import('./src/config.js').then(async ({loadConfig})=>{const {createRuntime}=await import('./src/runtime.js');const rt=createRuntime(loadConfig(),{seed:true});console.log(rt.seed);rt.close();})\"",
+    "p2:phase1": "tsx --env-file-if-exists=../../.env scripts/p2-phase1.ts"
   },
   "dependencies": {
     "@bubbleworks/shared": "workspace:*",
@@ -23,6 +24,7 @@
     "pino": "^10.4.0",
     "pino-pretty": "^13.2.0",
     "socket.io": "^4.8.4",
+    "spectrum-ts": "12.10.1",
     "tsx": "^4.23.15",
     "zod": "^4.6.5"
   },
