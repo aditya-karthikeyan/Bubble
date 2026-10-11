@@ -63,6 +63,7 @@ export function seedDatabase(db: Db, options: SeedOptions = {}): SeedResult {
         chatId: group.chatId,
         status: group.status,
         createdByUserId: group.createdByUserId,
+        joinCode: group.joinCode ?? null,
         centerLat: group.center?.lat ?? null,
         centerLng: group.center?.lng ?? null,
         timezone: group.timezone,
@@ -130,6 +131,7 @@ export function groupById(db: Db, groupId: string): Group | null {
     chatId: row.chatId,
     status: row.status,
     createdByUserId: row.createdByUserId,
+    joinCode: row.joinCode ?? null,
     center:
       row.centerLat !== null && row.centerLng !== null
         ? { lat: row.centerLat, lng: row.centerLng }

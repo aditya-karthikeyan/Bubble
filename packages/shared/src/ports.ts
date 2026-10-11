@@ -212,6 +212,7 @@ export interface CrewDirectory {
   crewsOf(userId: string): Promise<Group[]>;
   crewById(groupId: string): Promise<Group | null>;
   crewByChatId(chatId: string): Promise<Group | null>;
+  crewByJoinCode(code: string): Promise<Group | null>;
   membersOf(groupId: string): Promise<User[]>;
   /** New crew in status pending; the creator counts as confirmed. */
   createCrew(input: { name: string; createdByUserId: string; memberIds: string[] }): Promise<Group>;

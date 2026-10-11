@@ -101,7 +101,7 @@ describe('DbBubbleService', () => {
       expect(done).toMatch(/^All set/);
       expect(done).toContain('https://example.test/oauth/google/start?u=');
       expect(done).toContain('send me your location right here (+ → Location → Share)');
-      expect(done).toMatch(/my crew is/);
+      expect(done).toMatch(/new crew/);
 
       const profile = await bubbles.getProfile(zoe.id);
       const byType = Object.fromEntries(profile.facts.map((f) => [f.type, f]));
@@ -195,6 +195,39 @@ describe('DbBubbleService', () => {
         expect(lastTo(u.id)).toMatch(/^Thursday Eats is set: (Ana|Bo|Cy).*Anyone can text/);
       }
       expect(changes.map((c) => c.change)).toEqual(['joined', 'joined']);
+    });
+
+    it('"new crew" makes a crew of one with a join code, and "join <code>" lands a friend in it', async () => {
+      const ana = await newUser('Ana', '+19195550141');
+      const bo = await newUser('Bo', '+19195550142');
+      for (const u of [ana, bo]) await onboard(u);
+
+      await dm(ana, 'new crew the boys');
+      const made = lastTo(ana.id);
+      expect(made).toMatch(/^the boys is set 🫧/);
+      const crew = (await rt.crews.crewsOf(ana.id)).find((g) => g.name === 'the boys')!;
+      expect(crew.status).toBe('active');
+      expect(crew.joinCode).toMatch(/^the-boys-\d{4}$/);
+      expect(made).toContain(crew.joinCode!);
+
+      await dm(bo, `join ${crew.joinCode}`);
+      expect(lastTo(bo.id)).toMatch(/^You're in the boys 🫧/);
+      expect(lastTo(ana.id)).toBe('Bo joined the boys.');
+      expect((await rt.crews.membersOf(crew.id)).map((u) => u.displayName).sort()).toEqual([
+        'Ana',
+        'Bo',
+      ]);
+      expect((await rt.crews.crewById(crew.id))?.status).toBe('active');
+
+      await dm(bo, 'join nope-0000');
+      expect(lastTo(bo.id)).toMatch(/^I don't know that code/);
+    });
+
+    it('a plan-shaped text from someone with no crew points them at "new crew"', async () => {
+      const dee = await newUser('Dee', '+19195550143');
+      await onboard(dee);
+      await dm(dee, 'dinner tonight?');
+      expect(lastTo(dee.id)).toMatch(/^You're not in a crew yet/);
     });
 
     it('holds an invite until the invitee finishes onboarding', async () => {

@@ -9,6 +9,7 @@ interface SignupResponse {
   ok: boolean;
   bubbleNumber?: string;
   smsLink?: string | null;
+  crewName?: string | null;
   error?: string;
 }
 
@@ -16,9 +17,9 @@ type State =
   | { kind: 'idle' }
   | { kind: 'sending' }
   | { kind: 'error'; message: string }
-  | { kind: 'done'; bubbleNumber: string | null; smsLink: string | null };
+  | { kind: 'done'; bubbleNumber: string | null; smsLink: string | null; crewName: string | null };
 
-export function SignupForm() {
+export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName?: string } = {}) {
   const [state, setState] = useState<State>({ kind: 'idle' });
 
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -39,7 +40,7 @@ export function SignupForm() {
       const res = await fetch(`${SERVER_URL}/api/signup`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name, email, phone }),
+        body: JSON.stringify({ name, email, phone, ...(crewCode ? { crewCode } : {}) }),
       });
       const body = (await res.json()) as SignupResponse;
       if (!res.ok || !body.ok) {
@@ -51,6 +52,7 @@ export function SignupForm() {
         kind: 'done',
         bubbleNumber: number,
         smsLink: body.smsLink ?? (number ? `sms:${number}` : null),
+        crewName: body.crewName ?? crewName ?? null,
       });
     } catch {
       setState({
@@ -63,7 +65,9 @@ export function SignupForm() {
   if (state.kind === 'done') {
     return (
       <div className="glass" aria-live="polite">
-        <h2 style={{ margin: '0 0 4px', fontSize: 22 }}>Your bubble is ready</h2>
+        <h2 style={{ margin: '0 0 4px', fontSize: 22 }}>
+          {state.crewName ? `You're in ${state.crewName}` : 'Your bubble is ready'}
+        </h2>
         {state.bubbleNumber ? (
           <>
             <p className="lede">

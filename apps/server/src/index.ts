@@ -193,10 +193,22 @@ async function main(): Promise<void> {
     app.fastify.log.info('dev routes enabled at /api/dev/*');
   }
 
+  /** The join page shows the crew's name before signup. Only the name leaves the server. */
+  app.fastify.get<{ Params: { code: string } }>('/api/crews/:code', async (request, reply) => {
+    const crew = await runtime.crews.crewByJoinCode(request.params.code);
+    if (!crew) return reply.code(404).send({ ok: false, error: 'no such crew' });
+    return { ok: true, name: crew.name };
+  });
+
   app.fastify.post('/api/signup', async (request, reply) => {
     try {
       const result = await messaging.signup(request.body);
-      return { ok: true, bubbleNumber: result.bubbleNumber, smsLink: result.smsLink };
+      return {
+        ok: true,
+        bubbleNumber: result.bubbleNumber,
+        smsLink: result.smsLink,
+        crewName: result.crewName,
+      };
     } catch (err) {
       request.log.warn({ err: String(err) }, 'signup rejected');
       return reply.code(400).send({ ok: false, error: 'invalid signup' });

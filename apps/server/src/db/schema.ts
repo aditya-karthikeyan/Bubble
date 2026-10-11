@@ -67,6 +67,7 @@ export const groups = sqliteTable('groups', {
   chatId: text('chat_id').notNull().unique(),
   status: text('status').$type<GroupStatus>().notNull().default('pending'),
   createdByUserId: text('created_by_user_id'),
+  joinCode: text('join_code').unique(),
   centerLat: real('center_lat'),
   centerLng: real('center_lng'),
   timezone: text('timezone').notNull().default('America/New_York'),
