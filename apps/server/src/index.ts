@@ -126,7 +126,9 @@ async function main(): Promise<void> {
     app.fastify.log.info('elevenlabs webhook at /webhooks/elevenlabs');
   caller.start();
   app.fastify.log.info({ mode: caller.mode }, 'caller ready');
-  const intake = messaging.attachEngine(engine);
+  const intake = messaging.attachEngine(engine, {
+    isOnboarded: (userId) => bubbles.service.isOnboarded(userId),
+  });
   engine.setIntake(intake);
 
   // Private DMs: the bubble answers first; what it does not handle may be a plan command.
