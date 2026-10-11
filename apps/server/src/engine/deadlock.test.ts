@@ -102,6 +102,20 @@ describe('analyzeDeadlock', () => {
   });
 });
 
+describe('distance asks need a real location', () => {
+  it('never proposes walking further for a member whose location is unknown', () => {
+    const far = { ...ctx, groupCenter: { lat: 35.93, lng: -79.02 } }; // everything is a long walk from here
+    const members = [member('user_dev'), member('user_ava')];
+    const a = analyzeDeadlock(venues, members, far);
+    expect(a.concessions.some((c) => c.kind === 'distance')).toBe(false);
+    const located = members.map((m) => ({ ...m, location: { lat: 35.93, lng: -79.02 } }));
+    const b = analyzeDeadlock(venues, located, far);
+    expect(b.concessions.some((c) => c.kind === 'distance') || b.concessions.length === 0).toBe(
+      true,
+    );
+  });
+});
+
 describe('ask wording', () => {
   const input = {
     kind: 'budget' as const,

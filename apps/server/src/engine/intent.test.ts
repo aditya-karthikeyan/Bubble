@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCommand, parseIntent, parseTime } from './intent.js';
+import { parseCommand, parseIntent, parseStyle, parseTime } from './intent.js';
 
 const opts = { now: new Date('2026-10-10T20:00:00Z'), timezone: 'America/New_York' };
 
@@ -44,5 +44,15 @@ describe('parseCommand', () => {
     expect(parseCommand('veto')).toBe('veto');
     expect(parseCommand('why there?')).toBe('why');
     expect(parseCommand("i'm vegetarian btw")).toBeNull();
+  });
+});
+
+describe('parseStyle', () => {
+  it('reads takeout and sit-down words', () => {
+    expect(parseStyle('quick takeout tonight?')).toBe('fast_food');
+    expect(parseStyle('fast food run?')).toBe('fast_food');
+    expect(parseStyle('sit-down dinner tonight?')).toBe('sit_down');
+    expect(parseStyle('dinner tonight?')).toBeNull();
+    expect(parseIntent('takeout tonight?', opts).style).toBe('fast_food');
   });
 });

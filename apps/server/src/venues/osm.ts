@@ -166,10 +166,16 @@ export function elementToVenue(el: OverpassElement): { venue: Venue } | { reject
   }
   const cuisine = normalizeCuisine(t['cuisine'], t['amenity']);
   const priceLevel = priceLevelFor(t, cuisine);
+  const cuisineTags = (t['cuisine'] ?? '')
+    .split(';')
+    .map((c) => c.trim().toLowerCase())
+    .filter(Boolean);
   const venue = Venue.parse({
     id,
     name,
     cuisine,
+    cuisineTags,
+    style: t['amenity'] === 'fast_food' || t['amenity'] === 'cafe' ? 'fast_food' : 'sit_down',
     dietTags: dietTagsFor(t, cuisine),
     accessibilityTags: accessibilityTagsFor(t),
     priceLevel,

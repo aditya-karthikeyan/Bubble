@@ -24,21 +24,33 @@ export const ALLERGEN_RISK_CUISINES: Record<string, readonly string[]> = {
   sesame: ['middle_eastern', 'mediterranean', 'chinese', 'asian', 'korean'],
 };
 
+/**
+ * Meat-centric kitchens where "no pork" / "no beef" is not a safe bet even with a veg option.
+ * Matched against the raw OSM cuisine tags and the folded cuisine key.
+ */
+const PORK_HEAVY = new Set(['hot_dog', 'bbq', 'barbecue', 'german', 'pork', 'ribs', 'sausage']);
+const BEEF_HEAVY = new Set([
+  'burger',
+  'hot_dog',
+  'steak_house',
+  'steak',
+  'bbq',
+  'barbecue',
+  'kbbq',
+  'korean_bbq',
+]);
+const MEAT_EXCLUSIONS: Record<string, ReadonlySet<string>> = {
+  no_pork: PORK_HEAVY,
+  no_beef: BEEF_HEAVY,
+  no_red_meat: new Set([...PORK_HEAVY, ...BEEF_HEAVY, 'lamb']),
+};
+
 const DIET_SATISFIED_BY: Record<string, readonly string[]> = {
   vegetarian: ['vegetarian', 'vegan'],
   vegan: ['vegan'],
   pescatarian: ['vegetarian', 'vegan', 'pescatarian', 'seafood'],
   gluten_free: ['gluten_free'],
   dairy_free: ['dairy_free', 'vegan'],
-};
-
-/**
- * Cuisines built around the meat. The OSM import folds hot_dog / burger / barbecue /
- * steak_house into "american", so those keys only match once the import keeps them (P1).
- */
-export const MEAT_CENTERED: Record<string, readonly string[]> = {
-  no_pork: ['hot_dog', 'barbecue', 'bbq'],
-  no_beef: ['hot_dog', 'burger', 'barbecue', 'bbq', 'steak_house', 'steakhouse'],
 };
 
 const RELIGIOUS_SATISFIED_BY: Record<string, readonly string[]> = {
@@ -59,12 +71,12 @@ export function checkHardFact(venue: Venue, fact: Fact): Incompatibility | null 
   const tags = new Set(venue.dietTags);
   switch (fact.type) {
     case 'diet': {
-      // no_pork / no_beef (P3 facts) rule out meat-centered cuisines rather than needing a tag;
-      // without this an unknown value would demand a "no_pork" tag no venue has.
-      const meat = MEAT_CENTERED[fact.value];
-      if (meat) {
-        return meat.includes(venue.cuisine)
-          ? { factType: fact.type, value: fact.value, reason: 'meat_centered' }
+      const excluded = MEAT_EXCLUSIONS[fact.value];
+      if (excluded) {
+        const kitchen = [venue.cuisine, ...(venue.cuisineTags ?? [])];
+        const risky = kitchen.some((c) => excluded.has(c));
+        return risky
+          ? { factType: fact.type, value: fact.value, reason: 'meat_heavy_kitchen' }
           : null;
       }
       const ok = (DIET_SATISFIED_BY[fact.value] ?? [fact.value]).some((t) => tags.has(t));

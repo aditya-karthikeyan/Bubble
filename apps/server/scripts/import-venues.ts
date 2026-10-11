@@ -24,6 +24,11 @@ const OUT = resolve(import.meta.dirname, '../../../data/venues.json');
  * Venues OSM still lists that are gone or moved. Checked 2026-10-11 against local news; keep the
  * reason so the next import can re-check. The caller must never ring a dead number.
  */
+/** OSM says "american" where the kitchen is really one thing. Extra raw cuisine tags by venue id. */
+const TAG_OVERRIDES: Record<string, string[]> = {
+  venue_osm_w324952854: ['hot_dog'], // Sup Dogs
+};
+
 const REMOVED: Record<string, string> = {
   venue_osm_n3316380639: "[B]SKI'S The Wrap Redefined closed January 2019 (Daily Tar Heel)",
   venue_osm_w44343001: "Mama Dip's Kitchen closed permanently 22 July 2025 (Chapelboro, ABC11)",
@@ -68,11 +73,16 @@ async function main(): Promise<void> {
     : await fetchOverpass();
 
   const { venues: converted, rejections } = convertOverpass(raw);
-  const venues = converted.filter((v) => {
-    const why = REMOVED[v.id];
-    if (why) console.log(`  removed: ${v.name}: ${why}`);
-    return !why;
-  });
+  const venues = converted
+    .filter((v) => {
+      const why = REMOVED[v.id];
+      if (why) console.log(`  removed: ${v.name}: ${why}`);
+      return !why;
+    })
+    .map((v) => {
+      const extra = TAG_OVERRIDES[v.id];
+      return extra ? { ...v, cuisineTags: [...new Set([...(v.cuisineTags ?? []), ...extra])] } : v;
+    });
   const all = [demoVenue(), ...venues];
   writeFileSync(OUT, `${JSON.stringify(all, null, 2)}\n`);
 

@@ -94,7 +94,9 @@ export function analyzeDeadlock(
         }
       }
     }
-    if (m.location || ctx.groupCenter) {
+    // Distance is only negotiable when we know where the person actually is; a group-center
+    // guess must never produce a "would you walk further?" ask.
+    if (m.location) {
       for (const [i, step] of DISTANCE_STEPS.entries()) {
         const { feasible } = filterCandidates(
           venues,

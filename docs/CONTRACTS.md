@@ -209,6 +209,18 @@ cancels the other ask with a thank-you, and reruns the solver with the accepted 
 or the `ask_timeout` fall back to a time shift (30/60 min either way) or a takeout close.
 Allergy, religious diet, accessibility, and diet are never relaxed.
 
+Question bundle (P1 decides, P2 renders): `BundleRequest` carries `stylePoll` (keys `sit_down`,
+`fast_food`; asked only when the feasible venues span both and the message named no style), then
+`cuisinePoll`, then the headcount and page link. P2 sends polls in order; the engine calls
+`closePoll` on each as soon as `isPollDecided`, and deliberation waits for both. The decided
+style filters the solver (`Venue.style`, from OSM `fast_food`/`cafe` vs `restaurant`).
+
+Diet values the solver understands (hard facts): vegetarian, vegan, pescatarian, gluten_free,
+dairy_free, and the meat exclusions `no_pork`, `no_beef`, `no_red_meat`, which fail hot dog,
+burger, barbecue, steakhouse and similar kitchens by their raw OSM `cuisineTags` even when a
+vegetarian option exists. Deadlock asks never propose a distance stretch for a member whose
+live location is unknown.
+
 Edge cases (Phase 4, all in the engine): a headcount change in DELIBERATING / DEADLOCK / LOCKED
 reruns the solver; in BOOKED / DAY_OF it calls `CallerPort.modify` and re-runs the splitter
 (cancel + close when fewer than two remain); a late joiner the bubble has not met triggers

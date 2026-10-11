@@ -111,7 +111,7 @@ export const Fact = z.object({
   type: FactType,
   /**
    * Normalized value. Conventions:
-   * diet: vegetarian | vegan | pescatarian | gluten_free | dairy_free | no_pork | no_beef
+   * diet: vegetarian | vegan | pescatarian | gluten_free | dairy_free | no_pork | no_beef | no_red_meat
    * allergy: peanut | tree_nut | shellfish | dairy | gluten | soy | egg | sesame
    * religious_diet: halal | kosher | hindu_veg | jain
    * accessibility: wheelchair | step_free | quiet
@@ -163,11 +163,18 @@ export type WeeklyHours = z.infer<typeof WeeklyHours>;
 export const PriceLevel = z.number().int().min(1).max(4);
 export type PriceLevel = z.infer<typeof PriceLevel>;
 
+export const VenueStyle = z.enum(['sit_down', 'fast_food']);
+export type VenueStyle = z.infer<typeof VenueStyle>;
+
 export const Venue = z.object({
   id: z.string(),
   name: z.string(),
   /** Lowercase cuisine key, e.g. "thai", "pizza", "american". */
   cuisine: z.string(),
+  /** Raw OSM cuisine values before folding, e.g. ["hot_dog"], ["burger", "breakfast"]. */
+  cuisineTags: z.array(z.string()).optional(),
+  /** Sit-down restaurant, or counter service / takeout (OSM fast_food and cafe). Absent = sit-down. */
+  style: VenueStyle.optional(),
   /** Diet keys this venue can serve: vegetarian, vegan, halal, gluten_free, ... */
   dietTags: z.array(z.string()),
   /** Accessibility keys this venue satisfies: wheelchair, step_free. */
@@ -218,6 +225,8 @@ export const PlanIntent = z.object({
   startMinutes: z.number().int().min(0).max(1440).nullable().default(null),
   /** Cuisine the message named, when it did. */
   cuisine: z.string().nullable().default(null),
+  /** Style the message named ("takeout", "sit down"), when it did. Optional for older callers. */
+  style: VenueStyle.nullish(),
   rawText: z.string(),
 });
 export type PlanIntent = z.infer<typeof PlanIntent>;
@@ -276,7 +285,7 @@ export type BubblePageStatus = z.infer<typeof BubblePageStatus>;
 // Votes, asks, bookings, ledger
 // ---------------------------------------------------------------------------
 
-export const PollKind = z.enum(['cuisine', 'headcount', 'time', 'venue']);
+export const PollKind = z.enum(['cuisine', 'headcount', 'time', 'venue', 'style']);
 export type PollKind = z.infer<typeof PollKind>;
 
 export const Vote = z.object({
