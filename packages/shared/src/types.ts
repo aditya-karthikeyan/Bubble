@@ -303,7 +303,15 @@ export const Vote = z.object({
 });
 export type Vote = z.infer<typeof Vote>;
 
-export const AskKind = z.enum(['budget', 'distance', 'time', 'deposit', 'seat', 'represent']);
+export const AskKind = z.enum([
+  'budget',
+  'distance',
+  'time',
+  'deposit',
+  'seat',
+  'represent',
+  'cuisine',
+]);
 export type AskKind = z.infer<typeof AskKind>;
 
 export const AskStatus = z.enum(['pending', 'accepted', 'declined', 'expired', 'cancelled']);

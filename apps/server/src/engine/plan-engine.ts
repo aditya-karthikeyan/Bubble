@@ -45,12 +45,20 @@ import { asks, bookings, events, ledger, votes } from '../db/schema.js';
 import { groupById } from '../db/seed.js';
 import { silentLogger, type Logger } from '../events/bus.js';
 import type { Runtime } from '../runtime.js';
+import { filterCandidates } from '../solver/filter.js';
 import { solve } from '../solver/rounds.js';
 import type { SolverContext, SolverMember } from '../solver/types.js';
 import { dayOfWeek } from '../venues/hours.js';
 import { analyzeDeadlock, pickAsks } from './deadlock.js';
 import { parseIntent } from './intent.js';
-import { noFitText, TemplateAskWriter, thankYouText, type AskWriter } from './wording.js';
+import {
+  cuisineSwitchAsk,
+  cuisineSwitchNotice,
+  noFitText,
+  TemplateAskWriter,
+  thankYouText,
+  type AskWriter,
+} from './wording.js';
 import {
   cuisineLabel,
   decideCuisineQuestion,
@@ -121,6 +129,8 @@ export class BubbleworksEngine implements PlanEngine {
   private readonly polls = new Map<string, PlanPolls>();
   private readonly closedPolls = new Set<string>();
   private readonly vetoed = new Map<string, Set<string>>();
+  /** Plans whose unreachable cuisine was dropped without anyone to ask. */
+  private readonly cuisineDropped = new Set<string>();
   private readonly t0 = new Map<string, number>();
 
   private planNow(): Date {
@@ -405,6 +415,10 @@ export class BubbleworksEngine implements PlanEngine {
       await this.answerDeposit(plan, ask.id, input.answer, at);
       return;
     }
+    if (ask.kind === 'cuisine') {
+      await this.answerCuisineSwitch(plan, ask.id, ask.userId, input.answer, at);
+      return;
+    }
     if (input.answer === 'no') {
       this.rt.db
         .update(asks)
@@ -673,6 +687,10 @@ export class BubbleworksEngine implements PlanEngine {
         return;
       }
       case 'failed': {
+        // One venue we could not call (bad number, refused, provider error) is not the end of
+        // the plan: drop it and let the solver try the next place. Only the deadlock path can
+        // close a plan for lack of venues.
+        if (plan.state !== 'BOOKING') return;
         this.rt.db
           .update(bookings)
           .set({ status: 'failed', callId: result.callId, notes: 'failed', updatedAt: at })
@@ -682,9 +700,11 @@ export class BubbleworksEngine implements PlanEngine {
           type: 'doer_status',
           doer: 'caller',
           state: 'failed',
-          detail: 'Call failed',
+          detail: 'Could not reach them, trying the next place',
         });
-        await this.fail(plan.id, 'call failed');
+        this.addVetoed(plan.id, booking.venueId);
+        await this.rt.plans.transition(plan.id, 'DELIBERATING', { reason: 'call failed' });
+        await this.deliberate(plan.id);
         return;
       }
       case 'modified': {
@@ -1104,6 +1124,7 @@ export class BubbleworksEngine implements PlanEngine {
       ? this.minutesOf(plan.startAt)
       : (plan.intent.startMinutes ?? SOLVER.default_start_min);
     const ctx = this.ctx(plan, startMinutes);
+    if (await this.askCuisineSwitch(plan, members, ctx)) return;
     const result = solve({
       venues: this.rt.venues(),
       members,
@@ -1290,15 +1311,6 @@ export class BubbleworksEngine implements PlanEngine {
     });
   }
 
-  private async fail(planId: string, reason: string): Promise<void> {
-    this.rt.timers.cancel(planId);
-    const r = await this.rt.plans.tryTransition(planId, 'FAILED', { reason });
-    if (!r.ok) return;
-    await this.publish(planId, { type: 'plan_closed', reason: 'failed' });
-    this.deps.intake?.closePlan(planId);
-    await this.groupText(r.plan, 'failed', 'I could not get a table tonight. Sorry.');
-  }
-
   /** The organizer's answer to a deposit request. Yes books it under their name; no moves on. */
   private async answerDeposit(
     plan: Plan,
@@ -1480,8 +1492,14 @@ export class BubbleworksEngine implements PlanEngine {
   private async afterAsksResolved(planId: string): Promise<void> {
     const plan = this.rt.plans.get(planId);
     if (!plan || plan.state !== 'DEADLOCK') return;
-    const all = this.rt.db.select().from(asks).where(eq(asks.planId, planId)).all();
-    if (all.some((a) => a.status === 'pending')) return;
+    const every = this.rt.db.select().from(asks).where(eq(asks.planId, planId)).all();
+    if (every.some((a) => a.status === 'pending')) return;
+    const all = every.filter((a) => a.kind !== 'cuisine');
+    if (all.length === 0 && every.length > 0) {
+      // Only the cuisine question was out: its answers decide, then the solver runs.
+      await this.deliberate(planId);
+      return;
+    }
     if (all.some((a) => a.status === 'accepted')) return;
     this.rt.timers.cancel(planId, 'ask_timeout');
     const participants = this.rt.plans
@@ -1592,7 +1610,152 @@ export class BubbleworksEngine implements PlanEngine {
       groupCenter: this.groupCenter(plan.groupId),
       meal: plan.intent.meal,
       style: this.decidedStyle(plan),
+      cuisine: this.decidedCuisine(plan),
     };
+  }
+
+  /** Cuisine from the message, else the cuisine poll's leader, else no constraint. */
+  private decidedCuisine(plan: Plan): string | null {
+    if (this.cuisineSwitch(plan.id) === 'switch') return null;
+    if (plan.intent.cuisine) return plan.intent.cuisine;
+    const spec = this.pollSpec(plan.id)?.cuisine;
+    return spec ? this.pollLeader(plan.id, spec) : null;
+  }
+
+  /**
+   * Where the "nothing <cuisine> in range, OK to switch?" question stands. Silence counts as yes;
+   * the cuisine stays only when more of its voters said no than yes.
+   */
+  private cuisineSwitch(planId: string): 'none' | 'pending' | 'switch' | 'keep' {
+    if (this.cuisineDropped.has(planId)) return 'switch';
+    const rows = this.rt.db
+      .select()
+      .from(asks)
+      .where(and(eq(asks.planId, planId), eq(asks.kind, 'cuisine')))
+      .all();
+    if (rows.length === 0) return 'none';
+    if (rows.some((r) => r.status === 'pending')) return 'pending';
+    const no = rows.filter((r) => r.status === 'declined').length;
+    return no > rows.length - no ? 'keep' : 'switch';
+  }
+
+  /**
+   * The decided cuisine has nothing in range: tell the table, ask the people who chose it whether
+   * the best other pick is OK, and wait. Returns true when the plan is now waiting on them.
+   */
+  private async askCuisineSwitch(
+    plan: Plan,
+    members: SolverMember[],
+    ctx: SolverContext,
+  ): Promise<boolean> {
+    const cuisine = ctx.cuisine;
+    if (!cuisine || this.cuisineSwitch(plan.id) !== 'none') return false;
+    const vetoed = this.vetoed.get(plan.id) ?? new Set<string>();
+    const venues = this.rt.venues().filter((v) => !vetoed.has(v.id));
+    if (filterCandidates(venues, members, ctx).feasible.length > 0) return false;
+    const fallback = solve({ venues, members, ctx: { ...ctx, cuisine: null } }).winner;
+    // Nothing fits even without the cuisine: the deadlock breaker takes it from here.
+    if (!fallback) return false;
+
+    const label = cuisineLabel(cuisine);
+    const spec = this.pollSpec(plan.id)?.cuisine;
+    const voters = new Set<string>(
+      spec
+        ? this.rt.db
+            .select()
+            .from(votes)
+            .where(and(eq(votes.pollId, spec.pollId), eq(votes.choice, cuisine)))
+            .all()
+            .map((v) => v.userId)
+        : [plan.createdByUserId],
+    );
+    const askable = members.filter((m) => voters.has(m.userId) && !m.represented);
+    this.log.info(
+      { planId: plan.id, cuisine, fallback: fallback.id, asked: askable.length },
+      'voted cuisine out of range',
+    );
+    if (askable.length === 0) {
+      this.cuisineDropped.add(plan.id);
+      return false;
+    }
+
+    await this.rt.plans.transition(plan.id, 'DEADLOCK', { reason: `no ${cuisine} in range` });
+    const at = this.now().toISOString();
+    const expiresAt = new Date(
+      this.now().getTime() + this.rt.timers.deadlines.private_ask_ms,
+    ).toISOString();
+    const text = cuisineSwitchAsk(label, fallback.name);
+    for (const m of askable) {
+      const askId = newId('ask');
+      const key = idempotencyKey(plan.id, 'ask', askId);
+      this.rt.db
+        .insert(asks)
+        .values({
+          id: askId,
+          planId: plan.id,
+          userId: m.userId,
+          kind: 'cuisine',
+          concession: { factType: 'other', from: cuisine, to: fallback.cuisine, cost: 1 },
+          text,
+          status: 'pending',
+          idempotencyKey: key,
+          sentAt: at,
+          expiresAt,
+        })
+        .run();
+      await this.publish(plan.id, { type: 'private_ask_sent', askId });
+      await this.deps.messaging.sendPrivateText({ userId: m.userId, text, idempotencyKey: key });
+    }
+    const notice = cuisineSwitchNotice(label, fallback.name);
+    for (const m of members) {
+      if (askable.some((a) => a.userId === m.userId)) continue;
+      await this.deps.messaging.sendPrivateText({
+        userId: m.userId,
+        text: notice,
+        idempotencyKey: idempotencyKey(plan.id, 'cuisine_notice', m.userId),
+      });
+    }
+    this.rt.timers.schedule({ planId: plan.id, kind: 'ask_timeout', replace: true });
+    return true;
+  }
+
+  private async answerCuisineSwitch(
+    plan: Plan,
+    askId: string,
+    userId: string,
+    answer: 'yes' | 'no',
+    at: string,
+  ): Promise<void> {
+    const outcome = answer === 'yes' ? 'accepted' : 'declined';
+    this.rt.db
+      .update(asks)
+      .set({ status: outcome, resolvedAt: at })
+      .where(eq(asks.id, askId))
+      .run();
+    await this.publish(plan.id, { type: 'private_ask_resolved', askId, outcome });
+    if (answer === 'yes') {
+      this.rt.db
+        .insert(ledger)
+        .values({
+          id: newId('ledger'),
+          groupId: plan.groupId,
+          planId: plan.id,
+          userId,
+          kind: 'compromised',
+          amount: 1,
+          note: 'cuisine switch',
+          at,
+        })
+        .run();
+    }
+    await this.deps.messaging.sendPrivateText({
+      userId,
+      text: answer === 'yes' ? 'Thanks, switching.' : 'Got it.',
+      idempotencyKey: idempotencyKey(plan.id, 'cuisine_answer', askId),
+    });
+    if (this.cuisineSwitch(plan.id) === 'pending') return;
+    this.rt.timers.cancel(plan.id, 'ask_timeout');
+    await this.deliberate(plan.id);
   }
 
   /** Style from the message, else the style poll's leader, else no constraint. */
@@ -1600,13 +1763,17 @@ export class BubbleworksEngine implements PlanEngine {
     if (plan.intent.style) return plan.intent.style;
     const spec = this.pollSpec(plan.id)?.style;
     if (!spec) return null;
-    const { decision, counts } = this.tally(plan.id, spec);
+    const leader = this.pollLeader(plan.id, spec);
+    return leader === 'sit_down' || leader === 'fast_food' ? leader : null;
+  }
+
+  /** The poll's decided leader, else a plurality with at least one vote and no tie. */
+  private pollLeader(planId: string, spec: PollSpec): string | null {
+    const { decision, counts } = this.tally(planId, spec);
     const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    // Plurality with at least one vote and no tie; otherwise no style constraint.
     const top = ranked[0];
     const plurality = top && top[1] > 0 && (ranked[1]?.[1] ?? 0) < top[1] ? top[0] : null;
-    const leader = decision.leader ?? plurality;
-    return leader === 'sit_down' || leader === 'fast_food' ? leader : null;
+    return decision.leader ?? plurality;
   }
 
   private groupCenter(groupId: string) {

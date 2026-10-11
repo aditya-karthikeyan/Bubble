@@ -100,3 +100,13 @@ export class TemplateAskWriter implements AskWriter {
     return templateAsk(input);
   }
 }
+
+/** To a member who voted for a cuisine nothing that fits tonight serves. Poll labels read as names. */
+export function cuisineSwitchAsk(cuisine: string, venueName: string): string {
+  return `${cuisine} won the vote, but no spot like that fits tonight. OK to switch to ${venueName}? Reply yes or no.`;
+}
+
+/** To everyone else while the voters are asked. */
+export function cuisineSwitchNotice(cuisine: string, venueName: string): string {
+  return `${cuisine} won the vote, but no spot like that fits tonight. Checking with its voters about ${venueName}.`;
+}

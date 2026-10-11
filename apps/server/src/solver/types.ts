@@ -25,9 +25,12 @@ export interface SolverContext {
   meal?: MealKind;
   /** Decided style (style poll or intent words); venues of the other style are out. */
   style?: VenueStyle | null;
+  /** Decided cuisine (poll winner or named in the message); other cuisines are out. */
+  cuisine?: string | null;
 }
 
-export type InfeasibleReason = 'closed' | 'meal' | 'style' | 'diet' | 'budget' | 'distance';
+export type InfeasibleReason =
+  'closed' | 'meal' | 'style' | 'cuisine' | 'diet' | 'budget' | 'distance';
 
 export interface Infeasibility {
   venueId: string;

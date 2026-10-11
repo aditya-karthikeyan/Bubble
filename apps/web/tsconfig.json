@@ -6,8 +6,12 @@
     "jsx": "preserve",
     "allowJs": false,
     "incremental": true,
-    "plugins": [{ "name": "next" }]
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
   },
-  "include": ["app", "next.config.ts"],
+  "include": ["app", "src", "next.config.ts"],
   "exclude": ["node_modules", ".next"]
 }
