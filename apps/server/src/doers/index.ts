@@ -4,9 +4,10 @@
  *
  * - Inviter DMs each attending member a short .ics link (/ics/<signed>.ics).
  * - Splitter estimates per-person cost from the price level, picks the payer (attending member
- *   with a Venmo handle and the fewest "paid" ledger rows in this crew), DMs everyone else a
- *   Venmo pay link, and records the payer in the ledger. Counter-service venues (price level 1)
- *   get no split, and anyone who said they don't split is left off the bill.
+ *   with a payment method and the fewest "paid" ledger rows in this crew), DMs everyone else
+ *   the payer's methods (Venmo, Cash App, PayPal links with the amount; Zelle as text), and
+ *   records the payer in the ledger. Fast-food venues (style fast_food or price level 1) get no
+ *   split, and anyone who said they don't split is left off the bill.
  * - Watcher wakes 45 minutes before the booking and every 60 s after: reads Find My, estimates
  *   ETAs, updates the live card, and reports anyone 15+ minutes late (once per member).
  * - Representation: when a plan locks, each represented member gets a private summary with a
@@ -29,7 +30,7 @@ import {
   type PlanEvent,
   type User,
 } from '@bubbleworks/shared';
-import { NO_SPLIT } from '../bubbles/facts.js';
+import { payLine } from '../bubbles/payments.js';
 import type { DbBubbleService } from '../bubbles/service.js';
 import type { Db } from '../db/client.js';
 import {
@@ -176,9 +177,9 @@ export class Doers implements DoerPorts {
   // -- Splitter --------------------------------------------------------------
 
   private async split(s: BookingSummary & { idempotencyKey: string }): Promise<DoerResult> {
-    // Counter service (fast food, cafes: price level 1 from OSM) means everyone pays at the
-    // register, so there is nothing to split and nobody gets a message.
-    if (s.venue.priceLevel <= COUNTER_SERVICE_MAX_PRICE_LEVEL) {
+    // Counter service (fast food, cafes: style fast_food or price level 1 from OSM) means
+    // everyone pays at the register, so there is nothing to split and nobody gets a message.
+    if (s.venue.style === 'fast_food' || s.venue.priceLevel <= COUNTER_SERVICE_MAX_PRICE_LEVEL) {
       this.log.info({ planId: s.planId, venue: s.venue.name }, 'split skipped: counter service');
       return { ok: true, detail: 'Counter service, everyone pays for themselves' };
     }
@@ -186,8 +187,7 @@ export class Doers implements DoerPorts {
     const groupId = this.groupIdOf(s.planId);
     const attending = await this.attending(s);
     // Anyone who said they don't split pays for themselves: off the bill, no messages.
-    const handleOf = (u: User) => this.d.bubbles.facts.current(u.id, 'venmo_handle')?.value ?? null;
-    const people = attending.filter((u) => handleOf(u) !== NO_SPLIT);
+    const people = attending.filter((u) => !this.d.bubbles.optedOutOfSplits(u.id));
     if (people.length < 2) {
       // A re-split that drops to one person on the bill: nobody is fronting anything now.
       this.d.db
@@ -200,11 +200,12 @@ export class Doers implements DoerPorts {
       );
       return { ok: true, detail: 'No split, everyone pays for themselves' };
     }
+    const handlesOf = new Map(people.map((u) => [u.id, this.d.bubbles.payHandles(u.id)]));
     const withHandle = people
-      .map((u) => ({ u, handle: handleOf(u) }))
-      .filter((x): x is { u: User; handle: string } => x.handle !== null);
+      .map((u) => ({ u, handles: handlesOf.get(u.id)! }))
+      .filter((x) => x.handles.length > 0);
     if (!withHandle.length) {
-      return { ok: false, detail: 'Nobody has a Venmo handle yet' };
+      return { ok: false, detail: 'Nobody has a payment method yet' };
     }
 
     // History only: this plan's own rows (a first split's paid row) must not count against anyone.
@@ -243,8 +244,13 @@ export class Doers implements DoerPorts {
     // Count only who is attending now (in or represented), never s.partySize from the booking.
     const total = each * people.length;
     const note = `${s.venue.name} ${shortDay(s.startAt)}`;
-    const handle = payer.handle.replace(/^@/, '');
-    const link = `https://venmo.com/?txn=pay&recipients=${encodeURIComponent(handle)}&amount=${each}&note=${encodeURIComponent(note)}`;
+    // Each person sees the payer's methods, the ones they use too first.
+    const linesFor = (u: User) => {
+      const theirs = new Set((handlesOf.get(u.id) ?? []).map((h) => h.method));
+      return [...payer.handles]
+        .sort((a, b) => Number(theirs.has(b.method)) - Number(theirs.has(a.method)))
+        .map((h) => payLine(h, payer.u.displayName, each, note));
+    };
 
     // A rerun after someone dropped (the engine re-splits on a table change): anyone on the
     // last split who is no longer attending is told they are off the bill.
@@ -258,7 +264,7 @@ export class Doers implements DoerPorts {
       await this.dm(
         gone,
         `Plans changed and you're not on ${s.venue.name} anymore, so you're off the bill. ` +
-          'Ignore the earlier Venmo link.',
+          'Ignore the earlier payment link.',
         `${s.idempotencyKey}:offbill:${id}`,
       );
     }
@@ -266,15 +272,19 @@ export class Doers implements DoerPorts {
     await this.dm(
       payer.u,
       `You're covering ${s.venue.name} this time, about $${total} for ${people.length} ($${each} each). ` +
-        "I'll send everyone else a Venmo link to you. It rotates, so next time is someone else.",
+        "I'll send everyone else a way to pay you back. It rotates, so next time is someone else.",
       `${s.idempotencyKey}:payer`,
     );
     let requests = 0;
     for (const u of people) {
       if (u.id === payer.u.id) continue;
+      const lines = linesFor(u);
       await this.dm(
         u,
-        `${payer.u.displayName} is covering ${s.venue.name}. Your share is about $${each}: ${link}`,
+        `${payer.u.displayName} is covering ${s.venue.name}. Your share is about $${each}:` +
+          (lines.length === 1
+            ? ` ${lines[0]!.replace(/^(Venmo|Cash App|PayPal): /, '')}`
+            : `\n${lines.join('\n')}`),
         `${s.idempotencyKey}:${u.id}`,
       );
       requests++;
@@ -309,7 +319,7 @@ export class Doers implements DoerPorts {
     // Keep the fairness ledger in step with who is actually attending.
     this.ledger.recordPlan(s.planId);
     this.log.info({ planId: s.planId, payer: payer.u.id, each, requests }, 'split sent');
-    return { ok: true, detail: `${payer.u.displayName} covers, ${requests} Venmo links sent` };
+    return { ok: true, detail: `${payer.u.displayName} covers, ${requests} payment requests sent` };
   }
 
   // -- Watcher ---------------------------------------------------------------

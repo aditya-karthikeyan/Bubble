@@ -112,7 +112,7 @@ describe('DbBubbleService', () => {
       expect(byType['allergy']).toMatchObject({ value: 'peanut', hard: true, confirmed: true });
       expect(byType['budget_max']).toMatchObject({ value: '30', hard: true });
       expect(byType['neighborhood']?.value).toBe('near Franklin St');
-      expect(byType['venmo_handle']?.value).toBe('@zoe-eats');
+      expect(byType['payment_handle']?.value).toBe('venmo:@zoe-eats');
       const venue = rt.db.query.venues.findFirst({
         where: (v, { eq: e }) => e(v.name, 'Alpha Pie'),
       });
@@ -306,6 +306,28 @@ describe('DbBubbleService', () => {
       expect(textsTo(pia.id).join('\n')).toContain('you pay for yourself, no bill splits');
     });
 
+    it('takes any payment method at 5/5 and in DMs; a handle undoes an opt-out', async () => {
+      const uma = await newUser('Uma', '+19195550146');
+      await onboard(uma, ['none', '25', 'Franklin St', 'skip', '$umacash or 919-555-0177']);
+      expect(
+        bubbles
+          .payHandles(uma.id)
+          .map((h) => `${h.method}:${h.id}`)
+          .sort(),
+      ).toEqual(['cashapp:$umacash', 'zelle:+19195550177']);
+      await dm(uma, "I don't want to split");
+      expect(bubbles.payHandles(uma.id)).toEqual([]);
+      await dm(uma, 'my venmo is @uma-v');
+      expect(lastTo(uma.id)).toMatch(/^Saved Venmo @uma-v\./);
+      expect(bubbles.optedOutOfSplits(uma.id)).toBe(false);
+      expect(
+        bubbles
+          .payHandles(uma.id)
+          .map((h) => h.method)
+          .sort(),
+      ).toEqual(['cashapp', 'venmo', 'zelle']);
+    });
+
     it('works anytime after onboarding, and replaces a handle', async () => {
       const quinn = await newUser('Quinn', '+19195550142');
       await onboard(quinn, ['none', '25', 'Franklin St', 'skip', '@quinn-q']);
@@ -333,7 +355,7 @@ describe('DbBubbleService', () => {
       const gus = await newUser('Gus', '+19195550151');
       await onboard(gus, ['vegetarian', '25', 'Southpoint', 'skip', '@gus']);
       await dm(gus, 'forget that');
-      expect(lastTo(gus.id)).toBe('Done, I forgot that your Venmo is @gus.');
+      expect(lastTo(gus.id)).toBe('Done, I forgot that friends pay you on Venmo @gus.');
       expect(bubbles.facts.current(gus.id, 'venmo_handle')).toBeNull();
       expect(bubbles.facts.current(gus.id, 'diet')?.value).toBe('vegetarian');
     });
