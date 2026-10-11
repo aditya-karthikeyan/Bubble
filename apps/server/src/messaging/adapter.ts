@@ -117,6 +117,7 @@ export class SpectrumMessaging implements MessagingPort {
     | ((m: { userId: string; messageId: string; text: string; at: string }) => Promise<boolean>)
     | null = null;
   private presence: ((userId: string) => Promise<Presence>) | null = null;
+  private readonly pollClosed: Array<(pollId: string) => Promise<unknown>> = [];
   /** Last time each person texted their bubble, for the quiet-hours override. */
   private readonly lastInbound = new Map<string, number>();
   private readonly rawText: Array<(userId: string, text: string, at: string) => boolean | void> =
@@ -187,6 +188,11 @@ export class SpectrumMessaging implements MessagingPort {
   async closePoll(input: { chatId: string; pollId: string }): Promise<void> {
     const poll = this.o.store.poll(input.pollId);
     if (!poll || !this.o.store.closePoll(input.pollId)) return;
+    for (const handler of this.pollClosed) {
+      await handler(input.pollId).catch((err: unknown) =>
+        this.o.log.error({ err: String(err), pollId: input.pollId }, 'poll-closed handler failed'),
+      );
+    }
     // The live card already moves on ("finding the spot"); skipping this saves a ping each.
     if (this.o.announcePollClose === false) return;
     const tally = this.o.store.tally(input.pollId);
@@ -405,6 +411,11 @@ export class SpectrumMessaging implements MessagingPort {
     gate: (m: { userId: string; messageId: string; text: string; at: string }) => Promise<boolean>,
   ): void {
     this.gate = gate;
+  }
+
+  /** Runs after a poll closes (e.g. send the next question). Not part of MessagingPort. */
+  onPollClosed(handler: (pollId: string) => Promise<unknown>): Unsubscribe {
+    return add(this.pollClosed, handler);
   }
 
   /** Presence source for quiet hours (P3's BubbleService.getPresence). Not part of MessagingPort. */

@@ -37,6 +37,12 @@ export interface QuestionDecision {
   dayOffset?: 0 | 1;
   /** Null when the engine's question policy skips the cuisine question. */
   cuisinePoll: { pollId: string; question?: string; options: PollOption[] } | null;
+  /**
+   * Several questions in order, e.g. ["Sit-down or fast food?", cuisine]. The first goes out
+   * once enough people are in; each next one when the engine closes the previous poll. When set,
+   * it replaces cuisinePoll.
+   */
+  polls?: Array<{ pollId: string; question?: string; options: PollOption[] }>;
   headcount: {
     closesAt: IsoDateTime;
     timezone: string;
@@ -62,6 +68,13 @@ export interface BundleResult {
 
 type PendingPoll = NonNullable<QuestionDecision['cuisinePoll']>;
 
+/** pending_poll holds a JSON array (older rows: one object). */
+function parsePolls(raw: string | null): PendingPoll[] {
+  if (!raw) return [];
+  const parsed = JSON.parse(raw) as PendingPoll | PendingPoll[];
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
 export interface BundleRecord {
   planId: string;
   chatId: string;
@@ -73,7 +86,10 @@ export interface BundleRecord {
   /** When the headcount line went out; iMessage only allows edits for 15 minutes. */
   createdAt?: IsoDateTime;
   /** Staged bundles: the poll waiting for enough people, and the link waiting for deliberation. */
-  pendingPoll?: PendingPoll | null;
+  /** Questions to ask, in order (staged). */
+  pendingPolls?: PendingPoll[];
+  /** Index of the next poll to send. */
+  pollIndex?: number;
   pageUrl?: string | null;
   pollSent?: boolean;
   linkSent?: boolean;
@@ -95,6 +111,10 @@ export class BundleStore {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS p2_bundles_chat ON p2_bundles (chat_id, closed);
+      CREATE TABLE IF NOT EXISTS p2_bundle_polls (
+        poll_id TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS p2_bundle_in (
         plan_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
@@ -111,6 +131,7 @@ export class BundleStore {
       ['pending_poll', 'TEXT'],
       ['page_url', 'TEXT'],
       ['poll_sent', 'INTEGER NOT NULL DEFAULT 0'],
+      ['poll_index', 'INTEGER NOT NULL DEFAULT 0'],
       ['link_sent', 'INTEGER NOT NULL DEFAULT 0'],
     ] as const) {
       if (!have.has(name)) sqlite.exec(`ALTER TABLE p2_bundles ADD COLUMN ${name} ${type}`);
@@ -134,7 +155,7 @@ export class BundleStore {
         record.meal,
         record.closesAt,
         new Date().toISOString(),
-        record.pendingPoll ? JSON.stringify(record.pendingPoll) : null,
+        record.pendingPolls?.length ? JSON.stringify(record.pendingPolls) : null,
         record.pageUrl ?? null,
         record.pollSent ? 1 : 0,
         record.linkSent ? 1 : 0,
@@ -156,7 +177,8 @@ export class BundleStore {
       meal: (str('meal') as MealKind | null) ?? null,
       closesAt: str('closes_at')!,
       createdAt: str('created_at')!,
-      pendingPoll: str('pending_poll') ? (JSON.parse(str('pending_poll')!) as PendingPoll) : null,
+      pendingPolls: parsePolls(str('pending_poll')),
+      pollIndex: (row['poll_index'] as number | null) ?? 0,
       pageUrl: str('page_url'),
       pollSent: row['poll_sent'] === 1,
       linkSent: row['link_sent'] === 1,
@@ -174,6 +196,13 @@ export class BundleStore {
   }
 
   byPollId(pollId: string): BundleRecord | null {
+    const row = this.sqlite
+      .prepare('SELECT plan_id FROM p2_bundle_polls WHERE poll_id = ?')
+      .get(pollId) as { plan_id: string } | undefined;
+    if (row) {
+      const bundle = this.byPlan(row.plan_id);
+      return bundle && !bundle.closed ? bundle : null;
+    }
     return this.one('poll_id = ? AND closed = 0', pollId);
   }
 
@@ -207,13 +236,28 @@ export class BundleStore {
     return row.n;
   }
 
-  /** Flips poll_sent / link_sent once; true only for the caller that flipped it. */
-  claim(planId: string, what: 'poll' | 'link'): boolean {
-    const column = what === 'poll' ? 'poll_sent' : 'link_sent';
+  /** Flips link_sent once; true only for the caller that flipped it. */
+  claim(planId: string, what: 'link'): boolean {
     const result = this.sqlite
-      .prepare(`UPDATE p2_bundles SET ${column} = 1 WHERE plan_id = ? AND ${column} = 0`)
+      .prepare(`UPDATE p2_bundles SET link_sent = 1 WHERE plan_id = ? AND link_sent = 0`)
       .run(planId);
+    return result.changes === 1 && what === 'link';
+  }
+
+  /** Moves poll_index from `index` to `index + 1` once; true only for the caller that moved it. */
+  claimPoll(planId: string, index: number): boolean {
+    const result = this.sqlite
+      .prepare(
+        'UPDATE p2_bundles SET poll_index = ?, poll_sent = 1 WHERE plan_id = ? AND poll_index = ?',
+      )
+      .run(index + 1, planId, index);
     return result.changes === 1;
+  }
+
+  registerPoll(pollId: string, planId: string): void {
+    this.sqlite
+      .prepare('INSERT OR REPLACE INTO p2_bundle_polls (poll_id, plan_id) VALUES (?, ?)')
+      .run(pollId, planId);
   }
 }
 
@@ -264,14 +308,17 @@ export async function renderBundle(
     planId: decision.planId,
     chatId: decision.chatId,
     headcountMessageId: headcount.messageId,
-    pollId: decision.cuisinePoll?.pollId ?? null,
+    pollId: (decision.polls?.[0] ?? decision.cuisinePoll)?.pollId ?? null,
     organizerName: decision.organizerName,
     meal: decision.meal,
     closesAt: decision.headcount.closesAt,
-    pendingPoll: decision.cuisinePoll,
+    pendingPolls: decision.polls ?? (decision.cuisinePoll ? [decision.cuisinePoll] : []),
     pageUrl: decision.pageUrl,
   });
   if (options.organizerUserId) store.markIn(decision.planId, options.organizerUserId, true);
+  for (const p of decision.polls ?? (decision.cuisinePoll ? [decision.cuisinePoll] : [])) {
+    store.registerPoll(p.pollId, decision.planId);
+  }
 
   if (mode === 'staged') {
     return {
@@ -300,6 +347,30 @@ export async function renderBundle(
  * Stage 2: the cuisine poll, once enough people are in. Returns the poll's message id when this
  * call sent it, null otherwise (no poll, not enough people yet, already sent, plan closed).
  */
+async function sendPollAt(
+  port: Pick<MessagingPort, 'sendPoll'>,
+  store: BundleStore,
+  bundle: BundleRecord,
+  index: number,
+): Promise<string | null> {
+  const poll = bundle.pendingPolls?.[index];
+  if (!poll || !store.claimPoll(bundle.planId, index)) return null;
+  const sent = await port.sendPoll({
+    chatId: bundle.chatId,
+    planId: bundle.planId,
+    pollId: poll.pollId,
+    question: poll.question ?? 'What are we eating?',
+    options: poll.options,
+    // The first poll keeps Phase 2's key, so a redeploy mid-plan does not resend it.
+    idempotencyKey: index === 0 ? key(bundle.planId, 'poll') : key(bundle.planId, `poll${index}`),
+  });
+  return sent.messageId;
+}
+
+/**
+ * Stage 2: the first poll, once enough people are in. Returns the poll's message id when this
+ * call sent it, null otherwise (no poll, not enough people yet, already sent, plan closed).
+ */
 export async function maybeSendPoll(
   port: Pick<MessagingPort, 'sendPoll'>,
   store: BundleStore,
@@ -307,19 +378,26 @@ export async function maybeSendPoll(
   options: { force?: boolean; minIn?: number } = {},
 ): Promise<string | null> {
   const bundle = store.byPlan(planId);
-  if (!bundle?.pendingPoll || bundle.pollSent || bundle.closed) return null;
+  if (!bundle?.pendingPolls?.length || (bundle.pollIndex ?? 0) > 0 || bundle.closed) return null;
   if (!options.force && store.inCount(planId) < (options.minIn ?? MIN_PARTY_SIZE)) return null;
-  if (!store.claim(planId, 'poll')) return null;
-  const poll = bundle.pendingPoll;
-  const sent = await port.sendPoll({
-    chatId: bundle.chatId,
-    planId,
-    pollId: poll.pollId,
-    question: poll.question ?? 'What are we eating?',
-    options: poll.options,
-    idempotencyKey: key(planId, 'poll'),
-  });
-  return sent.messageId;
+  return sendPollAt(port, store, bundle, 0);
+}
+
+/**
+ * The engine closed a poll: send the next question in the plan's sequence, if any (e.g. cuisine
+ * after "sit-down or fast food?"). Returns the next poll's message id when this call sent it.
+ */
+export async function advancePolls(
+  port: Pick<MessagingPort, 'sendPoll'>,
+  store: BundleStore,
+  closedPollId: string,
+): Promise<string | null> {
+  const bundle = store.byPollId(closedPollId) ?? null;
+  if (!bundle?.pendingPolls?.length) return null;
+  const index = bundle.pollIndex ?? 0;
+  const previous = bundle.pendingPolls[index - 1];
+  if (!previous || previous.pollId !== closedPollId) return null;
+  return sendPollAt(port, store, bundle, index);
 }
 
 /** Stage 3: the live page link, once. Returns its message id when this call sent it. */
