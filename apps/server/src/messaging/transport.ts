@@ -24,7 +24,7 @@ import {
 } from 'spectrum-ts';
 import { imessage } from 'spectrum-ts/providers/imessage';
 import { terminal } from 'spectrum-ts/providers/terminal';
-import { normalize, type RawInbound } from './normalize.js';
+import { isLocationAttachment, normalize, parseCoordinates, type RawInbound } from './normalize.js';
 
 export type OutContent =
   | { kind: 'text'; text: string; replyToMessageId?: string }
@@ -102,12 +102,40 @@ export class SpectrumTransport implements Transport {
     this.loop = (async () => {
       for await (const [, message] of app.messages) {
         try {
+          const location = await this.locationPin(message);
+          if (location) {
+            onInbound(location);
+            continue;
+          }
           for (const event of this.toInbound(message)) onInbound(event);
         } catch (err) {
           this.options.log?.({ err: String(err) }, 'inbound message dropped');
         }
       }
     })();
+  }
+
+  /** An Apple location pin (CL.loc.vcf) becomes a location event; anything else returns null. */
+  private async locationPin(message: Message): Promise<RawInbound | null> {
+    if (message.direction !== 'inbound' || !isLocationAttachment(message.content)) return null;
+    const vcard = (await message.content.read()).toString('utf8');
+    const coords = parseCoordinates(vcard);
+    if (!coords) {
+      this.options.log?.(
+        { name: message.content.name ?? null },
+        'location pin without coordinates',
+      );
+      return null;
+    }
+    const raw = message.space.id;
+    const phone = raw.startsWith('any;-;') ? raw.slice('any;-;'.length) : raw;
+    return {
+      kind: 'location',
+      providerId: message.id,
+      phone,
+      ...coords,
+      at: message.timestamp.toISOString(),
+    };
   }
 
   private toInbound(message: Message): RawInbound[] {

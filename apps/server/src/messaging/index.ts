@@ -26,7 +26,7 @@ import { signup, type SignupResult } from './signup.js';
 import { MessagingStore } from './store.js';
 import { SpectrumTransport, type Transport } from './transport.js';
 
-export { SpectrumMessaging, dmChatId } from './adapter.js';
+export { SpectrumMessaging, dmChatId, type InboundLocation } from './adapter.js';
 export { type BundleResult, type QuestionDecision } from './bundle.js';
 export { loadMessagingConfig, type MessagingConfig } from './config.js';
 export { PlanIntake } from './intake.js';
