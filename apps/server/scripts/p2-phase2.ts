@@ -64,12 +64,14 @@ if (real) {
     projectId: config.SPECTRUM_PROJECT_ID!,
     projectSecret: config.SPECTRUM_PROJECT_SECRET!,
   });
+  // Names come from Photon's user list (first name), so each phone shows its own person.
+  const names = await photon.firstNames();
   const ids: string[] = [];
   for (const phone of phones) {
     const bubbleNumber = await photon.bubbleNumberFor(phone);
     if (!bubbleNumber) throw new Error(`…${phone.slice(-4)} is not registered with Photon`);
     const user = await runtime.crews.createUser({
-      displayName: 'Pranav',
+      displayName: names.get(phone) ?? `…${phone.slice(-4)}`,
       handle: phone,
       bubbleNumber,
     });
