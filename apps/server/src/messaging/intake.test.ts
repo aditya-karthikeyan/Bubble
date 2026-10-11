@@ -117,7 +117,9 @@ describe('bundle text', () => {
         headcount: { closesAt: '2026-10-10T23:05:00.000Z', timezone: 'America/New_York' },
         pageUrl: null,
       }),
-    ).toBe("Pranav's making a plan for dinner tonight. Tap 👍 on this message if you're in.");
+    ).toMatch(
+      /^🫧 Pranav's on dinner tonight\. Tap 👍 on this message if you're in\. Locking a spot at \d+:\d\d\.$/,
+    );
   });
 });
 

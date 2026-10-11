@@ -314,7 +314,7 @@ export function headcountText(decision: QuestionDecision): string {
   if (decision.headcount.mode === 'opt_out') {
     return `🫧 ${decision.organizerName}'s on ${what} ${when}. You're counted in, reply "out" if you can't make it. Locking a spot at ${closes}.`;
   }
-  return `${decision.organizerName}'s making a plan for ${what} ${when}. Tap 👍 on this message if you're in.`;
+  return `🫧 ${decision.organizerName}'s on ${what} ${when}. Tap 👍 on this message if you're in. Locking a spot at ${closes}.`;
 }
 
 const key = (planId: string, part: string) => idempotencyKey(planId, 'bundle', part);
