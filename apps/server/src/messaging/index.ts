@@ -15,7 +15,7 @@
 import { crewChatId, type PlanEngine, type Presence } from '@bubbleworks/shared';
 import type { Runtime } from '../runtime.js';
 import { SpectrumMessaging } from './adapter.js';
-import { BundleStore } from './bundle.js';
+import { BundleStore, advancePolls } from './bundle.js';
 import { ClaudeClassifier, type Classifier } from './classifier.js';
 import type { MessagingConfig } from './config.js';
 import { PlanIntake } from './intake.js';
@@ -26,7 +26,7 @@ import { signup, type SignupResult } from './signup.js';
 import { MessagingStore } from './store.js';
 import { SpectrumTransport, type Transport } from './transport.js';
 
-export { SpectrumMessaging, dmChatId } from './adapter.js';
+export { SpectrumMessaging, dmChatId, type InboundLocation } from './adapter.js';
 export { type BundleResult, type QuestionDecision } from './bundle.js';
 export { loadMessagingConfig, type MessagingConfig } from './config.js';
 export { PlanIntake } from './intake.js';
@@ -139,6 +139,8 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
     log,
   });
   port.setInboundGate((m) => safety.gate(m));
+  // Questions asked in sequence: when the engine closes one poll, the next one goes out.
+  port.onPollClosed((pollId) => advancePolls(port, bundles, pollId));
 
   let intake: PlanIntake | null = null;
   return {

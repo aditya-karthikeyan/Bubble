@@ -208,3 +208,86 @@ describe('latinOnly', () => {
     expect(latinOnly('Café Résumé')).toBe('Café Résumé');
   });
 });
+
+describe('poll sequence', () => {
+  it('asks "sit-down or fast food?" first, then cuisine once the engine closes the first poll', async () => {
+    const {
+      BundleStore: Store,
+      renderBundle,
+      advancePolls,
+      maybeSendPoll,
+    } = await import('./bundle.js');
+    const store = new Store(new Database(':memory:'));
+    const polls: string[] = [];
+    const port = {
+      sendGroupText: async () => ({ messageId: 'grp:headcount', deduplicated: false }),
+      sendPoll: async (p: { pollId: string }) => {
+        polls.push(p.pollId);
+        return { messageId: `grp:${p.pollId}`, deduplicated: false };
+      },
+      sendRichLink: async () => ({ messageId: 'grp:link', deduplicated: false }),
+    };
+    await renderBundle(
+      port,
+      store,
+      {
+        planId: PLAN,
+        chatId: CREW,
+        organizerName: 'Pranav',
+        meal: 'dinner',
+        cuisinePoll: null,
+        polls: [
+          {
+            pollId: 'poll_style',
+            question: 'Sit-down or fast food?',
+            options: [{ key: 'sit', label: 'Sit-down' }],
+          },
+          { pollId: 'poll_cuisine', options: [{ key: 'thai', label: 'Thai' }] },
+        ],
+        headcount: { closesAt: at, timezone: 'America/New_York' },
+        pageUrl: null,
+      },
+      { organizerUserId: 'user_pranav' },
+    );
+    expect(polls).toEqual([]);
+    store.markIn(PLAN, 'user_mahil', true);
+    await maybeSendPoll(port, store, PLAN);
+    expect(polls).toEqual(['poll_style']);
+    // Votes on either poll route to the plan.
+    expect(store.byPollId('poll_cuisine')?.planId).toBe(PLAN);
+    await advancePolls(port, store, 'poll_style');
+    await advancePolls(port, store, 'poll_style');
+    expect(polls).toEqual(['poll_style', 'poll_cuisine']);
+    await advancePolls(port, store, 'poll_cuisine');
+    expect(polls).toEqual(['poll_style', 'poll_cuisine']);
+  });
+
+  it("builds the sequence from P1's stylePoll then cuisinePoll", async () => {
+    const { pollSequence } = await import('./bundle.js');
+    const base = {
+      planId: PLAN,
+      chatId: CREW,
+      organizerName: 'Pranav',
+      meal: 'dinner' as const,
+      headcount: { closesAt: at, timezone: 'America/New_York' },
+      pageUrl: null,
+    };
+    const style = {
+      pollId: 'poll_style',
+      options: [
+        { key: 'sit_down', label: 'Sit-down' },
+        { key: 'fast_food', label: 'Fast food / takeout' },
+      ],
+    };
+    const cuisine = { pollId: 'poll_cuisine', options: [{ key: 'thai', label: 'Thai' }] };
+    expect(
+      pollSequence({ ...base, stylePoll: style, cuisinePoll: cuisine }).map((p) => p.pollId),
+    ).toEqual(['poll_style', 'poll_cuisine']);
+    expect(
+      pollSequence({ ...base, stylePoll: null, cuisinePoll: cuisine }).map((p) => p.pollId),
+    ).toEqual(['poll_cuisine']);
+    expect(
+      pollSequence({ ...base, stylePoll: style, cuisinePoll: null }).map((p) => p.pollId),
+    ).toEqual(['poll_style']);
+  });
+});

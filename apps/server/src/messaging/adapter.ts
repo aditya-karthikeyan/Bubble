@@ -95,7 +95,17 @@ type Handlers = {
   vote: Array<(v: PollVote) => Promise<void>>;
   reaction: Array<(r: Reaction) => Promise<void>>;
   member: Array<(c: MemberChange) => Promise<void>>;
+  location: Array<(l: InboundLocation) => Promise<void>>;
 };
+
+/** A one-time location pin someone sent their bubble (+ -> Location -> Share). */
+export interface InboundLocation {
+  userId: string;
+  messageId: string;
+  lat: number;
+  lng: number;
+  at: string;
+}
 
 interface FanOptions {
   chatId: string;
@@ -112,11 +122,13 @@ export class SpectrumMessaging implements MessagingPort {
     vote: [],
     reaction: [],
     member: [],
+    location: [],
   };
   private gate:
     | ((m: { userId: string; messageId: string; text: string; at: string }) => Promise<boolean>)
     | null = null;
   private presence: ((userId: string) => Promise<Presence>) | null = null;
+  private readonly pollClosed: Array<(pollId: string) => Promise<unknown>> = [];
   /** Last time each person texted their bubble, for the quiet-hours override. */
   private readonly lastInbound = new Map<string, number>();
   private readonly rawText: Array<(userId: string, text: string, at: string) => boolean | void> =
@@ -187,6 +199,11 @@ export class SpectrumMessaging implements MessagingPort {
   async closePoll(input: { chatId: string; pollId: string }): Promise<void> {
     const poll = this.o.store.poll(input.pollId);
     if (!poll || !this.o.store.closePoll(input.pollId)) return;
+    for (const handler of this.pollClosed) {
+      await handler(input.pollId).catch((err: unknown) =>
+        this.o.log.error({ err: String(err), pollId: input.pollId }, 'poll-closed handler failed'),
+      );
+    }
     // The live card already moves on ("finding the spot"); skipping this saves a ping each.
     if (this.o.announcePollClose === false) return;
     const tally = this.o.store.tally(input.pollId);
@@ -322,6 +339,11 @@ export class SpectrumMessaging implements MessagingPort {
     return add(this.rawText, handler);
   }
 
+  /** Location pins people send their bubble. Not part of MessagingPort (P3 stores them). */
+  onLocation(handler: (l: InboundLocation) => Promise<void>): Unsubscribe {
+    return add(this.handlers.location, handler);
+  }
+
   /** Crew membership changes come from P3's declaration flow, so this never fires. */
   onMemberChange(handler: (c: MemberChange) => Promise<void>): Unsubscribe {
     return add(this.handlers.member, handler);
@@ -344,6 +366,26 @@ export class SpectrumMessaging implements MessagingPort {
     }
 
     switch (event.kind) {
+      case 'location': {
+        // P3's contract (#41): the pin reaches the bubble as a private message with `location`
+        // set and empty text. onLocation stays for anything else that wants pins.
+        const pin: InboundPrivateMessage & { location: { lat: number; lng: number } } = {
+          messageId: event.providerId,
+          userId: user.id,
+          text: '',
+          at: event.at,
+          location: { lat: event.lat, lng: event.lng },
+        };
+        await this.emit(this.handlers.private, pin);
+        await this.emit(this.handlers.location, {
+          userId: user.id,
+          messageId: event.providerId,
+          lat: event.lat,
+          lng: event.lng,
+          at: event.at,
+        });
+        return;
+      }
       case 'text': {
         let flushNow = false;
         for (const handler of this.rawText) {
@@ -405,6 +447,11 @@ export class SpectrumMessaging implements MessagingPort {
     gate: (m: { userId: string; messageId: string; text: string; at: string }) => Promise<boolean>,
   ): void {
     this.gate = gate;
+  }
+
+  /** Runs after a poll closes (e.g. send the next question). Not part of MessagingPort. */
+  onPollClosed(handler: (pollId: string) => Promise<unknown>): Unsubscribe {
+    return add(this.pollClosed, handler);
   }
 
   /** Presence source for quiet hours (P3's BubbleService.getPresence). Not part of MessagingPort. */
