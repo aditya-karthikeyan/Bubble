@@ -27,9 +27,9 @@
     "speed": "tsx --env-file-if-exists=../../.env scripts/speed.ts",
     "p3:phase4": "tsx --env-file-if-exists=../../.env scripts/p3/phase4.ts",
     "demo:reset": "tsx --env-file-if-exists=../../.env scripts/demo-reset.ts",
-    "p2:phase3": "tsx --env-file-if-exists=../../.env scripts/p2-phase3.ts",
     "p3:smoke": "tsx --env-file-if-exists=../../.env scripts/p3/smoke.ts",
-    "p2:e2e-seed": "tsx --env-file-if-exists=../../.env scripts/p2-e2e-seed.ts"
+    "p2:e2e-seed": "tsx --env-file-if-exists=../../.env scripts/p2-e2e-seed.ts",
+    "p2:demo": "tsx --env-file-if-exists=../../.env scripts/p2-demo.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
@@ -47,6 +47,7 @@
     "nice-grpc-common": "^2.0.4",
     "pino": "^10.4.0",
     "pino-pretty": "^13.2.0",
+    "qrcode": "^1.5.4",
     "satori": "^0.47.1",
     "sharp": "^0.35.5",
     "socket.io": "^4.8.4",
@@ -56,6 +57,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
+    "@types/qrcode": "^1.5.6",
     "drizzle-kit": "^0.31.11",
     "socket.io-client": "^4.8.4"
   }
