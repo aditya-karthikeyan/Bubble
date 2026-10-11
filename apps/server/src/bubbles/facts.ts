@@ -23,6 +23,7 @@ import {
 } from '@bubbleworks/shared';
 import type { Db } from '../db/client.js';
 import { facts } from '../db/schema.js';
+import { decodeHandle, describeHandle } from './payments.js';
 
 const SINGLE_VALUED: ReadonlySet<FactType> = new Set<FactType>([
   'budget_max',
@@ -235,11 +236,8 @@ export function describeFact(f: Pick<Fact, 'type' | 'value'>): string {
         ? 'you pay for yourself, no bill splits'
         : `your Venmo is ${f.value}`;
     case 'payment_handle': {
-      const [kind, handle] = f.value.split(':', 2);
-      const label =
-        { venmo: 'Venmo', cashapp: 'Cash App', zelle: 'Zelle', paypal: 'PayPal' }[kind ?? ''] ??
-        kind;
-      return `friends can pay you back on ${label} at ${handle ?? f.value}`;
+      const h = decodeHandle(f.value);
+      return h ? `friends pay you on ${describeHandle(h)}` : 'you have a payment method saved';
     }
     case 'other':
       return f.value;

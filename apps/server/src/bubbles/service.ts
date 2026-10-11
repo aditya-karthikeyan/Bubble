@@ -56,6 +56,13 @@ import {
   type FactExtractor,
 } from './extract.js';
 import { describeFact, FactStore, NO_SPLIT } from './facts.js';
+import {
+  decodeHandle,
+  describeHandle,
+  encodeHandle,
+  parsePaymentHandles,
+  type PayHandle,
+} from './payments.js';
 import { PassiveLearner, type LearnInput } from './learner.js';
 import { mightBeReaction, type ReactionClassifier } from './reactions.js';
 import {
@@ -83,7 +90,9 @@ const QUESTIONS: Record<OnboardingStep, string> = {
   budget: '2/5 Usual budget per person for dinner? Like $20 or $30.',
   neighborhood: '3/5 What area are you usually in? Like Franklin St or Southpoint.',
   favorites: '4/5 Two favorite spots around here?',
-  venmo: '5/5 Venmo handle, for splitting the bill? Or say skip.',
+  venmo:
+    '5/5 How should friends pay you back? Send your Venmo @, Cash App $, Zelle phone or ' +
+    'email, or PayPal. Or say skip.',
 };
 
 const FORGET_ME_WINDOW_MS = 5 * 60_000;
@@ -439,6 +448,17 @@ export class DbBubbleService implements BubbleService {
       );
       return true;
     }
+    if (text.length <= 160 && /venmo|cash ?app|zelle|paypal|\$[a-z]/i.test(text)) {
+      const found = parsePaymentHandles(text);
+      if (found.length) {
+        this.savePayHandles(user.id, found, 'chat');
+        await reply(
+          `Saved ${found.map(describeHandle).join(', ')}. When you cover a dinner, friends get ` +
+            'these with the amount filled in.',
+        );
+        return true;
+      }
+    }
     // Not for the bubble: the engine gets it, and the learner reads it in the background.
     this.learn({ messageId: m.messageId, userId: user.id, text, at: m.at });
     return false;
@@ -734,7 +754,16 @@ export class DbBubbleService implements BubbleService {
     const steps: readonly OnboardingStep[] = fast ? FAST_STEPS : ONBOARDING_STEPS;
     const noSplit = step === 'venmo' && isNoSplit(text);
     if (noSplit) this.recordNoSplit(user.id, 'onboarding');
-    const extracted = isSkip(text) || noSplit ? [] : await this.deps.extractor.extract(text, step);
+    // The payment question reads handles by format, so a bare phone or email is Zelle.
+    const handles =
+      step === 'venmo' && !noSplit && !isSkip(text)
+        ? parsePaymentHandles(text, { bareContact: true })
+        : [];
+    if (handles.length) this.savePayHandles(user.id, handles, 'onboarding');
+    const extracted =
+      isSkip(text) || noSplit || handles.length
+        ? []
+        : await this.deps.extractor.extract(text, step);
     const saved = await this.saveExtracted(user.id, extracted, step, text);
 
     if (step === 'budget' && !isSkip(text) && !saved.some((f) => f.type === 'budget_max')) {
@@ -857,6 +886,56 @@ export class DbBubbleService implements BubbleService {
       );
     }
     return out;
+  }
+
+  /**
+   * How friends pay this person back: payment_handle facts, plus a legacy venmo_handle as Venmo.
+   * Empty when they have none or opted out of splits.
+   */
+  payHandles(userId: string): PayHandle[] {
+    const legacy = this.facts.current(userId, 'venmo_handle')?.value ?? null;
+    if (legacy === NO_SPLIT) return [];
+    const out = this.facts
+      .active(userId)
+      .filter((f) => f.type === 'payment_handle')
+      .map((f) => decodeHandle(f.value))
+      .filter((h): h is PayHandle => h !== null);
+    if (legacy && !out.some((h) => h.method === 'venmo')) out.push({ method: 'venmo', id: legacy });
+    return out;
+  }
+
+  /** Said "I don't want to split". */
+  optedOutOfSplits(userId: string): boolean {
+    return this.facts.current(userId, 'venmo_handle')?.value === NO_SPLIT;
+  }
+
+  /** One handle per method: a new one replaces the old. Saving any handle undoes an opt-out. */
+  private savePayHandles(
+    userId: string,
+    handles: PayHandle[],
+    source: 'onboarding' | 'chat',
+  ): void {
+    const methods = new Set(handles.map((h) => h.method));
+    const stale = this.facts.active(userId).filter((f) => {
+      if (f.type === 'venmo_handle') return f.value === NO_SPLIT || methods.has('venmo');
+      if (f.type !== 'payment_handle') return false;
+      const old = decodeHandle(f.value);
+      return old !== null && methods.has(old.method);
+    });
+    if (stale.length) this.facts.delete(stale.map((f) => f.id));
+    for (const h of handles) {
+      this.facts.record({
+        userId,
+        type: 'payment_handle',
+        value: encodeHandle(h),
+        hard: false,
+        confidence: 1,
+        source,
+        confirmed: true,
+        expiresAt: null,
+      });
+    }
+    this.log.info({ userId, methods: [...methods] }, 'payment handles saved');
   }
 
   /** Opts out of bill splits. Replaces any Venmo handle (single-valued). */

@@ -181,7 +181,7 @@ describe('Doers', () => {
         .run();
       const s = booking();
       const r = await doers.splitter.send({ ...s, idempotencyKey: 'spl' });
-      expect(r).toEqual({ ok: true, detail: 'Ben covers, 3 Venmo links sent' });
+      expect(r).toEqual({ ok: true, detail: 'Ben covers, 3 payment requests sent' });
       expect(dmsTo('user_ben')[0]).toMatch(
         /^You're covering Alpha Pie this time, about \$120 for 4 \(\$30 each\)/,
       );
@@ -206,6 +206,34 @@ describe('Doers', () => {
       );
     });
 
+    it('sends every method the payer has, the ones the payee shares first', async () => {
+      const s = booking();
+      // Ava covers (nobody has paid yet; first to join). She also takes Cash App and Zelle.
+      // Ben uses Cash App and Venmo too, so those come before Zelle.
+      const add = (userId: string, value: string) =>
+        bubbles.facts.record({
+          userId,
+          type: 'payment_handle',
+          value,
+          hard: false,
+          confidence: 1,
+          source: 'onboarding',
+          confirmed: true,
+          expiresAt: null,
+        });
+      add('user_ava', 'cashapp:$avacash');
+      add('user_ava', 'zelle:+19195550101');
+      add('user_ben', 'cashapp:$bencash');
+      const r = await doers.splitter.send({ ...s, idempotencyKey: 'spl' });
+      expect(r.detail).toBe('Ava covers, 3 payment requests sent');
+      expect(dmsTo('user_ben')[0]!.split('\n')).toEqual([
+        'Ava is covering Alpha Pie. Your share is about $30:',
+        'Cash App: https://cash.app/$avacash/30',
+        'Venmo: https://venmo.com/?txn=pay&recipients=ava-demo&amount=30&note=Alpha%20Pie%20Oct%2010',
+        'Zelle Ava at +19195550101 · $30',
+      ]);
+    });
+
     it('stays quiet at counter service: no split question, no Venmo, no paid row', async () => {
       const s = booking();
       const chipotle = rt.venues().find((v) => v.id === CHIPOTLE)!;
@@ -221,7 +249,7 @@ describe('Doers', () => {
       const s = booking();
       optOut('user_ben');
       const r = await doers.splitter.send({ ...s, idempotencyKey: 'spl' });
-      expect(r.detail).toBe('Ava covers, 2 Venmo links sent');
+      expect(r.detail).toBe('Ava covers, 2 payment requests sent');
       expect(dmsTo('user_ben')).toHaveLength(0);
       expect(dmsTo('user_ava')[0]).toMatch(/about \$90 for 3 \(\$30 each\)/);
     });
@@ -254,7 +282,7 @@ describe('Doers', () => {
       expect(dmsTo('user_ava')[0]).toContain('table for 3 under Ava');
 
       const r = await doers.splitter.send({ ...stale, idempotencyKey: 'spl' });
-      expect(r.detail).toBe('Ava covers, 2 Venmo links sent');
+      expect(r.detail).toBe('Ava covers, 2 payment requests sent');
       expect(dmsTo('user_ava').at(-1)).toMatch(/about \$90 for 3 \(\$30 each\)/);
       expect(dmsTo('user_chloe')).toHaveLength(0);
       expect(dmsTo('user_eli')).toHaveLength(0);
@@ -276,7 +304,7 @@ describe('Doers', () => {
       rt.plans.upsertMember(s.planId, 'user_chloe', 'out'); // drops after booking
       await doers.splitter.send({ ...s, idempotencyKey: 'spl:3' }); // engine re-splits for 3
       expect(dmsTo('user_chloe').at(-1)).toBe(
-        "Plans changed and you're not on Alpha Pie anymore, so you're off the bill. Ignore the earlier Venmo link.",
+        "Plans changed and you're not on Alpha Pie anymore, so you're off the bill. Ignore the earlier payment link.",
       );
       expect(dmsTo('user_ava').at(-1)).toMatch(/about \$90 for 3/);
       const rows = rt.db.select().from(ledger).where(eq(ledger.planId, s.planId)).all();
