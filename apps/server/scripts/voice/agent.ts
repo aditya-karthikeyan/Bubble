@@ -37,6 +37,9 @@ Rules:
 11. One short sentence per turn, one question at a time. Phone lines lag, so after "yeah" or "mm-hmm" carry on from where you were instead of starting over.
 12. Never share anything about the guests beyond the booking details above.`;
 
+/** ElevenLabs premade voice "Jessica - Playful, Bright, Warm". */
+const JESSICA = 'cgSgspJ2msm6clMCkdW9';
+
 function systemTool(name: string) {
   return { type: 'system', name, description: '', params: { system_tool_type: name } };
 }
@@ -74,8 +77,9 @@ const body = {
         },
       },
     },
-    // English agents must use flash v2 or turbo; v2.5 is rejected.
-    tts: { model_id: 'eleven_flash_v2' },
+    // English agents must use flash v2 or turbo; v2.5 is rejected. Voice: Jessica (warm, bright,
+    // conversational) unless ELEVENLABS_VOICE_ID picks another, so re-saving never resets it.
+    tts: { model_id: 'eleven_flash_v2', voice_id: process.env['ELEVENLABS_VOICE_ID'] || JESSICA },
     // Patient turn-taking: short acknowledgements on a phone line shouldn't cut the agent off.
     turn: { turn_eagerness: 'patient' },
   },
