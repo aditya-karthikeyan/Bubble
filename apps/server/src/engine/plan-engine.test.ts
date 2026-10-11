@@ -150,6 +150,15 @@ describe('BubbleworksEngine', () => {
     await h.engine.handleHeadcount({ planId: planId!, userId: 'user_ben', in: true, at: h.at() });
     await h.engine.handleHeadcount({ planId: planId!, userId: 'user_chloe', in: true, at: h.at() });
     await h.advance(DEADLINES.poll_ms + 1);
+    // Both pizza places are over a budget at the table, so Ava (who named pizza) is asked first.
+    expect(h.rt.plans.get(planId!)?.state).toBe('DEADLOCK');
+    await h.engine.handleAskAnswer({
+      askId: h.engine.pendingAskFor('user_ava')!.askId,
+      userId: 'user_ava',
+      answer: 'yes',
+      rawText: 'yes',
+      at: h.at(),
+    });
     const members = h.rt.plans.members(planId!);
     expect(members.find((m) => m.userId === 'user_eli')?.status).toBe('represented');
     expect(members.find((m) => m.userId === 'user_dev')?.status).toBe('dropped');
@@ -416,6 +425,113 @@ describe('BubbleworksEngine', () => {
     expect(plan.state).toBe('LOCKED');
     const winner = h.rt.venues().find((v) => v.id === plan.chosenVenueId)!;
     expect(winner.style).toBe('fast_food');
+  });
+
+  describe('voted cuisine out of range', () => {
+    const VOTERS = ['user_ava', 'user_ben', 'user_chloe', 'user_dev'];
+    /** The demo crew votes the first cuisine option, which then has nothing in range. */
+    async function toCuisineAsk() {
+      const { planId } = await h.engine.handleIntent({
+        chatId: CHAT,
+        userId: 'user_ava',
+        messageId: 'm1',
+        text: 'dinner tonight?',
+        at: h.at(),
+      });
+      for (const u of ['user_ben', 'user_chloe', 'user_dev'])
+        await h.engine.handleHeadcount({ planId: planId!, userId: u, in: true, at: h.at() });
+      await h.engine.handleHeadcount({
+        planId: planId!,
+        userId: 'user_eli',
+        in: false,
+        at: h.at(),
+      });
+      const polls = h.messaging.sent.filter((x) => x.kind === 'poll');
+      const cuisinePoll = polls.find(
+        (p) => 'input' in p && !p.input.options.some((o) => o.key === 'fast_food'),
+      );
+      if (!cuisinePoll || !('input' in cuisinePoll)) throw new Error('no cuisine poll');
+      // Vote for a cuisine other than American, so American places are left to switch to.
+      const cuisine = cuisinePoll.input.options.find((o) => o.key !== 'american')!.key;
+      // Every venue of that cuisine drops out before the vote ends (as a far location pin would).
+      const all = h.rt.venues();
+      for (let i = all.length - 1; i >= 0; i -= 1)
+        if (all[i]!.cuisine === cuisine) all.splice(i, 1);
+      h.messaging.sent.length = 0;
+      for (const sent of polls) {
+        if (!('input' in sent)) continue;
+        const choice = sent === cuisinePoll ? cuisine : sent.input.options[0]!.key;
+        for (const u of VOTERS) {
+          await h.engine.handleVote({
+            planId: planId!,
+            pollId: sent.input.pollId,
+            userId: u,
+            choices: [choice],
+            at: h.at(),
+          });
+        }
+      }
+      return { planId: planId!, cuisine };
+    }
+    const privateTexts = () =>
+      h.messaging.sent
+        .filter((s) => s.kind === 'private_text')
+        .map((s) => ('input' in s ? [s.input.userId, s.input.text] : ['', '']));
+
+    it('asks the voters before switching and locks the switch when they say yes', async () => {
+      const { planId } = await toCuisineAsk();
+      expect(h.rt.plans.get(planId)?.state).toBe('DEADLOCK');
+      const texts = privateTexts();
+      const asked = texts.filter(([, t]) => /OK to switch/.test(t!));
+      // The poll decides once three of four agree; those three are asked, the fourth is told.
+      const voters = asked.map(([u]) => u!);
+      expect(voters.length).toBeGreaterThanOrEqual(3);
+      for (const [, t] of asked)
+        expect(t).toMatch(
+          /won the vote, but no spot like that fits tonight\. OK to switch to .+\? Reply yes or no\.$/,
+        );
+      for (const [u, t] of texts)
+        if (!voters.includes(u!)) expect(t).toMatch(/Checking with its voters about .+\.$/);
+      expect(texts).toHaveLength(VOTERS.length);
+      expect(h.rt.timers.pending(planId).map((t) => t.kind)).toEqual(['ask_timeout']);
+
+      for (const u of voters) {
+        // Each yes waits for the remaining voters.
+        expect(h.rt.plans.get(planId)?.state).toBe('DEADLOCK');
+        await h.engine.handleAskAnswer({
+          askId: h.engine.pendingAskFor(u)!.askId,
+          userId: u,
+          answer: 'yes',
+          rawText: 'yes',
+          at: h.at(),
+        });
+      }
+      expect(h.rt.plans.get(planId)?.state).toBe('LOCKED');
+    });
+
+    it('treats silence as yes', async () => {
+      const { planId } = await toCuisineAsk();
+      await h.advance(DEADLINES.private_ask_ms + 1);
+      expect(h.rt.plans.get(planId)?.state).toBe('LOCKED');
+    });
+
+    it('keeps the cuisine when the voters say no, and never locks another cuisine', async () => {
+      const { planId, cuisine } = await toCuisineAsk();
+      const voters = VOTERS.filter((u) => h.engine.pendingAskFor(u));
+      for (const u of voters) {
+        await h.engine.handleAskAnswer({
+          askId: h.engine.pendingAskFor(u)!.askId,
+          userId: u,
+          answer: 'no',
+          rawText: 'no',
+          at: h.at(),
+        });
+      }
+      const plan = h.rt.plans.get(planId)!;
+      expect(plan.state).not.toBe('LOCKED');
+      if (plan.chosenVenueId)
+        expect(h.rt.venues().find((v) => v.id === plan.chosenVenueId)?.cuisine).toBe(cuisine);
+    });
   });
 
   it('a typed style skips the style poll', async () => {
