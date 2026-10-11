@@ -71,7 +71,7 @@ class RecordingEngine implements PlanEngine {
   }
 }
 
-async function setup(classifier = new StubClassifier()) {
+async function setup(classifier = new StubClassifier(), isOnboarded?: (userId: string) => boolean) {
   const transport = new FakeTransport('imessage');
   const sqlite = new Database(':memory:');
   const bundles = new BundleStore(sqlite);
@@ -87,7 +87,15 @@ async function setup(classifier = new StubClassifier()) {
   });
   const engine = new RecordingEngine();
   const audit = new AuditLog(sqlite);
-  const intake = new PlanIntake({ port, engine, bundles, classifier, log: silentLogger, audit });
+  const intake = new PlanIntake({
+    port,
+    engine,
+    bundles,
+    classifier,
+    log: silentLogger,
+    audit,
+    ...(isOnboarded ? { isOnboarded } : {}),
+  });
   engine.intake = intake;
   intake.start();
   await port.start();
@@ -239,6 +247,14 @@ describe('PlanIntake', () => {
     await text(AVA.handle, 'grab food later?', 'in_1');
     await vi.runAllTimersAsync();
     expect(engine.intents).toHaveLength(1);
+  });
+
+  it('shows no typing for an onboarding answer that names food', async () => {
+    const { transport, engine, text } = await setup(new StubClassifier(), () => false);
+    await text(AVA.handle, 'chipotle and dinner at cava', 'in_1');
+    await vi.runAllTimersAsync();
+    expect(transport.calls.some((c) => c.op === 'typing')).toBe(false);
+    expect(engine.intents).toHaveLength(0);
   });
 
   it('leaves small talk alone', async () => {

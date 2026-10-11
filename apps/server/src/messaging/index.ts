@@ -42,7 +42,10 @@ export interface Messaging {
   /** Quiet hours: pass BubbleService.getPresence so nobody asleep or driving gets pinged. */
   setPresence(presence: (userId: string) => Promise<Presence>): void;
   /** Wire inbound messages to the engine. Call once, before start(). */
-  attachEngine(engine: PlanEngine, options?: { classifier?: Classifier | null }): PlanIntake;
+  attachEngine(
+    engine: PlanEngine,
+    options?: { classifier?: Classifier | null; isOnboarded?: (userId: string) => boolean },
+  ): PlanIntake;
   /** One-time registration: Photon user + bubble number + CrewDirectory user. */
   signup(raw: unknown): Promise<SignupResult>;
   start(): Promise<void>;
@@ -161,6 +164,7 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
         log,
         audit,
         bundleMode: config.MESSAGING_BUNDLE_MODE,
+        ...(attachOptions.isOnboarded ? { isOnboarded: attachOptions.isOnboarded } : {}),
       });
       intake.start();
       return intake;
