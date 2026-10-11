@@ -91,6 +91,8 @@ export const FactType = z.enum([
   'neighborhood',
   'favorite_venue',
   'venmo_handle',
+  /** Any pay-back method, value "<kind>:<handle>": venmo:@x, cashapp:$x, zelle:+1555..., paypal:x */
+  'payment_handle',
   'other',
 ]);
 export type FactType = z.infer<typeof FactType>;
@@ -118,6 +120,7 @@ export const Fact = z.object({
    * budget_max: integer dollars per person as a string, e.g. "25"
    * cuisine_like / cuisine_avoid: lowercase cuisine key, e.g. "thai"
    * neighborhood: free text; favorite_venue: venue id; venmo_handle: "@name"
+   * payment_handle: "venmo:@name" | "cashapp:$name" | "zelle:+15551234567" | "zelle:a@b.c" | "paypal:name"
    */
   value: z.string(),
   /** Hard facts filter candidates. Soft facts only score them. */
