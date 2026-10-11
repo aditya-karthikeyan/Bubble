@@ -193,6 +193,9 @@ export const Venue = z.object({
   neighborhood: z.string().nullable().default(null),
   /** The demo venue rings a teammate's phone. */
   isDemo: z.boolean().default(false),
+  /** Public rating out of 5 and how many reviews back it (Google). Null when unknown. */
+  rating: z.number().min(0).max(5).nullish(),
+  ratingCount: z.number().int().nonnegative().nullish(),
 });
 export type Venue = z.infer<typeof Venue>;
 

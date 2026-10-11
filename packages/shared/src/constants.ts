@@ -79,7 +79,12 @@ export const SOLVER = {
     distance: 0.15,
     recent_visit: 0.2,
     budget_headroom: 0.1,
+    /** Public rating: 3.5 stars scores 0, 5 stars scores 1, scaled by how many reviews back it. */
+    rating: 0.3,
   },
+  /** Places rated below this, with at least min_rating_reviews reviews, are out. Unknown passes. */
+  min_rating: 3.6,
+  min_rating_reviews: 10,
   /** Fairness: each recent compromise adds this much weight to a member's vote. */
   fairness_step: 0.25,
   fairness_max: 2,
