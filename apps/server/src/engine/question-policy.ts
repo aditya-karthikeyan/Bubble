@@ -216,7 +216,13 @@ export function decideStartTime(
     const end = start + SOLVER.meal_duration_min * 60_000;
     let free = 0;
     for (const busy of Object.values(busyByMember)) {
-      const clash = busy.some((b) => Date.parse(b.start) < end && Date.parse(b.end) > start);
+      // All-day blocks (a hackathon on the calendar) say nothing about dinner; skip them.
+      const clash = busy.some(
+        (b) =>
+          Date.parse(b.end) - Date.parse(b.start) < 20 * 60 * 60_000 &&
+          Date.parse(b.start) < end &&
+          Date.parse(b.end) > start,
+      );
       if (!clash) free += 1;
     }
     freeCounts[w] = free;
