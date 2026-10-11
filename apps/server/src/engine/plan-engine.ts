@@ -1592,7 +1592,15 @@ export class BubbleworksEngine implements PlanEngine {
       groupCenter: this.groupCenter(plan.groupId),
       meal: plan.intent.meal,
       style: this.decidedStyle(plan),
+      cuisine: this.decidedCuisine(plan),
     };
+  }
+
+  /** Cuisine from the message, else the cuisine poll's leader, else no constraint. */
+  private decidedCuisine(plan: Plan): string | null {
+    if (plan.intent.cuisine) return plan.intent.cuisine;
+    const spec = this.pollSpec(plan.id)?.cuisine;
+    return spec ? this.pollLeader(plan.id, spec) : null;
   }
 
   /** Style from the message, else the style poll's leader, else no constraint. */
@@ -1600,13 +1608,17 @@ export class BubbleworksEngine implements PlanEngine {
     if (plan.intent.style) return plan.intent.style;
     const spec = this.pollSpec(plan.id)?.style;
     if (!spec) return null;
-    const { decision, counts } = this.tally(plan.id, spec);
+    const leader = this.pollLeader(plan.id, spec);
+    return leader === 'sit_down' || leader === 'fast_food' ? leader : null;
+  }
+
+  /** The poll's decided leader, else a plurality with at least one vote and no tie. */
+  private pollLeader(planId: string, spec: PollSpec): string | null {
+    const { decision, counts } = this.tally(planId, spec);
     const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    // Plurality with at least one vote and no tie; otherwise no style constraint.
     const top = ranked[0];
     const plurality = top && top[1] > 0 && (ranked[1]?.[1] ?? 0) < top[1] ? top[0] : null;
-    const leader = decision.leader ?? plurality;
-    return leader === 'sit_down' || leader === 'fast_food' ? leader : null;
+    return decision.leader ?? plurality;
   }
 
   private groupCenter(groupId: string) {

@@ -52,6 +52,45 @@ describe('filter', () => {
     const coffee = filterCandidates(venues, [member('user_dev')], { ...ctx, meal: 'coffee' });
     expect(coffee.feasible.every((v) => v.cuisine === 'coffee')).toBe(true);
   });
+  it("a decided cuisine is binding: voted mexican on fast food never picks Raising Cane's", () => {
+    const likesAmerican = (id: string) =>
+      member(id, {
+        pollChoices: ['mexican'],
+        softFacts: [
+          {
+            type: 'cuisine_like',
+            value: 'american',
+            hard: false,
+          } as Fact,
+        ],
+        hardFacts: [],
+      });
+    const result = solve({
+      venues,
+      members: [likesAmerican('user_ava'), likesAmerican('user_ben')],
+      ctx: { ...ctx, meal: 'dinner', style: 'fast_food', cuisine: 'mexican' },
+    });
+    expect(result.winner?.name).toBe('Chipotle');
+    expect(result.feasible.every((v) => v.cuisine === 'mexican')).toBe(true);
+  });
+  it('a cuisine that clashes with the style relaxes the style, then the cuisine', () => {
+    const people = [member('user_dev', { hardFacts: [], softFacts: [] })];
+    const indian = filterCandidates(venues, people, {
+      ...ctx,
+      meal: 'dinner',
+      style: 'fast_food',
+      cuisine: 'indian',
+    });
+    expect(indian.feasible.map((v) => v.cuisine)).toEqual(['indian']);
+    const none = filterCandidates(venues, people, {
+      ...ctx,
+      meal: 'dinner',
+      style: 'fast_food',
+      cuisine: 'ethiopian',
+    });
+    expect(none.feasible.length).toBeGreaterThan(0);
+    expect(none.feasible.every((v) => v.style === 'fast_food')).toBe(true);
+  });
   it('distance filter uses the member location when known', () => {
     const far = member('user_dev', { location: { lat: 35.95, lng: -79.0 } });
     const { feasible } = filterCandidates(venues, [far], ctx);

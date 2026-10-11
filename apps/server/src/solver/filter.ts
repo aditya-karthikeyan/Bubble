@@ -71,7 +71,25 @@ export function fitsMeal(venue: Venue, meal: SolverContext['meal']): boolean {
   return meal === 'coffee' ? COFFEE_ONLY.has(venue.cuisine) : !COFFEE_ONLY.has(venue.cuisine);
 }
 
+/**
+ * Filters candidates. A decided cuisine or style never dead-ends the plan: when nothing fits
+ * both, the style gives way first (the cuisine vote is the more specific one), then the cuisine.
+ */
 export function filterCandidates(
+  venues: Venue[],
+  members: SolverMember[],
+  ctx: SolverContext,
+): { feasible: Venue[]; infeasible: Infeasibility[] } {
+  const strict = filterStrict(venues, members, ctx);
+  if (strict.feasible.length || !ctx.cuisine) return strict;
+  if (ctx.style) {
+    const anyStyle = filterStrict(venues, members, { ...ctx, style: null });
+    if (anyStyle.feasible.length) return anyStyle;
+  }
+  return filterStrict(venues, members, { ...ctx, cuisine: null });
+}
+
+function filterStrict(
   venues: Venue[],
   members: SolverMember[],
   ctx: SolverContext,
@@ -87,6 +105,14 @@ export function filterCandidates(
         userId: null,
         reason: 'style',
         detail: `${style} but the table wants ${ctx.style}`,
+      });
+    }
+    if (ctx.cuisine && venue.cuisine !== ctx.cuisine) {
+      problems.push({
+        venueId: venue.id,
+        userId: null,
+        reason: 'cuisine',
+        detail: `${venue.cuisine} but the table voted ${ctx.cuisine}`,
       });
     }
     if (!fitsMeal(venue, ctx.meal)) {
