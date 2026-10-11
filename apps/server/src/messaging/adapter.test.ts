@@ -157,6 +157,20 @@ describe('outbound', () => {
     expect(transport.sends()).toHaveLength(PERSONAS.length - 1);
   });
 
+  it('closes a poll silently when announcing is off (the live card shows it)', async () => {
+    const { transport, messaging } = await setup({ announcePollClose: false });
+    await messaging.sendPoll({
+      chatId: dmChatId(AVA.id),
+      planId: 'plan_1',
+      pollId: 'poll_quiet',
+      question: 'Cuisine?',
+      options: [{ key: 'thai', label: 'Thai' }],
+      idempotencyKey: 'plan_1:poll_quiet',
+    });
+    await messaging.closePoll({ chatId: dmChatId(AVA.id), pollId: 'poll_quiet' });
+    expect(transport.sends()).toHaveLength(1);
+  });
+
   it('closes a poll by announcing the leading option once', async () => {
     const { transport, messaging } = await setup();
     await messaging.sendPoll({
