@@ -151,7 +151,15 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
       if (intake) throw new Error('engine already attached');
       const classifier =
         attachOptions.classifier !== undefined ? attachOptions.classifier : defaultClassifier;
-      intake = new PlanIntake({ port, engine, bundles, classifier, log, audit });
+      intake = new PlanIntake({
+        port,
+        engine,
+        bundles,
+        classifier,
+        log,
+        audit,
+        bundleMode: config.MESSAGING_BUNDLE_MODE,
+      });
       intake.start();
       return intake;
     },

@@ -23,14 +23,14 @@ import {
 } from '@bubbleworks/shared';
 import type { Logger } from '../events/bus.js';
 import type { SpectrumMessaging } from './adapter.js';
-import type { BundleStore } from './bundle.js';
+import { sendLiveLink, type BundleStore } from './bundle.js';
 import { renderTicket, walkMinutes, type TicketData } from './card-image.js';
 
 export const MAX_EDITS = 4;
 export const EDIT_WINDOW_MS = 14 * 60_000;
 
 export interface LiveSurfacesOptions {
-  port: Pick<SpectrumMessaging, 'editMessage' | 'sendImage'>;
+  port: Pick<SpectrumMessaging, 'editMessage' | 'sendImage' | 'sendRichLink'>;
   bundles: BundleStore;
   bus: {
     subscribe(planId: string, handler: (event: PlanEvent) => void | Promise<void>): () => void;
@@ -88,6 +88,8 @@ export class LiveSurfaces {
           const meal = bundle?.meal ? capitalize(bundle.meal) : 'Plan';
           const n = this.o.plans.inCount(event.planId);
           await this.edit(event.planId, `🫧 ${meal} · ${n} in · finding the spot`);
+          // Stage 3 of the bundle: now there is something to watch.
+          await sendLiveLink(this.o.port, this.o.bundles, event.planId);
         } else if (event.to === 'BOOKING' && view.venueName) {
           await this.edit(event.planId, `📞 Calling ${view.venueName}`);
         }

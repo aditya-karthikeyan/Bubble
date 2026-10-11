@@ -19,6 +19,8 @@ const Env = z
     MESSAGING_LINK_STYLE: z.enum(['app', 'richlink']).default('app'),
     /** Send "Voting closed: X". Off by default: the live card already shows the plan moved on. */
     MESSAGING_ANNOUNCE_POLL_CLOSE: z.stringbool().default(false),
+    /** staged: headcount, then poll once enough are in, then link at deliberation. */
+    MESSAGING_BUNDLE_MODE: z.enum(['staged', 'all_at_once']).default('staged'),
   })
   .refine(
     (env) =>

@@ -1,10 +1,14 @@
 /**
- * The question bundle: what every crew member gets when a plan starts.
+ * The question bundle: what every crew member gets when a plan starts, in stages so nobody is
+ * asked anything until the plan is actually happening.
  *
- *   1. Headcount line: "Pranav is planning dinner tonight. Tap 👍 on this message if you're
- *      in. Voting closes 7:05."
- *   2. Cuisine poll, only when the engine's question policy asks for one.
- *   3. Live page link (rich link), when the plan has a page.
+ *   1. Headcount line, right away: "Pranav's making a plan for dinner tonight. Tap 👍 on this
+ *      message if you're in."
+ *   2. Cuisine poll, once enough people are in (MIN_PARTY_SIZE, the organizer counts), and only
+ *      when the engine's question policy asks for one.
+ *   3. Live page link, when deliberation starts (sent by LiveSurfaces on DELIBERATING).
+ *
+ * MESSAGING_BUNDLE_MODE=all_at_once sends all three immediately (the Phase 2 behavior).
  *
  * The engine decides what to ask (QuestionDecision); this renders it through the MessagingPort
  * and remembers which logical messages and polls belong to which plan, so 👍 tapbacks, RSVP
@@ -12,12 +16,15 @@
  */
 import type Database from 'better-sqlite3';
 import {
+  MIN_PARTY_SIZE,
   idempotencyKey,
   type IsoDateTime,
   type MealKind,
   type MessagingPort,
   type PollOption,
 } from '@bubbleworks/shared';
+
+export type BundleMode = 'staged' | 'all_at_once';
 
 export interface QuestionDecision {
   planId: string;
@@ -47,11 +54,13 @@ export interface BundleResult {
   headcountMessageId: string;
   pollMessageId: string | null;
   linkMessageId: string | null;
-  /** Bundle start to poll sent, when there was a poll. */
+  /** Bundle start to poll sent, when the poll went out with the bundle. */
   pollMs: number | null;
-  /** Bundle start to everything sent. */
+  /** Bundle start to everything this call sent. */
   ms: number;
 }
+
+type PendingPoll = NonNullable<QuestionDecision['cuisinePoll']>;
 
 export interface BundleRecord {
   planId: string;
@@ -63,6 +72,12 @@ export interface BundleRecord {
   closesAt: IsoDateTime;
   /** When the headcount line went out; iMessage only allows edits for 15 minutes. */
   createdAt?: IsoDateTime;
+  /** Staged bundles: the poll waiting for enough people, and the link waiting for deliberation. */
+  pendingPoll?: PendingPoll | null;
+  pageUrl?: string | null;
+  pollSent?: boolean;
+  linkSent?: boolean;
+  closed?: boolean;
 }
 
 export class BundleStore {
@@ -80,15 +95,35 @@ export class BundleStore {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS p2_bundles_chat ON p2_bundles (chat_id, closed);
+      CREATE TABLE IF NOT EXISTS p2_bundle_in (
+        plan_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        PRIMARY KEY (plan_id, user_id)
+      );
     `);
+    // Columns added for staged bundles; existing databases (Railway's volume) get them here.
+    const have = new Set(
+      (sqlite.prepare('PRAGMA table_info(p2_bundles)').all() as Array<{ name: string }>).map(
+        (c) => c.name,
+      ),
+    );
+    for (const [name, type] of [
+      ['pending_poll', 'TEXT'],
+      ['page_url', 'TEXT'],
+      ['poll_sent', 'INTEGER NOT NULL DEFAULT 0'],
+      ['link_sent', 'INTEGER NOT NULL DEFAULT 0'],
+    ] as const) {
+      if (!have.has(name)) sqlite.exec(`ALTER TABLE p2_bundles ADD COLUMN ${name} ${type}`);
+    }
   }
 
   save(record: BundleRecord): void {
     this.sqlite
       .prepare(
         `INSERT OR REPLACE INTO p2_bundles
-           (plan_id, chat_id, headcount_message_id, poll_id, organizer_name, meal, closes_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (plan_id, chat_id, headcount_message_id, poll_id, organizer_name, meal, closes_at,
+            created_at, pending_poll, page_url, poll_sent, link_sent)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.planId,
@@ -99,23 +134,33 @@ export class BundleStore {
         record.meal,
         record.closesAt,
         new Date().toISOString(),
+        record.pendingPoll ? JSON.stringify(record.pendingPoll) : null,
+        record.pageUrl ?? null,
+        record.pollSent ? 1 : 0,
+        record.linkSent ? 1 : 0,
       );
   }
 
   private one(where: string, value: string): BundleRecord | null {
     const row = this.sqlite
       .prepare(`SELECT * FROM p2_bundles WHERE ${where} ORDER BY rowid DESC LIMIT 1`)
-      .get(value) as Record<string, string | null> | undefined;
+      .get(value) as Record<string, string | number | null> | undefined;
     if (!row) return null;
+    const str = (k: string) => (row[k] as string | null) ?? null;
     return {
-      planId: row['plan_id']!,
-      chatId: row['chat_id']!,
-      headcountMessageId: row['headcount_message_id']!,
-      pollId: row['poll_id'] ?? null,
-      organizerName: row['organizer_name']!,
-      meal: (row['meal'] as MealKind | null) ?? null,
-      closesAt: row['closes_at']!,
-      createdAt: row['created_at']!,
+      planId: str('plan_id')!,
+      chatId: str('chat_id')!,
+      headcountMessageId: str('headcount_message_id')!,
+      pollId: str('poll_id'),
+      organizerName: str('organizer_name')!,
+      meal: (str('meal') as MealKind | null) ?? null,
+      closesAt: str('closes_at')!,
+      createdAt: str('created_at')!,
+      pendingPoll: str('pending_poll') ? (JSON.parse(str('pending_poll')!) as PendingPoll) : null,
+      pageUrl: str('page_url'),
+      pollSent: row['poll_sent'] === 1,
+      linkSent: row['link_sent'] === 1,
+      closed: row['closed'] === 1,
     };
   }
 
@@ -140,6 +185,36 @@ export class BundleStore {
   close(planId: string): void {
     this.sqlite.prepare('UPDATE p2_bundles SET closed = 1 WHERE plan_id = ?').run(planId);
   }
+
+  /** Records a yes or no; returns how many are in now. */
+  markIn(planId: string, userId: string, isIn: boolean): number {
+    if (isIn) {
+      this.sqlite
+        .prepare('INSERT OR IGNORE INTO p2_bundle_in (plan_id, user_id) VALUES (?, ?)')
+        .run(planId, userId);
+    } else {
+      this.sqlite
+        .prepare('DELETE FROM p2_bundle_in WHERE plan_id = ? AND user_id = ?')
+        .run(planId, userId);
+    }
+    return this.inCount(planId);
+  }
+
+  inCount(planId: string): number {
+    const row = this.sqlite
+      .prepare('SELECT COUNT(*) AS n FROM p2_bundle_in WHERE plan_id = ?')
+      .get(planId) as { n: number };
+    return row.n;
+  }
+
+  /** Flips poll_sent / link_sent once; true only for the caller that flipped it. */
+  claim(planId: string, what: 'poll' | 'link'): boolean {
+    const column = what === 'poll' ? 'poll_sent' : 'link_sent';
+    const result = this.sqlite
+      .prepare(`UPDATE p2_bundles SET ${column} = 1 WHERE plan_id = ? AND ${column} = 0`)
+      .run(planId);
+    return result.changes === 1;
+  }
 }
 
 /** "7:05" in the crew's timezone. */
@@ -156,28 +231,35 @@ export function clockTime(iso: IsoDateTime, timezone: string): string {
 export function headcountText(decision: QuestionDecision): string {
   const when =
     decision.dayOffset === 1 ? 'tomorrow' : decision.meal === 'dinner' ? 'tonight' : 'today';
-  const what = decision.meal ?? 'something';
+  const what = decision.meal ?? 'food';
   const closes = clockTime(decision.headcount.closesAt, decision.headcount.timezone);
   if (decision.headcount.mode === 'opt_out') {
-    return `🫧 ${decision.organizerName} is planning ${what} ${when}. You're counted in, reply "out" if you can't make it. Locking it in at ${closes}.`;
+    return `🫧 ${decision.organizerName}'s making a plan for ${what} ${when}. You're counted in, reply "out" if you can't make it. Locking it in at ${closes}.`;
   }
-  return `${decision.organizerName} is planning ${what} ${when}. Tap 👍 on this message if you're in. Voting closes ${closes}.`;
+  return `${decision.organizerName}'s making a plan for ${what} ${when}. Tap 👍 on this message if you're in.`;
 }
 
+const key = (planId: string, part: string) => idempotencyKey(planId, 'bundle', part);
+
+/**
+ * Stage 1 (and, in all_at_once mode, everything). organizerUserId counts as in from the start,
+ * since they asked.
+ */
 export async function renderBundle(
-  port: MessagingPort,
+  port: Pick<MessagingPort, 'sendGroupText' | 'sendPoll' | 'sendRichLink'>,
   store: BundleStore,
   decision: QuestionDecision,
+  options: { mode?: BundleMode; organizerUserId?: string | null } = {},
 ): Promise<BundleResult> {
   const started = performance.now();
-  const key = (part: string) => idempotencyKey(decision.planId, 'bundle', part);
+  const mode = options.mode ?? 'staged';
 
   const headcount = await port.sendGroupText({
     chatId: decision.chatId,
     text: headcountText(decision),
-    idempotencyKey: key('headcount'),
+    idempotencyKey: key(decision.planId, 'headcount'),
   });
-  // Save before the poll goes out, so an early 👍 or "I'm in" already routes to the plan.
+  // Save before anything else goes out, so an early 👍 or "I'm in" already routes to the plan.
   store.save({
     planId: decision.planId,
     chatId: decision.chatId,
@@ -186,37 +268,74 @@ export async function renderBundle(
     organizerName: decision.organizerName,
     meal: decision.meal,
     closesAt: decision.headcount.closesAt,
+    pendingPoll: decision.cuisinePoll,
+    pageUrl: decision.pageUrl,
   });
+  if (options.organizerUserId) store.markIn(decision.planId, options.organizerUserId, true);
 
-  // Waves: everyone's poll goes out before anyone's link card. Photon's shared gateway appears
-  // to work through sends one at a time, so a slow link card (~2.6 s) queued ahead of a poll
-  // delayed the poll for the whole crew (3-phone run: poll at 7.7 s).
-  const poll = decision.cuisinePoll
-    ? await port.sendPoll({
-        chatId: decision.chatId,
-        planId: decision.planId,
-        pollId: decision.cuisinePoll.pollId,
-        question: decision.cuisinePoll.question ?? 'What are we eating?',
-        options: decision.cuisinePoll.options,
-        idempotencyKey: key('poll'),
-      })
-    : null;
+  if (mode === 'staged') {
+    return {
+      headcountMessageId: headcount.messageId,
+      pollMessageId: null,
+      linkMessageId: null,
+      pollMs: null,
+      ms: Math.round(performance.now() - started),
+    };
+  }
+
+  // all_at_once: poll wave, then link wave (slow link cards must not delay anyone's poll).
+  const poll = (await maybeSendPoll(port, store, decision.planId, { force: true })) ?? null;
   const pollMs = poll ? Math.round(performance.now() - started) : null;
-
-  const link = decision.pageUrl
-    ? await port.sendRichLink({
-        chatId: decision.chatId,
-        url: decision.pageUrl,
-        title: 'Watch the bubbles decide',
-        idempotencyKey: key('link'),
-      })
-    : null;
-
+  const link = (await sendLiveLink(port, store, decision.planId)) ?? null;
   return {
     headcountMessageId: headcount.messageId,
-    pollMessageId: poll?.messageId ?? null,
-    linkMessageId: link?.messageId ?? null,
+    pollMessageId: poll,
+    linkMessageId: link,
     pollMs,
     ms: Math.round(performance.now() - started),
   };
+}
+
+/**
+ * Stage 2: the cuisine poll, once enough people are in. Returns the poll's message id when this
+ * call sent it, null otherwise (no poll, not enough people yet, already sent, plan closed).
+ */
+export async function maybeSendPoll(
+  port: Pick<MessagingPort, 'sendPoll'>,
+  store: BundleStore,
+  planId: string,
+  options: { force?: boolean; minIn?: number } = {},
+): Promise<string | null> {
+  const bundle = store.byPlan(planId);
+  if (!bundle?.pendingPoll || bundle.pollSent || bundle.closed) return null;
+  if (!options.force && store.inCount(planId) < (options.minIn ?? MIN_PARTY_SIZE)) return null;
+  if (!store.claim(planId, 'poll')) return null;
+  const poll = bundle.pendingPoll;
+  const sent = await port.sendPoll({
+    chatId: bundle.chatId,
+    planId,
+    pollId: poll.pollId,
+    question: poll.question ?? 'What are we eating?',
+    options: poll.options,
+    idempotencyKey: key(planId, 'poll'),
+  });
+  return sent.messageId;
+}
+
+/** Stage 3: the live page link, once. Returns its message id when this call sent it. */
+export async function sendLiveLink(
+  port: Pick<MessagingPort, 'sendRichLink'>,
+  store: BundleStore,
+  planId: string,
+): Promise<string | null> {
+  const bundle = store.byPlan(planId);
+  if (!bundle?.pageUrl || bundle.linkSent) return null;
+  if (!store.claim(planId, 'link')) return null;
+  const sent = await port.sendRichLink({
+    chatId: bundle.chatId,
+    url: bundle.pageUrl,
+    title: 'Watch the bubbles decide',
+    idempotencyKey: key(planId, 'link'),
+  });
+  return sent.messageId;
 }

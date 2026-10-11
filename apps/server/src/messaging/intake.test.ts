@@ -109,9 +109,7 @@ describe('bundle text', () => {
         headcount: { closesAt: '2026-10-10T23:05:00.000Z', timezone: 'America/New_York' },
         pageUrl: null,
       }),
-    ).toBe(
-      "Pranav is planning dinner tonight. Tap 👍 on this message if you're in. Voting closes 7:05.",
-    );
+    ).toBe("Pranav's making a plan for dinner tonight. Tap 👍 on this message if you're in.");
   });
 });
 
@@ -119,8 +117,8 @@ describe('PlanIntake', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it('shows typing before batching, then sends headcount, poll, and link to every member', async () => {
-    const { transport, engine, text } = await setup();
+  it('stages the bundle: headcount first, poll once two are in', async () => {
+    const { transport, engine, port, text } = await setup();
     await text(AVA.handle, 'dinner today?', 'in_1');
     await vi.runAllTimersAsync();
     // Typing went to Ava's DM before anything was sent.
@@ -129,21 +127,34 @@ describe('PlanIntake', () => {
     );
     expect(typingOn).toBeGreaterThanOrEqual(0);
     expect(typingOn).toBeLessThan(transport.calls.findIndex((c) => c.op === 'send'));
-
     expect(engine.intents).toEqual([
       { chatId: CREW, userId: AVA.id, messageId: 'in_1', text: 'dinner today?', at },
     ]);
-    const sends = transport.sends();
-    expect(sends).toHaveLength(PERSONAS.length * 3);
-    const toBen = sends
-      .filter((s) => s.chatId === `any;-;${BEN.handle}`)
-      .map((s) => s.content.kind);
-    expect(toBen).toEqual(['text', 'poll', 'link']);
-    expect(transport.calls.at(-1)).toEqual({
-      op: 'typing',
-      chatId: `any;-;${AVA.handle}`,
-      on: false,
+
+    // Stage 1: only the headcount line. Ava (the organizer) already counts as in.
+    expect(transport.sends().map((s) => s.content.kind)).toEqual(PERSONAS.map(() => 'text'));
+
+    // Stage 2: Ben's 👍 makes two, so the poll goes out to everyone.
+    const bensHeadcount = transport.sends().find((s) => s.chatId === `any;-;${BEN.handle}`)!;
+    await port.handleInbound({
+      kind: 'reaction',
+      providerId: 'rx_ben',
+      phone: BEN.handle,
+      targetMessageId: bensHeadcount.messageId,
+      emoji: '👍',
+      removed: false,
+      at,
     });
+    const polls = transport.sends().filter((s) => s.content.kind === 'poll');
+    expect(polls).toHaveLength(PERSONAS.length);
+    // A third yes does not resend it.
+    await text(CHLOE.handle, "I'm in", 'in_2');
+    await vi.runAllTimersAsync();
+    expect(transport.sends().filter((s) => s.content.kind === 'poll')).toHaveLength(
+      PERSONAS.length,
+    );
+    // The link waits for deliberation (LiveSurfaces).
+    expect(transport.sends().some((s) => s.content.kind === 'link')).toBe(false);
   });
 
   it('turns a 👍 on any member copy of the headcount into handleHeadcount(in)', async () => {
@@ -183,6 +194,8 @@ describe('PlanIntake', () => {
   it('forwards poll votes to handleVote with the plan id', async () => {
     const { transport, engine, port, text } = await setup();
     await text(AVA.handle, 'dinner today?', 'in_1');
+    await vi.runAllTimersAsync();
+    await text(BEN.handle, "I'm in", 'in_ben');
     await vi.runAllTimersAsync();
     const bensPoll = transport
       .sends()
