@@ -65,6 +65,7 @@ async function main(): Promise<void> {
     log: (l) => say(`CALL ${l}`),
   });
   const engine = new BubbleworksEngine({
+    now: () => new Date('2026-10-10T21:00:00.000Z'),
     runtime: rt,
     bubbles,
     messaging,

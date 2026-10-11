@@ -6,7 +6,12 @@ import { loadVenuesFile } from '../venues/repo.js';
 import { VENUES_FIXTURE } from '../test-helpers.js';
 import { filterCandidates } from '../solver/filter.js';
 import type { SolverMember } from '../solver/types.js';
-import { decideCuisineQuestion, decideStartTime, zonedInstant } from './question-policy.js';
+import {
+  decideCuisineQuestion,
+  decideStartTime,
+  earliestStart,
+  zonedInstant,
+} from './question-policy.js';
 
 const venues: Venue[] = loadVenuesFile(VENUES_FIXTURE);
 const ctx = { day: 6, startMinutes: 19 * 60, groupCenter: HACKATHON_CENTER };
@@ -55,22 +60,29 @@ describe('cuisine question', () => {
 });
 
 describe('start time', () => {
+  const afternoon = new Date('2026-10-10T21:00:00.000Z'); // 17:00 New York
   it('honours a requested time', () => {
-    expect(decideStartTime(20 * 60, {}, '2026-10-10', 'America/New_York').startMinutes).toBe(
-      20 * 60,
-    );
+    expect(
+      decideStartTime(20 * 60, {}, '2026-10-10', 'America/New_York', afternoon).startMinutes,
+    ).toBe(20 * 60);
   });
   it('avoids the window where someone is busy', () => {
     const busyAt7 = {
       start: new Date(zonedInstant('2026-10-10', 19 * 60, 'America/New_York')).toISOString(),
       end: new Date(zonedInstant('2026-10-10', 20 * 60, 'America/New_York')).toISOString(),
     };
-    const d = decideStartTime(null, { a: [busyAt7], b: [] }, '2026-10-10', 'America/New_York');
+    const d = decideStartTime(
+      null,
+      { a: [busyAt7], b: [] },
+      '2026-10-10',
+      'America/New_York',
+      afternoon,
+    );
     expect(d.startMinutes).not.toBe(19 * 60);
     expect(d.freeCounts[19 * 60]).toBe(1);
   });
   it('breaks a tie with the default', () => {
-    const d = decideStartTime(null, { a: [], b: [] }, '2026-10-10', 'America/New_York');
+    const d = decideStartTime(null, { a: [], b: [] }, '2026-10-10', 'America/New_York', afternoon);
     expect(d).toMatchObject({ startMinutes: 19 * 60, tie: true });
   });
   it('zonedInstant converts local minutes to the right instant', () => {
@@ -78,5 +90,33 @@ describe('start time', () => {
     expect(new Date(zonedInstant('2026-10-10', 19 * 60, 'America/New_York')).toISOString()).toBe(
       '2026-10-10T23:00:00.000Z',
     );
+  });
+});
+
+describe('start time never in the past', () => {
+  const tz = 'America/New_York';
+  const late = new Date('2026-10-11T00:53:00.000Z'); // 8:53 PM New York on 2026-10-10
+  it('floors to now + 45 min rounded up to the half hour', () => {
+    expect(earliestStart('2026-10-10', tz, late)).toBe(22 * 60); // 21:38 -> 22:00
+    expect(earliestStart('2026-10-11', tz, late)).toBe(0); // tomorrow: no floor
+    expect(earliestStart('2026-10-10', tz, new Date('2026-10-10T21:00:00.000Z'))).toBe(18 * 60); // 17:45 -> 18:00
+  });
+  it('bumps the default past the floor instead of booking 7 PM at 8:53 PM', () => {
+    const d = decideStartTime(null, {}, '2026-10-10', tz, late);
+    expect(d.startMinutes).toBeGreaterThanOrEqual(22 * 60);
+    expect(d.bumped).toBe(true);
+  });
+  it('bumps a requested time that has passed and leaves a future one alone', () => {
+    expect(decideStartTime(19 * 60, {}, '2026-10-10', tz, late)).toMatchObject({
+      startMinutes: 22 * 60,
+      bumped: true,
+    });
+    expect(decideStartTime(19 * 60, {}, '2026-10-11', tz, late)).toMatchObject({
+      startMinutes: 19 * 60,
+      bumped: false,
+    });
+    expect(
+      decideStartTime(null, {}, '2026-10-10', tz, new Date('2026-10-10T21:00:00.000Z')),
+    ).toMatchObject({ startMinutes: 19 * 60, bumped: false });
   });
 });

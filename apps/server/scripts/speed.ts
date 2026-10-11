@@ -33,6 +33,7 @@ async function one(): Promise<Record<string, number>> {
   const ref: { e: BubbleworksEngine | null } = { e: null };
   const caller = new FakeCaller((r) => ref.e!.handleCallResult(r), { delayMs: 5 });
   const engine = new BubbleworksEngine({
+    now: () => new Date('2026-10-10T21:00:00.000Z'),
     runtime: rt,
     bubbles: new FakeBubbles(),
     messaging: new FakeMessaging({ print: false }),

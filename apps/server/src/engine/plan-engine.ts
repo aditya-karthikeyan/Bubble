@@ -54,6 +54,7 @@ import {
   cuisineLabel,
   decideCuisineQuestion,
   decideStartTime,
+  earliestStart,
   zonedInstant,
 } from './question-policy.js';
 import { IllegalTransitionError, isTerminal } from './state-machine.js';
@@ -193,7 +194,7 @@ export class BubbleworksEngine implements PlanEngine {
     );
     const busy: Record<string, (typeof members)[number]['busy']> = {};
     for (const m of members) busy[m.userId] = m.busy;
-    const time = decideStartTime(intent.startMinutes, busy, intent.date, this.tz);
+    const time = decideStartTime(intent.startMinutes, busy, intent.date, this.tz, this.now());
     const ctx = this.ctx(plan, time.startMinutes);
     const preview = solve({ venues: this.rt.venues(), members, ctx });
     const cuisine = decideCuisineQuestion(preview.feasible, members, ctx, intent.cuisine);
@@ -205,10 +206,11 @@ export class BubbleworksEngine implements PlanEngine {
         reason: cuisine.reason,
         startMinutes: time.startMinutes,
         timeTie: time.tie,
+        timeBumped: time.bumped,
       },
       'question policy',
     );
-    if (time.startMinutes !== intent.startMinutes) {
+    if (time.startMinutes !== intent.startMinutes || time.bumped) {
       this.rt.plans.setChoice(plan.id, {
         chosenVenueId: null,
         backupVenueId: null,
@@ -1333,6 +1335,9 @@ export class BubbleworksEngine implements PlanEngine {
       this.rt.venues().filter((v) => !vetoed.has(v.id)),
       members,
       ctx,
+      {
+        minStartMinutes: earliestStart(plan.intent.date, this.tz, this.now()),
+      },
     );
     const picks = pickAsks(analysis);
     this.rt.plans.audit(planId, 'deadlock_analysis', {
@@ -1444,7 +1449,9 @@ export class BubbleworksEngine implements PlanEngine {
     const startMinutes = plan.startAt
       ? this.minutesOf(plan.startAt)
       : (plan.intent.startMinutes ?? SOLVER.default_start_min);
-    const analysis = analyzeDeadlock(this.rt.venues(), members, this.ctx(plan, startMinutes));
+    const analysis = analyzeDeadlock(this.rt.venues(), members, this.ctx(plan, startMinutes), {
+      minStartMinutes: earliestStart(plan.intent.date, this.tz, this.now()),
+    });
     await this.noFit(
       planId,
       analysis.timeShift ? { startMinutes: analysis.timeShift.startMinutes } : null,
