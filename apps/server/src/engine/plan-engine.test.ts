@@ -363,6 +363,39 @@ describe('BubbleworksEngine', () => {
     expect(h.events.at(-1)?.type).toBe('plan_closed');
   });
 
+  it('a poll vote from an undecided member counts as in', async () => {
+    const { planId } = await h.engine.handleIntent({
+      chatId: CHAT,
+      userId: 'user_ava',
+      messageId: 'm1',
+      text: 'dinner?',
+      at: h.at(),
+    });
+    const poll = h.messaging.sent.find((s) => s.kind === 'poll');
+    const pollId = poll && 'input' in poll ? poll.input.pollId : '';
+    const option = poll && 'input' in poll ? poll.input.options[0]!.key : '';
+    await h.engine.handleVote({
+      planId: planId!,
+      pollId,
+      userId: 'user_ben',
+      choices: [option],
+      at: h.at(),
+    });
+    expect(h.rt.plans.members(planId!).find((m) => m.userId === 'user_ben')?.status).toBe('in');
+    expect(h.events.some((e) => e.type === 'bubble_joined' && e.bubble.userId === 'user_ben')).toBe(
+      true,
+    );
+    // A cleared vote from someone already in does not change their status.
+    await h.engine.handleVote({
+      planId: planId!,
+      pollId,
+      userId: 'user_ben',
+      choices: [],
+      at: h.at(),
+    });
+    expect(h.rt.plans.members(planId!).find((m) => m.userId === 'user_ben')?.status).toBe('in');
+  });
+
   it('too few in closes the plan', async () => {
     const { planId } = await h.engine.handleIntent({
       chatId: CHAT,
