@@ -33,6 +33,7 @@ describe('signup', () => {
     expect(result.user).toMatchObject({ displayName: 'Dee Dee', handle: '+15550000009' });
     const post = fetch.mock.calls.find(([, init]) => init?.method === 'POST')!;
     expect(JSON.parse(String(post[1]!.body))).toEqual({
+      type: 'shared',
       firstName: 'Dee',
       lastName: 'Dee',
       email: 'dee@example.com',

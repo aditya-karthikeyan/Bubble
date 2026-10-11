@@ -106,9 +106,8 @@ async function addJudge(): Promise<void> {
     throw new Error('Usage: add-judge "Name" +15551234567 [--imessage-email x@icloud.com]');
   }
   const imessageEmail = flag('--imessage-email');
-  // Photon requires an email. Without one we use a placeholder on the reserved .invalid TLD,
-  // which can never receive mail.
-  const email = imessageEmail ?? `${phone.replace(/\D/g, '')}@judges.bubbleworks.invalid`;
+  // Email is optional on Photon; pass it only when the judge's iMessage runs on it.
+  const email = imessageEmail ?? null;
   const [firstName, ...rest] = name.trim().split(/\s+/);
   const p = photon();
   const { bubbleNumber } = await p.register({
