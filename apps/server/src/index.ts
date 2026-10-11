@@ -60,7 +60,8 @@ async function main(): Promise<void> {
   const messaging = createMessaging({
     config: messagingConfig,
     runtime,
-    links: { publicBaseUrl: publicBase, linkSecret },
+    // The booked card opens the ticket on the website when there is one (WEB_PUBLIC_URL).
+    links: { publicBaseUrl: publicBase, linkSecret, pageBaseUrl: config.WEB_PUBLIC_URL ?? null },
   });
   const startMessaging = messagingConfig.SPECTRUM_PROVIDER === 'imessage' || process.stdin.isTTY;
 
@@ -212,22 +213,30 @@ async function main(): Promise<void> {
       .send(joinPageHtml({ code: request.params.code, crewName: crew?.name ?? null }));
   });
 
-  /** The booked ticket the Mini App card opens. The token is the signed .ics booking token. */
+  const ticketDeps = {
+    db: runtime.db,
+    plans: runtime.plans,
+    crews: runtime.crews,
+    publicBaseUrl: publicBase,
+    linkSecret,
+  };
+  /**
+   * The booked ticket the Mini App card opens. The token is the signed .ics booking token. With
+   * WEB_PUBLIC_URL set the card opens the website's /t/ page (fed by /api/tickets/:token); this
+   * page is the fallback.
+   */
   app.fastify.get<{ Params: { token: string } }>('/t/:token', async (request, reply) => {
-    const ticket = await loadTicketPage(
-      {
-        db: runtime.db,
-        plans: runtime.plans,
-        crews: runtime.crews,
-        publicBaseUrl: publicBase,
-        linkSecret,
-      },
-      request.params.token,
-    );
+    const ticket = await loadTicketPage(ticketDeps, request.params.token);
     return reply
       .code(ticket ? 200 : 404)
       .type('text/html; charset=utf-8')
       .send(ticketPageHtml(ticket));
+  });
+
+  app.fastify.get<{ Params: { token: string } }>('/api/tickets/:token', async (request, reply) => {
+    const ticket = await loadTicketPage(ticketDeps, request.params.token);
+    if (!ticket) return reply.code(404).send({ ok: false, error: 'no such ticket' });
+    return { ok: true, ticket };
   });
 
   app.fastify.get<{ Params: { code: string } }>('/api/crews/:code', async (request, reply) => {

@@ -477,3 +477,149 @@ input:focus {
     }
   }
 }
+
+/* Ticket page (/t/[token]): what the booked card opens. Frutiger Aero glass over the sky. */
+.ticket-sky {
+  position: relative;
+  overflow: hidden;
+}
+
+.ticket-sky .bokeh {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ticket-sky .wrap {
+  position: relative;
+}
+
+.ticket-pill {
+  display: inline-block;
+  margin: 0 0 10px;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  color: #fff;
+  background: linear-gradient(180deg, #8ee86b 0%, #3fbf3f 50%, #23992e 100%);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.6),
+    0 6px 14px rgba(35, 153, 46, 0.3);
+  text-shadow: 0 1px 1px rgba(0, 60, 10, 0.35);
+}
+
+.ticket {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+}
+
+.ticket::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 46%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+
+.ticket-when {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 22px 20px 18px;
+  text-align: center;
+}
+
+.ticket-time {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+
+.ticket-party {
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.ticket-tear {
+  height: 0;
+  margin: 0 18px;
+  border-top: 2px dashed var(--glass-edge);
+}
+
+.ticket-rows {
+  position: relative;
+  margin: 0;
+  padding: 6px 20px 0;
+}
+
+.ticket-rows div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--glass-edge);
+}
+
+.ticket-rows dt {
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
+.ticket-rows dd {
+  margin: 0;
+  font-weight: 800;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.ticket-label {
+  position: relative;
+  margin: 16px 20px 8px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink-soft);
+}
+
+.ticket-who {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0 20px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ticket-who li {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.9) 0 18%, transparent 19%),
+    linear-gradient(180deg, rgba(200, 238, 255, 0.95), rgba(127, 208, 255, 0.75));
+  border: 1px solid var(--glass-edge);
+  color: #0b2a3d;
+  box-shadow: 0 4px 10px rgba(10, 95, 170, 0.18);
+}
+
+.button-glass {
+  margin-top: 12px;
+  color: var(--ink);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), var(--glass));
+  border: 1px solid var(--glass-edge);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.7),
+    0 8px 18px rgba(10, 60, 100, 0.15);
+}
+
+.ticket-center {
+  text-align: center;
+}

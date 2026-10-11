@@ -31,8 +31,11 @@ import { renderTicket, walkMinutes, type TicketData } from './card-image.js';
 
 export interface LiveSurfacesOptions {
   port: Pick<SpectrumMessaging, 'sendGroupText' | 'sendMiniApp'>;
-  /** The ticket page link: <publicBaseUrl>/t/<signed booking token>, same HMAC as the .ics link. */
-  ticketLinks: { publicBaseUrl: string; linkSecret: string };
+  /**
+   * The ticket page link: <pageBaseUrl>/t/<signed booking token>, same HMAC as the .ics link.
+   * pageBaseUrl is the website (WEB_PUBLIC_URL) when set, else the server's own /t/ page.
+   */
+  ticketLinks: { publicBaseUrl: string; linkSecret: string; pageBaseUrl?: string | null };
   bundles: BundleStore;
   bus: {
     subscribe(planId: string, handler: (event: PlanEvent) => void | Promise<void>): () => void;
@@ -142,8 +145,9 @@ export class LiveSurfaces {
       );
       return null;
     });
-    const { publicBaseUrl, linkSecret } = this.o.ticketLinks;
-    const url = `${publicBaseUrl.replace(/\/$/, '')}/t/${signBookingToken(booking.bookingId, linkSecret)}`;
+    const { publicBaseUrl, linkSecret, pageBaseUrl } = this.o.ticketLinks;
+    const base = (pageBaseUrl || publicBaseUrl).replace(/\/$/, '');
+    const url = `${base}/t/${signBookingToken(booking.bookingId, linkSecret)}`;
     const party = `table for ${booking.partySize}`;
     await this.o.port.sendMiniApp({
       chatId: plan.chatId,
