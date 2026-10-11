@@ -56,21 +56,27 @@ describe('GET /watch/:secret', () => {
     expect((await app.fastify.inject({ url: `/watch/${SECRET}` })).statusCode).toBe(404);
   });
 
-  it('serves a small page when there is no plan yet', async () => {
+  it('serves the following page, which polls for the newest plan', async () => {
     await start(SECRET);
     const res = await app.fastify.inject({ url: `/watch/${SECRET}` });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toContain('text/html');
-    expect(res.body).toContain('No plan yet. Start one from a bubble and refresh.');
+    expect(res.body).toContain(`/watch/${SECRET}/latest`);
+    expect(res.body).toContain('<iframe');
+    const latest = await app.fastify.inject({ url: `/watch/${SECRET}/latest` });
+    expect(latest.json()).toEqual({ ok: true, planId: null, state: null, pageUrl: null });
   });
 
-  it('redirects to the newest plan’s live page', async () => {
+  it('latest points at the newest plan’s live page, and /go redirects there', async () => {
     await start(SECRET);
     plan('crew:a');
     const newest = plan('crew:b');
-    const res = await app.fastify.inject({ url: `/watch/${SECRET}` });
-    expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe(`https://page.test/p/${newest.pageToken}`);
+    const latest = await app.fastify.inject({ url: `/watch/${SECRET}/latest` });
+    expect(latest.json().pageUrl).toBe(`https://page.test/p/${newest.pageToken}`);
+    const go = await app.fastify.inject({ url: `/watch/${SECRET}/go` });
+    expect(go.statusCode).toBe(302);
+    expect(go.headers.location).toBe(`https://page.test/p/${newest.pageToken}`);
+    expect((await app.fastify.inject({ url: '/watch/nope/latest' })).statusCode).toBe(404);
   });
 
   it('prefers an active plan over a newer closed one, and falls back to the newest closed', async () => {
@@ -78,10 +84,10 @@ describe('GET /watch/:secret', () => {
     const active = plan('crew:a');
     const closed = plan('crew:b');
     await store.transition(closed.id, 'CANCELLED');
-    const first = await app.fastify.inject({ url: `/watch/${SECRET}` });
-    expect(first.headers.location).toBe(`https://page.test/p/${active.pageToken}`);
+    const first = await app.fastify.inject({ url: `/watch/${SECRET}/latest` });
+    expect(first.json().pageUrl).toBe(`https://page.test/p/${active.pageToken}`);
     await store.transition(active.id, 'CANCELLED');
-    const second = await app.fastify.inject({ url: `/watch/${SECRET}` });
-    expect(second.headers.location).toBe(`https://page.test/p/${closed.pageToken}`);
+    const second = await app.fastify.inject({ url: `/watch/${SECRET}/latest` });
+    expect(second.json().pageUrl).toBe(`https://page.test/p/${closed.pageToken}`);
   });
 });
