@@ -71,7 +71,7 @@ if (real) {
     const bubbleNumber = await photon.bubbleNumberFor(phone);
     if (!bubbleNumber) throw new Error(`…${phone.slice(-4)} is not registered with Photon`);
     const user = await runtime.crews.createUser({
-      displayName: names.get(phone) ?? `…${phone.slice(-4)}`,
+      displayName: names.get(phone.toLowerCase()) ?? names.get(phone) ?? `…${phone.slice(-4)}`,
       handle: phone,
       bubbleNumber,
     });
