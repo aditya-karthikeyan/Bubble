@@ -145,7 +145,25 @@ export function ticketTree(t: TicketData): Node {
   );
 }
 
-export async function renderTicket(t: TicketData): Promise<Buffer> {
+/**
+ * The bundled Inter covers Latin only. Drop characters it cannot draw (e.g. "Wheat 麦茶"
+ * becomes "Wheat") instead of rendering empty boxes or shipping a multi-megabyte CJK font.
+ */
+export function latinOnly(s: string): string {
+  return s
+    .replace(/[^\p{Script=Latin}\p{N}\p{P}\p{Zs}$+<=>^`|~]/gu, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+export async function renderTicket(input: TicketData): Promise<Buffer> {
+  const t: TicketData = {
+    ...input,
+    venueName: latinOnly(input.venueName) || 'Your table',
+    cuisine: latinOnly(input.cuisine),
+    address: input.address ? latinOnly(input.address) : null,
+    backupName: input.backupName ? latinOnly(input.backupName) || null : null,
+  };
   const svg = await satori(ticketTree(t) as never, {
     width: WIDTH,
     height: HEIGHT,

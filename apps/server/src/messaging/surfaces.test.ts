@@ -185,3 +185,12 @@ describe('walkMinutes', () => {
     expect(walkMinutes({ lat: 0, lng: 0 }, { lat: 0, lng: 0 })).toBe(1);
   });
 });
+
+describe('latinOnly', () => {
+  it('drops glyphs the ticket font cannot draw', async () => {
+    const { latinOnly } = await import('./card-image.js');
+    expect(latinOnly('Wheat 麦茶')).toBe('Wheat');
+    expect(latinOnly('Bonchon Chicken - Fried, $15')).toBe('Bonchon Chicken - Fried, $15');
+    expect(latinOnly('Café Résumé')).toBe('Café Résumé');
+  });
+});
