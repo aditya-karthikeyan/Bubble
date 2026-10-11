@@ -73,9 +73,9 @@ export function fitsMeal(venue: Venue, meal: SolverContext['meal']): boolean {
 }
 
 /**
- * Filters candidates. When nothing fits both the decided style and the decided cuisine, the
- * style gives way (the cuisine vote is the more specific one). The cuisine never silently gives
- * way: the engine asks the people who voted for it first.
+ * Filters candidates. Strict first; when nothing fits with the decided style applied, the style
+ * gives way, whether or not a cuisine is also decided (the style is a soft table preference). The
+ * cuisine never silently gives way: the engine asks the people who voted for it first.
  */
 export function filterCandidates(
   venues: Venue[],
@@ -83,11 +83,12 @@ export function filterCandidates(
   ctx: SolverContext,
 ): { feasible: Venue[]; infeasible: Infeasibility[] } {
   const strict = filterStrict(venues, members, ctx);
-  if (strict.feasible.length || !ctx.cuisine || !ctx.style) return strict;
+  if (strict.feasible.length || !ctx.style) return strict;
   return filterStrict(venues, members, { ...ctx, style: null });
 }
 
-function filterStrict(
+/** Filters with every decided preference applied as given; nothing gives way. */
+export function filterStrict(
   venues: Venue[],
   members: SolverMember[],
   ctx: SolverContext,
