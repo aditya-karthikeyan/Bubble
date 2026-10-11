@@ -7,10 +7,11 @@
  * - got_preference: voted and the winner was among their choices.
  * - organized: started the plan.
  * - absent: represented by their bubble.
- * The Splitter writes `paid` for the payer. getProfile().recentCompromiseCount counts
+ * The bubble writes `paid` for whoever covered the bill and `owes` for everyone else's share,
+ * once the payer reports the real total after the meal. getProfile().recentCompromiseCount counts
  * `compromised` rows from the last 30 days, which raises that member's concession cost next time.
  */
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, notInArray } from 'drizzle-orm';
 import type { EventBus, LedgerKind, PlanEvent } from '@bubbleworks/shared';
 import type { Db } from '../db/client.js';
 import { asks, ledger, planMembers, plans, venues, votes } from '../db/schema.js';
@@ -85,10 +86,11 @@ export class LedgerWriter {
 
     const at = (this.options.now ?? (() => new Date()))().toISOString();
     // Rewrite this plan's outcome rows from current attendance: someone who said no after the
-    // booking loses their rows, and nothing is counted twice. `paid` belongs to the Splitter.
+    // booking loses their rows, and nothing is counted twice. `paid` and `owes` belong to the
+    // bill split.
     this.db.transaction((tx) => {
       tx.delete(ledger)
-        .where(and(eq(ledger.planId, planId), ne(ledger.kind, 'paid')))
+        .where(and(eq(ledger.planId, planId), notInArray(ledger.kind, ['paid', 'owes'])))
         .run();
       for (const r of rows) {
         tx.insert(ledger)

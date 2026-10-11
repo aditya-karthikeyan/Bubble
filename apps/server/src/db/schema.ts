@@ -303,7 +303,11 @@ export type BubblePending =
   | { kind: 'crew_confirm'; groupId: string }
   | { kind: 'forget_me_confirm'; expiresAt: string }
   /** "go back" / "change my diet": the next message re-answers this onboarding question. */
-  | { kind: 'redo_step'; step: string };
+  | { kind: 'redo_step'; step: string }
+  /** "I covered dinner" with no amount: the next message is the bill total. */
+  | { kind: 'bill_amount'; planId: string; expiresAt: string }
+  /** The payer has no payment handle yet: the next message is one, then the split goes out. */
+  | { kind: 'bill_handle'; planId: string; total: number; expiresAt: string };
 
 /** Per onboarding question: the message that answered it and the facts it saved. */
 export type BubbleAnswers = Record<string, { messageId: string; factIds: string[] }>;
