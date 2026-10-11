@@ -10,6 +10,11 @@
  * watching. History that arrives on join plays as a fast recap, so a late viewer still sees the
  * crew come together instead of landing on the end state.
  *
+ * With no token and no fixture the feed waits: no socket, an empty view model, so the page shows
+ * the gathering step with no bubbles (the organizer's /watch page before a plan starts). Changing
+ * the token closes the old socket, clears the view model, and joins the new room, which replays
+ * that plan's history as a recap.
+ *
  * The arena can also hold the queue: before each event the feed asks whether every animation
  * from the last one has finished (the crew bubble filling, doers splitting off, a pop), so no
  * step ever starts before the one before it ends.
@@ -25,13 +30,28 @@ import { EMPTY, reduce, type ViewModel } from './view-model';
 export const FIXTURES: Record<string, unknown[]> = { basic, deadlock };
 
 export type FeedStatus =
-  'connecting' | 'live' | 'reconnecting' | 'offline' | 'expired' | 'replay' | 'replay_done';
+  | 'waiting'
+  | 'connecting'
+  | 'live'
+  | 'reconnecting'
+  | 'offline'
+  | 'expired'
+  | 'replay'
+  | 'replay_done';
 
 type Pace = 'fixture' | 'recap' | 'live';
-type Action = { kind: 'event'; event: PlanEvent } | { kind: 'reset' };
+type Action = { kind: 'event'; event: PlanEvent } | { kind: 'reset'; source: string };
 
-function feedReducer(vm: ViewModel, action: Action): ViewModel {
-  return action.kind === 'reset' ? EMPTY : reduce(vm, action.event);
+/** The view model plus the feed source (token, fixture, run) it was built from. */
+interface FeedState {
+  source: string;
+  vm: ViewModel;
+}
+
+function feedReducer(state: FeedState, action: Action): FeedState {
+  return action.kind === 'reset'
+    ? { source: action.source, vm: EMPTY }
+    : { ...state, vm: reduce(state.vm, action.event) };
 }
 
 function parse(raw: unknown): PlanEvent | null {
@@ -75,13 +95,19 @@ export function gapAfter(
 }
 
 export function usePlanFeed(
-  token: string,
+  token: string | null,
   replay: string | null,
   settled?: MutableRefObject<(() => boolean) | null>,
+  server: string = SERVER_URL,
 ) {
-  const [vm, dispatch] = useReducer(feedReducer, EMPTY);
-  const [status, setStatus] = useState<FeedStatus>(replay ? 'replay' : 'connecting');
   const [run, setRun] = useState(0);
+  const source = `${token ?? ''}|${replay ?? ''}|${run}`;
+  const [feed, dispatch] = useReducer(feedReducer, { source, vm: EMPTY });
+  // Until the effect resets for a new source, the old plan's state is never shown on the new one.
+  const vm = feed.source === source ? feed.vm : EMPTY;
+  const [status, setStatus] = useState<FeedStatus>(
+    replay ? 'replay' : token ? 'connecting' : 'waiting',
+  );
   const restart = useCallback(() => setRun((n) => n + 1), []);
   const queue = useRef<{ event: PlanEvent; pace: Pace }[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -124,7 +150,7 @@ export function usePlanFeed(
   );
 
   useEffect(() => {
-    dispatch({ kind: 'reset' });
+    dispatch({ kind: 'reset', source });
     queue.current = [];
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
@@ -142,9 +168,16 @@ export function usePlanFeed(
       };
     }
 
+    if (!token) {
+      setStatus('waiting');
+      return;
+    }
+
     setStatus('connecting');
     let joinedOnce = false;
-    const socket = io(`${SERVER_URL}${SOCKET.namespace}`, { transports: ['websocket'] });
+    const socket = io(`${server.replace(/\/$/, '')}${SOCKET.namespace}`, {
+      transports: ['websocket'],
+    });
     socket.on('connect', () => {
       socket.emit(SOCKET.join, { token }, (ack: JoinAck) => {
         if (!ack.ok) {
@@ -172,7 +205,7 @@ export function usePlanFeed(
       if (timer.current) clearTimeout(timer.current);
       timer.current = null;
     };
-  }, [token, replay, run, enqueue]);
+  }, [token, replay, run, source, server, enqueue]);
 
   return { vm, status, restart, run };
 }

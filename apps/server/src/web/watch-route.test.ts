@@ -13,7 +13,10 @@ let rt: Runtime;
 let store: PlanStore;
 let nowMs: number;
 
-async function start(secret: string | undefined): Promise<void> {
+async function start(
+  secret: string | undefined,
+  urls: { web?: string; server?: string } = { web: 'https://page.test/' },
+): Promise<void> {
   app = await buildApp({
     config: loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'error' }),
     replayForToken: (t) => rt.bus.replayForToken(t),
@@ -21,7 +24,8 @@ async function start(secret: string | undefined): Promise<void> {
   registerWatchRoute(app.fastify, {
     secret,
     plans: store,
-    webPublicUrl: 'https://page.test/',
+    webPublicUrl: urls.web,
+    serverPublicUrl: urls.server,
   });
   await app.fastify.ready();
 }
@@ -56,8 +60,19 @@ describe('GET /watch/:secret', () => {
     expect((await app.fastify.inject({ url: `/watch/${SECRET}` })).statusCode).toBe(404);
   });
 
-  it('serves the following page, which polls for the newest plan', async () => {
-    await start(SECRET);
+  it('redirects to the website’s watch page, or serves the frame shell without WEB_PUBLIC_URL', async () => {
+    await start(SECRET, { web: 'https://page.test/', server: 'https://api.test/' });
+    const redirect = await app.fastify.inject({ url: `/watch/${SECRET}` });
+    expect(redirect.statusCode).toBe(302);
+    expect(redirect.headers.location).toBe(
+      `https://page.test/watch?s=${SECRET}&api=${encodeURIComponent('https://api.test')}`,
+    );
+    await app.fastify.close();
+    await start(SECRET, { web: 'https://page.test' });
+    const noApi = await app.fastify.inject({ url: `/watch/${SECRET}` });
+    expect(noApi.headers.location).toBe(`https://page.test/watch?s=${SECRET}`);
+    await app.fastify.close();
+    await start(SECRET, {});
     const res = await app.fastify.inject({ url: `/watch/${SECRET}` });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toContain('text/html');

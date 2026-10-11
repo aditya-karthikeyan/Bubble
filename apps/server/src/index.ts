@@ -243,6 +243,7 @@ async function main(): Promise<void> {
     secret: config.DEV_ROUTES_SECRET,
     plans: runtime.plans,
     webPublicUrl: config.WEB_PUBLIC_URL,
+    serverPublicUrl: config.SERVER_PUBLIC_URL,
   });
 
   const active = runtime.plans.findAllActive();

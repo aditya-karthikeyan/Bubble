@@ -10,6 +10,8 @@ import { usePlanFeed, type FeedStatus } from './use-plan-feed';
 import { PHASE_COPY, phaseOf, type Phase, type ViewModel } from './view-model';
 
 const STATUS_CHIP: Record<FeedStatus, string> = {
+  // The organizer's /watch page before a plan starts: it is following the server, just idle.
+  waiting: 'Live',
   connecting: 'Connecting',
   live: 'Live',
   reconnecting: 'Reconnecting',
@@ -206,15 +208,36 @@ export function PhaseBanner({
   );
 }
 
-export function LivePlan({ token, replay }: { token: string; replay: string | null }) {
+/**
+ * The live plan page. `token` null is the waiting mode used by the organizer's /watch page: the
+ * same desktop, arena and plan window at the gathering step with no bubbles, until a token
+ * arrives. Changing `token` switches the feed in place (new socket room, history recap) without
+ * remounting the page. `server` overrides NEXT_PUBLIC_SOCKET_URL for the socket.
+ */
+export function LivePlan({
+  token,
+  replay,
+  server,
+}: {
+  token: string | null;
+  replay: string | null;
+  server?: string;
+}) {
   // The arena tells the feed when its animations finish, so each step waits for the last.
   const settled = useRef<(() => boolean) | null>(null);
-  const { vm, status, restart, run } = usePlanFeed(token, replay, settled);
+  const { vm, status, restart, run } = usePlanFeed(token, replay, settled, server);
   const [hudMinimized, setHudMinimized] = useState(false);
   const [dismissed, setDismissed] = useState<string | null>(null);
   // Desktop windows pop up at random spots and float; the arena keeps bubbles out from under them.
   const [floating, setFloating] = useState(false);
   const [spots, setSpots] = useState<Partial<Record<WindowId, CSSProperties>>>({});
+  // A new plan starts with no dialogs: forget dismissals and dialog spots, keep the plan window.
+  const [shownToken, setShownToken] = useState(token);
+  if (shownToken !== token) {
+    setShownToken(token);
+    setDismissed(null);
+    setSpots((sp) => (sp.plan ? { plan: sp.plan } : {}));
+  }
   const rects = useRef<Partial<Record<WindowId, Rect>>>({});
   const windows = useRef<Rect[]>([]);
   const track = useMemo(
@@ -292,7 +315,8 @@ export function LivePlan({ token, replay }: { token: string; replay: string | nu
     restart();
   };
   const bubbles = vm.bubbles.filter((b) => b.present).length;
-  const live = status === 'live' || status === 'replay' || status === 'replay_done';
+  const live =
+    status === 'live' || status === 'waiting' || status === 'replay' || status === 'replay_done';
   return (
     <main className="stage">
       <Desktop />
