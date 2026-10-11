@@ -32,7 +32,9 @@ type CardInput = Parameters<
   ConstructorParameters<typeof LiveSurfaces>[0]['port']['sendMiniApp']
 >[0];
 
-function setup(options: { createdAgoMs?: number; renderFails?: boolean } = {}) {
+function setup(
+  options: { createdAgoMs?: number; renderFails?: boolean; pageBaseUrl?: string } = {},
+) {
   const bundles = new BundleStore(new Database(':memory:'));
   bundles.save({
     planId: PLAN,
@@ -64,7 +66,11 @@ function setup(options: { createdAgoMs?: number; renderFails?: boolean } = {}) {
         return { messageId: 'grp:ticket', deduplicated: false };
       },
     },
-    ticketLinks: { publicBaseUrl: 'https://api.bubbleworks.example/', linkSecret: SECRET },
+    ticketLinks: {
+      publicBaseUrl: 'https://api.bubbleworks.example/',
+      linkSecret: SECRET,
+      pageBaseUrl: options.pageBaseUrl ?? null,
+    },
     bundles,
     bus: { subscribe: (_planId, h) => ((handler = h), () => (handler = null)) },
     plans: {
@@ -138,6 +144,21 @@ describe('LiveSurfaces', () => {
       address: '108 E Franklin St',
       timeText: '7:30 PM',
     });
+  });
+
+  it('opens the ticket on the website when there is one', async () => {
+    const { cards, emit } = setup({ pageBaseUrl: 'https://bubbleworks.example/' });
+    await emit({
+      type: 'booking_confirmed',
+      bookingId: 'b1',
+      venue: { venueId: VENUE.id, name: VENUE.name, cuisine: 'thai' },
+      startAt: '2026-10-10T23:30:00.000Z',
+      partySize: 4,
+      reservationName: 'Pranav',
+    });
+    const match = /^https:\/\/bubbleworks\.example\/t\/([^/]+)$/.exec(cards[0]!.url);
+    expect(match).not.toBeNull();
+    expect(verifyBookingToken(match![1]!, SECRET)).toBe('b1');
   });
 
   it('sends the card without a picture when the ticket render fails', async () => {
