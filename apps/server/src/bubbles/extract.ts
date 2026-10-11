@@ -36,7 +36,15 @@ export interface FactExtractor {
   extract(text: string, hint: ExtractHint): Promise<ExtractedFact[]>;
 }
 
-const DIETS = ['vegetarian', 'vegan', 'pescatarian', 'gluten_free', 'dairy_free'] as const;
+const DIETS = [
+  'vegetarian',
+  'vegan',
+  'pescatarian',
+  'gluten_free',
+  'dairy_free',
+  'no_pork',
+  'no_beef',
+] as const;
 const ALLERGIES = ['peanut', 'tree_nut', 'shellfish', 'dairy', 'gluten', 'soy', 'egg', 'sesame'];
 const RELIGIOUS = ['halal', 'kosher', 'hindu_veg', 'jain'];
 const ACCESS = ['wheelchair', 'step_free', 'quiet'];
@@ -44,7 +52,7 @@ const ACCESS = ['wheelchair', 'step_free', 'quiet'];
 const SYSTEM = `You read one text message a person sent to their own dining assistant and list the dining facts it states about the sender.
 Only facts about the sender. Never guess. If nothing applies, return an empty list.
 Types and value formats:
-- diet: one of ${DIETS.join(' | ')}
+- diet: one of ${DIETS.join(' | ')} ("no pork or beef" is two facts: no_pork and no_beef; "no red meat" is both)
 - allergy: one of ${ALLERGIES.join(' | ')}
 - religious_diet: one of ${RELIGIOUS.join(' | ')}
 - accessibility: one of ${ACCESS.join(' | ')}
@@ -90,11 +98,35 @@ export class HaikuExtractor implements FactExtractor {
         messages: [{ role: 'user', content: `${HINTS[hint]}\nMessage: ${text}` }],
         output_config: { format: zodOutputFormat(Extraction) },
       });
-      return normalize(Extraction.parse(res.parsed_output).facts);
+      const facts = normalize(Extraction.parse(res.parsed_output).facts);
+      // Meat limits are hard facts, so they never depend on the model reading them right.
+      for (const f of meatLimits(text)) {
+        if (!facts.some((x) => x.type === 'diet' && x.value === f.value)) facts.push(f);
+      }
+      return facts;
     } catch {
       return this.fallback.extract(text, hint);
     }
   }
+}
+
+/**
+ * "no pork or beef", "I don't eat pork", "no red meat", "pork-free": diet no_pork / no_beef.
+ * A negation within a few words of the meat is required, so "I love pork" adds nothing.
+ */
+export function meatLimits(text: string): ExtractedFact[] {
+  const t = text.toLowerCase().replace(/[’`]/g, "'");
+  const neg = String.raw`\b(no|don'?t eat|do not eat|doesn'?t eat|never eat|can'?t eat|cannot eat|avoid)\b`;
+  const near = (meat: string, gap = 20) =>
+    new RegExp(String.raw`${neg}[^.!?;,]{0,${gap}}\b${meat}\b`).test(t) ||
+    new RegExp(String.raw`\b${meat}[- ]free\b`).test(t);
+  const red = near('red meat', 12);
+  const out: ExtractedFact[] = [];
+  const add = (value: string) =>
+    out.push({ type: 'diet', value, confidence: 0.8, until_phrase: null });
+  if (red || near('pork') || near('bacon') || near('ham')) add('no_pork');
+  if (red || near('beef') || near('steak')) add('no_beef');
+  return out;
 }
 
 /** Regex coverage for the common answers. Also the test double. */
@@ -110,6 +142,7 @@ export class RuleExtractor implements FactExtractor {
     else if (/\bpescatarian\b/.test(t)) add('diet', 'pescatarian');
     if (/gluten[- ]free|celiac/.test(t)) add('diet', 'gluten_free');
     if (/dairy[- ]free|lactose/.test(t)) add('diet', 'dairy_free');
+    out.push(...meatLimits(text));
 
     const allergyCue = /allerg|can'?t (have|eat)|cannot (have|eat)/.test(t);
     if (allergyCue) {

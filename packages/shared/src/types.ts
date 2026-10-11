@@ -111,7 +111,7 @@ export const Fact = z.object({
   type: FactType,
   /**
    * Normalized value. Conventions:
-   * diet: vegetarian | vegan | pescatarian | gluten_free | dairy_free
+   * diet: vegetarian | vegan | pescatarian | gluten_free | dairy_free | no_pork | no_beef
    * allergy: peanut | tree_nut | shellfish | dairy | gluten | soy | egg | sesame
    * religious_diet: halal | kosher | hindu_veg | jain
    * accessibility: wheelchair | step_free | quiet

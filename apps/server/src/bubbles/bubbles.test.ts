@@ -7,6 +7,7 @@ import type { Runtime } from '../runtime.js';
 import { testRuntime } from '../test-helpers.js';
 import {
   isNoSplit,
+  meatLimits,
   RuleExtractor,
   resolveUntil,
   type ExtractedFact,
@@ -102,7 +103,7 @@ describe('DbBubbleService', () => {
       const done = lastTo(zoe.id);
       expect(done).toMatch(/^All set/);
       expect(done).toContain('https://example.test/oauth/google/start?u=');
-      expect(done).toContain('+16285550100'); // Find My steps name the bubble number
+      expect(done).toContain('send me your location right here (+ → Location → Share)');
       expect(done).toMatch(/my crew is/);
 
       const profile = await bubbles.getProfile(zoe.id);
@@ -235,6 +236,65 @@ describe('DbBubbleService', () => {
       for (const secret of ['vegan', 'sesame', '$18', 'Carrboro', '@ana-v']) {
         expect(toFay).not.toContain(secret);
       }
+    });
+  });
+
+  describe('no pork / no beef (P2 real-phone run)', () => {
+    it('"no pork or beef" at the diet question saves two hard, confirmed facts', async () => {
+      const raj = await newUser('Raj', '+19195550143');
+      await onboard(raj, ['no pork or beef']);
+      const diets = (await bubbles.getHardLimits(raj.id)).filter((f) => f.type === 'diet');
+      expect(diets.map((f) => f.value).sort()).toEqual(['no_beef', 'no_pork']);
+      expect(diets.every((f) => f.hard && f.confirmed)).toBe(true);
+      expect(textsTo(raj.id).join('\n')).toContain("you don't eat pork");
+    });
+
+    it('reads common phrasings without false alarms', () => {
+      const read = (t: string) =>
+        meatLimits(t)
+          .map((f) => f.value)
+          .sort()
+          .join(',');
+      expect(read('no pork or beef')).toBe('no_beef,no_pork');
+      expect(read("I don't eat pork")).toBe('no_pork');
+      expect(read('no red meat please')).toBe('no_beef,no_pork');
+      expect(read('beef-free')).toBe('no_beef');
+      expect(read('I love pork')).toBe('');
+      expect(read('no, pork is great')).toBe('');
+    });
+  });
+
+  describe('location pins', () => {
+    it('a pin sent in iMessage is saved, used as the location, and expires after 6 hours', async () => {
+      const sam = await newUser('Sam', '+19195550144');
+      await onboard(sam);
+      const pin = { lat: 35.9132, lng: -79.0558 };
+      expect(
+        await bubbles.onPrivateMessage({
+          messageId: 'pin1',
+          userId: sam.id,
+          text: '',
+          at: clock.toISOString(),
+          location: pin,
+        }),
+      ).toEqual({ handled: true });
+      expect(lastTo(sam.id)).toMatch(/^Got your location 📍/);
+      expect(await bubbles.getLocation(sam.id)).toEqual(pin);
+      clock = new Date(clock.getTime() + 7 * 3_600_000);
+      expect(await bubbles.getLocation(sam.id)).not.toEqual(pin);
+    });
+
+    it('mid-onboarding, a pin repeats the open question', async () => {
+      const tia = await newUser('Tia', '+19195550145');
+      await dm(tia, 'hi');
+      await bubbles.onPrivateMessage({
+        messageId: 'pin2',
+        userId: tia.id,
+        text: '',
+        at: clock.toISOString(),
+        location: { lat: 35.91, lng: -79.05 },
+      });
+      expect(lastTo(tia.id)).toMatch(/Got your location[\s\S]*1\/5/);
     });
   });
 

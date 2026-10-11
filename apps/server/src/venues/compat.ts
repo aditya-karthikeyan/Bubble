@@ -32,6 +32,15 @@ const DIET_SATISFIED_BY: Record<string, readonly string[]> = {
   dairy_free: ['dairy_free', 'vegan'],
 };
 
+/**
+ * Cuisines built around the meat. The OSM import folds hot_dog / burger / barbecue /
+ * steak_house into "american", so those keys only match once the import keeps them (P1).
+ */
+export const MEAT_CENTERED: Record<string, readonly string[]> = {
+  no_pork: ['hot_dog', 'barbecue', 'bbq'],
+  no_beef: ['hot_dog', 'burger', 'barbecue', 'bbq', 'steak_house', 'steakhouse'],
+};
+
 const RELIGIOUS_SATISFIED_BY: Record<string, readonly string[]> = {
   halal: ['halal', 'vegetarian', 'vegan'],
   kosher: ['kosher', 'vegan'],
@@ -50,6 +59,14 @@ export function checkHardFact(venue: Venue, fact: Fact): Incompatibility | null 
   const tags = new Set(venue.dietTags);
   switch (fact.type) {
     case 'diet': {
+      // no_pork / no_beef (P3 facts) rule out meat-centered cuisines rather than needing a tag;
+      // without this an unknown value would demand a "no_pork" tag no venue has.
+      const meat = MEAT_CENTERED[fact.value];
+      if (meat) {
+        return meat.includes(venue.cuisine)
+          ? { factType: fact.type, value: fact.value, reason: 'meat_centered' }
+          : null;
+      }
       const ok = (DIET_SATISFIED_BY[fact.value] ?? [fact.value]).some((t) => tags.has(t));
       return ok ? null : { factType: fact.type, value: fact.value, reason: 'no_diet_option' };
     }

@@ -111,8 +111,11 @@ export interface InboundGroupMessage {
 export interface InboundPrivateMessage {
   messageId: string;
   userId: string;
+  /** Empty for a bare location pin. */
   text: string;
   at: IsoDateTime;
+  /** A location pin the person sent (iMessage + → Location → Share). The bubble stores it. */
+  location?: GeoPoint | null;
 }
 
 export interface PollVote {

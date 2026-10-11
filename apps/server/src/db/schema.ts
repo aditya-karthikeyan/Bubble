@@ -310,6 +310,10 @@ export const bubbleState = sqliteTable('bubble_state', {
   /** Presence the person set with a command (busy, sleeping, driving), until presenceUntil. */
   presence: text('presence').$type<'focus' | 'sleep' | 'driving'>(),
   presenceUntil: text('presence_until'),
+  /** Last location pin the person sent their bubble in iMessage (+ → Location), and when. */
+  pinLat: real('pin_lat'),
+  pinLng: real('pin_lng'),
+  pinAt: text('pin_at'),
   updatedAt: text('updated_at').notNull(),
 });
 
