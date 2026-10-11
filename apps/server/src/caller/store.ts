@@ -1,12 +1,30 @@
 /**
  * Caller state in SQLite, in p4_* tables owned by P4. One row per phone call: a booking's
- * primary venue and its backup are two rows. Survives restarts, so polling resumes and a
+ * primary venue and its backup are two rows; modify, cancel, and hold calls are one row each. Survives restarts, so polling resumes and a
  * repeated idempotency key or a redelivered webhook never dials or reports twice.
  */
 import type Database from 'better-sqlite3';
-import type { BookRequest, CallOutcome } from '@bubbleworks/shared';
+import type { CallOutcome, Venue } from '@bubbleworks/shared';
 
 export type CallAttempt = 'primary' | 'backup';
+export type CallPurpose = 'book' | 'modify' | 'cancel' | 'hold';
+
+/** Everything one phone call needs, whichever CallerPort method asked for it. */
+export interface CallRequest {
+  purpose: CallPurpose;
+  planId: string;
+  bookingId: string;
+  venue: Venue;
+  /** book only: tried when the primary can't take us. */
+  backupVenue: Venue | null;
+  partySize: number | null;
+  startAt: string | null;
+  reservationName: string;
+  tableNotes: string[];
+  /** hold only. */
+  holdMinutes: number | null;
+  idempotencyKey: string;
+}
 export type CallRowStatus = 'dialing' | 'talking' | 'finished';
 
 export interface CallRow {
@@ -16,7 +34,7 @@ export interface CallRow {
   bookingId: string;
   attempt: CallAttempt;
   venueId: string;
-  request: BookRequest;
+  request: CallRequest;
   conversationId: string | null;
   status: CallRowStatus;
   outcome: CallOutcome | null;
@@ -43,7 +61,7 @@ function toRow(r: RawRow): CallRow {
     bookingId: r.booking_id,
     attempt: r.attempt,
     venueId: r.venue_id,
-    request: JSON.parse(r.request_json) as BookRequest,
+    request: JSON.parse(r.request_json) as CallRequest,
     conversationId: r.conversation_id,
     status: r.status,
     outcome: r.outcome,

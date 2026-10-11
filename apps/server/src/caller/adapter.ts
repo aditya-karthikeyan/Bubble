@@ -1,10 +1,12 @@
 /**
- * ElevenLabsCaller: the real CallerPort. book() dials the venue through the ElevenLabs agent on
- * Twilio; the post-call webhook (or the poller, when the webhook is late or missing) reports what
- * happened. No answer, voicemail, or a full house sends it to the backup venue automatically.
- * Exactly one CallResult reaches the engine per booking. The engine publishes the first and final
- * doer_status and booking_confirmed; the caller adds the mid-call lines ("On the phone with X",
- * "X can't take us. Calling Y") with page-safe text only (venue names, never phones or diets).
+ * ElevenLabsCaller: the real CallerPort. Every method places one call through the ElevenLabs
+ * agent on Twilio with a `call_purpose` (book, modify, cancel, hold); the post-call webhook (or
+ * the poller, when the webhook is late or missing) reports what happened. For a booking, no
+ * answer, voicemail, or a full house sends it to the backup venue automatically.
+ *
+ * Exactly one CallResult reaches the engine per call request. The engine publishes the first and
+ * final doer_status and booking_confirmed; the caller adds the mid-call lines ("On the phone with
+ * X", "X can't take us. Calling Y") with page-safe text only (venue names, never phones or diets).
  */
 import {
   newId,
@@ -28,11 +30,18 @@ import {
   type WebhookEvent,
 } from './conversation.js';
 import type { ElevenLabsApi } from './elevenlabs.js';
-import type { CallRow, CallerStore } from './store.js';
+import type { CallRequest, CallRow, CallerStore } from './store.js';
 import { addMinutes, formatLocalTime, parseLocalTime } from './time.js';
 
 export type CallResultSink = (result: CallResult) => Promise<void>;
 export type WebhookOutcome = 'processed' | 'duplicate' | 'unmatched' | 'ignored';
+
+/** What the engine already knows about a booking, for calls that don't carry it. */
+export interface BookingDetails {
+  reservationName: string;
+  startAt: string;
+  partySize: number;
+}
 
 /** The agent accepts any time from 30 minutes before to 60 minutes after the request. */
 export const WINDOW_BEFORE_MIN = 30;
@@ -52,11 +61,24 @@ export interface ElevenLabsCallerOptions {
     | 'TWILIO_PHONE_NUMBER'
     | 'CALLER_DISCLOSE'
   >;
+  /** Fills in the name and time for cancel and hold calls, which don't carry them. */
+  bookingDetails?: (bookingId: string) => BookingDetails | null;
   log: Logger;
   now?: () => Date;
 }
 
+/**
+ * The outcome the engine sees. A modify, cancel, or hold that doesn't go through reports
+ * declined or no_answer, which the engine ignores once a plan is booked; `failed` would fail the
+ * whole plan, so only a booking call ever reports it.
+ */
 function outcomeFor(read: CallRead, row: CallRow): CallOutcome {
+  const { purpose } = row.request;
+  if (purpose !== 'book') {
+    if (read.kind === 'booked')
+      return purpose === 'modify' ? 'modified' : purpose === 'cancel' ? 'cancelled' : 'booked';
+    return read.kind === 'no_answer' || read.kind === 'voicemail' ? 'no_answer' : 'declined';
+  }
   switch (read.kind) {
     case 'booked':
       return row.attempt === 'primary' ? 'booked' : 'booked_backup';
@@ -85,7 +107,7 @@ export class ElevenLabsCaller implements CallerPort {
     this.now = o.now ?? (() => new Date());
   }
 
-  /** Resume watching calls that were live before a restart. */
+  /** Start polling live calls, including ones that were live before a restart. */
   start(): void {
     if (this.o.config.CALLER_POLL_MS > 0 && !this.timer) {
       this.timer = setInterval(() => void this.pollOnce(), this.o.config.CALLER_POLL_MS);
@@ -99,32 +121,69 @@ export class ElevenLabsCaller implements CallerPort {
   }
 
   async book(request: BookRequest): Promise<CallHandle> {
-    const seen = this.o.store.byKey(request.idempotencyKey);
-    if (seen)
-      return { callId: seen.callId, status: seen.status === 'talking' ? 'in_call' : 'dialing' };
-    const row = this.o.store.insert({
-      callId: newId('call'),
-      idempotencyKey: request.idempotencyKey,
+    return this.place({
+      purpose: 'book',
       planId: request.planId,
       bookingId: request.bookingId,
-      attempt: 'primary',
-      venueId: request.venue.id,
-      request,
+      venue: request.venue,
+      backupVenue: request.backupVenue,
+      partySize: request.partySize,
+      startAt: request.startAt,
+      reservationName: request.reservationName,
+      tableNotes: request.tableNotes,
+      holdMinutes: null,
+      idempotencyKey: request.idempotencyKey,
     });
-    await this.dial(row, request.venue);
-    return { callId: row.callId, status: 'dialing' };
   }
 
-  async modify(): Promise<CallHandle> {
-    throw new Error('ElevenLabsCaller.modify lands in P4 Phase 4');
+  async modify(input: Parameters<CallerPort['modify']>[0]): Promise<CallHandle> {
+    return this.place({
+      purpose: 'modify',
+      planId: input.planId,
+      bookingId: input.bookingId,
+      venue: input.venue,
+      backupVenue: null,
+      partySize: input.partySize,
+      startAt: input.startAt,
+      reservationName: input.reservationName,
+      tableNotes: [],
+      holdMinutes: null,
+      idempotencyKey: input.idempotencyKey,
+    });
   }
 
-  async cancel(): Promise<CallHandle> {
-    throw new Error('ElevenLabsCaller.cancel lands in P4 Phase 4');
+  async cancel(input: Parameters<CallerPort['cancel']>[0]): Promise<CallHandle> {
+    const known = this.o.bookingDetails?.(input.bookingId) ?? null;
+    return this.place({
+      purpose: 'cancel',
+      planId: input.planId,
+      bookingId: input.bookingId,
+      venue: input.venue,
+      backupVenue: null,
+      partySize: known?.partySize ?? null,
+      startAt: known?.startAt ?? null,
+      reservationName: input.reservationName,
+      tableNotes: [],
+      holdMinutes: null,
+      idempotencyKey: input.idempotencyKey,
+    });
   }
 
-  async holdTable(): Promise<CallHandle> {
-    throw new Error('ElevenLabsCaller.holdTable lands in P4 Phase 4');
+  async holdTable(input: Parameters<CallerPort['holdTable']>[0]): Promise<CallHandle> {
+    const known = this.o.bookingDetails?.(input.bookingId) ?? null;
+    return this.place({
+      purpose: 'hold',
+      planId: input.planId,
+      bookingId: input.bookingId,
+      venue: input.venue,
+      backupVenue: null,
+      partySize: input.partySize,
+      startAt: input.startAt,
+      reservationName: known?.reservationName ?? 'our group',
+      tableNotes: [],
+      holdMinutes: input.holdMinutes,
+      idempotencyKey: input.idempotencyKey,
+    });
   }
 
   /** Feed a verified, parsed webhook event. Safe to call twice with the same event. */
@@ -164,6 +223,23 @@ export class ElevenLabsCaller implements CallerPort {
     }
   }
 
+  private async place(request: CallRequest): Promise<CallHandle> {
+    const seen = this.o.store.byKey(request.idempotencyKey);
+    if (seen)
+      return { callId: seen.callId, status: seen.status === 'talking' ? 'in_call' : 'dialing' };
+    const row = this.o.store.insert({
+      callId: newId('call'),
+      idempotencyKey: request.idempotencyKey,
+      planId: request.planId,
+      bookingId: request.bookingId,
+      attempt: 'primary',
+      venueId: request.venue.id,
+      request,
+    });
+    await this.dial(row, request.venue);
+    return { callId: row.callId, status: 'dialing' };
+  }
+
   private venueOf(row: CallRow): Venue {
     return row.attempt === 'backup' && row.request.backupVenue
       ? row.request.backupVenue
@@ -176,20 +252,47 @@ export class ElevenLabsCaller implements CallerPort {
     return venue.isDemo || this.o.config.CALLER_ALLOWED_NUMBERS.includes(venue.phone);
   }
 
-  private variables(request: BookRequest, venue: Venue): Record<string, string | number> {
+  private opener(request: CallRequest, time: string): string {
+    const name = request.reservationName;
+    if (this.o.config.CALLER_DISCLOSE) {
+      switch (request.purpose) {
+        case 'book':
+          return `Hi, this is an AI assistant calling for ${name}. Do you take reservations?`;
+        case 'hold':
+          return `Hi, this is an AI assistant calling for ${name}, about the ${time} table.`;
+        default:
+          return `Hi, this is an AI assistant calling about a reservation under ${name}.`;
+      }
+    }
+    switch (request.purpose) {
+      case 'book':
+        return 'Hey! Quick question, do you guys take reservations?';
+      case 'hold':
+        return `Hey! I'm calling about the ${time} table under ${name}.`;
+      default:
+        return `Hey! I'm calling about a reservation under ${name}.`;
+    }
+  }
+
+  private variables(request: CallRequest, venue: Venue): Record<string, string | number> {
     const tz = this.o.config.CALLER_TIMEZONE;
+    const time = request.startAt ? formatLocalTime(request.startAt, tz) : 'tonight';
     return {
+      call_purpose: request.purpose,
       venue_name: venue.name,
-      party_size: request.partySize,
-      preferred_time: formatLocalTime(request.startAt, tz),
-      window_start: formatLocalTime(addMinutes(request.startAt, -WINDOW_BEFORE_MIN), tz),
-      window_end: formatLocalTime(addMinutes(request.startAt, WINDOW_AFTER_MIN), tz),
+      party_size: request.partySize ?? 'the group',
+      preferred_time: time,
+      window_start: request.startAt
+        ? formatLocalTime(addMinutes(request.startAt, -WINDOW_BEFORE_MIN), tz)
+        : time,
+      window_end: request.startAt
+        ? formatLocalTime(addMinutes(request.startAt, WINDOW_AFTER_MIN), tz)
+        : time,
       booking_name: request.reservationName,
       callback_number: this.o.config.TWILIO_PHONE_NUMBER ?? 'this number',
       table_notes: request.tableNotes.length ? request.tableNotes.join('; ') : 'none',
-      opener: this.o.config.CALLER_DISCLOSE
-        ? `Hi, this is an AI assistant calling for ${request.reservationName}. Do you take reservations?`
-        : 'Hey! Quick question, do you guys take reservations?',
+      hold_minutes: request.holdMinutes ?? 0,
+      opener: this.opener(request, time),
     };
   }
 
@@ -215,6 +318,7 @@ export class ElevenLabsCaller implements CallerPort {
           callId: row.callId,
           conversationId,
           callSid,
+          purpose: row.request.purpose,
           attempt: row.attempt,
           mark: 't_dial',
           at: this.now().toISOString(),
@@ -232,11 +336,17 @@ export class ElevenLabsCaller implements CallerPort {
 
   /** Claim the call's result once, then either try the backup venue or report to the engine. */
   private async conclude(row: CallRow, read: CallRead): Promise<boolean> {
-    if (!this.o.store.finish(row.callId, outcomeFor(read, row))) return false;
+    const outcome = outcomeFor(read, row);
+    if (!this.o.store.finish(row.callId, outcome)) return false;
     const { request } = row;
     const venue = this.venueOf(row);
 
-    if (triesBackup(read) && row.attempt === 'primary' && request.backupVenue) {
+    if (
+      request.purpose === 'book' &&
+      triesBackup(read) &&
+      row.attempt === 'primary' &&
+      request.backupVenue
+    ) {
       const backup = request.backupVenue;
       await this.doer(row.planId, 'working', `${venue.name} can't take us. Calling ${backup.name}`);
       const backupRow = this.o.store.insert({
@@ -252,35 +362,43 @@ export class ElevenLabsCaller implements CallerPort {
       return true;
     }
 
-    const outcome = outcomeFor(read, row);
     const at = this.now().toISOString();
     const tz = this.o.config.CALLER_TIMEZONE;
-    const booked = read.kind === 'booked';
+    const agreed = read.kind === 'booked';
     const confirmed =
-      booked && read.confirmedTime ? parseLocalTime(read.confirmedTime, request.startAt, tz) : null;
+      agreed && read.confirmedTime && request.startAt
+        ? parseLocalTime(read.confirmedTime, request.startAt, tz)
+        : null;
     const confirmedStartAt =
-      confirmed && confirmed !== new Date(request.startAt).toISOString() ? confirmed : null;
+      confirmed && request.startAt && confirmed !== new Date(request.startAt).toISOString()
+        ? confirmed
+        : null;
     const startAt = confirmedStartAt ?? request.startAt;
-    const name = (booked && read.nameOnReservation) || request.reservationName;
+    const name = (agreed && read.nameOnReservation) || request.reservationName;
 
     const result: CallResult = {
       planId: row.planId,
       bookingId: row.bookingId,
       callId: row.callId,
       outcome,
-      venueId: booked ? venue.id : null,
+      venueId: agreed && request.purpose !== 'cancel' ? venue.id : null,
       confirmationCode: null,
       confirmedStartAt,
-      depositRequested: read.kind === 'needs_human',
-      summary: this.summary(outcome, row, formatLocalTime(startAt, tz), name),
+      depositRequested: request.purpose === 'book' && read.kind === 'needs_human',
+      summary: this.summary(outcome, row, startAt ? formatLocalTime(startAt, tz) : 'tonight', name),
       at,
     };
-
-    // The engine publishes the final doer_status and booking_confirmed on handleCallResult.
-    if (booked) {
+    if (agreed) {
       this.o.log.info(
-        { planId: row.planId, callId: row.callId, outcome, mark: 't_booked', at },
-        'caller booked',
+        {
+          planId: row.planId,
+          callId: row.callId,
+          outcome,
+          purpose: request.purpose,
+          mark: request.purpose === 'book' ? 't_booked' : undefined,
+          at,
+        },
+        'caller request agreed',
       );
     }
     await this.o.onResult(result);
@@ -290,7 +408,22 @@ export class ElevenLabsCaller implements CallerPort {
   private summary(outcome: CallOutcome, row: CallRow, time: string, name: string): string {
     const { request } = row;
     const venue = this.venueOf(row).name;
-    const n = request.partySize;
+    const n = request.partySize ?? 'the group';
+    if (request.purpose === 'modify') {
+      return outcome === 'modified'
+        ? `${venue} updated the table to ${n}.`
+        : `${venue} couldn't change the table to ${n}.`;
+    }
+    if (request.purpose === 'cancel') {
+      return outcome === 'cancelled'
+        ? `Cancelled the table at ${venue}.`
+        : `Couldn't reach ${venue} to cancel yet.`;
+    }
+    if (request.purpose === 'hold') {
+      return outcome === 'booked'
+        ? `${venue} is holding the ${time} table for ${request.holdMinutes ?? 0} more minutes.`
+        : `${venue} couldn't promise to hold the ${time} table.`;
+    }
     switch (outcome) {
       case 'booked':
         return `Table for ${n} at ${time} at ${venue} under ${name}.`;

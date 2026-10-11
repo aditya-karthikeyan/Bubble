@@ -7,6 +7,13 @@ import { elevenlabs, env, setEnv } from './lib.js';
 
 const PROMPT = `You're phoning a restaurant to book a table for a guest. Sound like a friendly, relaxed person on the phone: casual words, contractions, no scripts or lists.
 
+Call purpose: {{call_purpose}}
+- book: book a new table, following the rules below.
+- modify: you're calling about the existing reservation under {{booking_name}} at {{preferred_time}}. Ask to change it to {{party_size}} people.
+- cancel: cancel the reservation under {{booking_name}} at {{preferred_time}}, then thank them.
+- hold: the party under {{booking_name}} for {{preferred_time}} is running late. Ask them to hold the table {{hold_minutes}} more minutes.
+For modify, cancel, and hold, skip rules 2 to 4 and record booked as true only if they agree.
+
 Booking details:
 - Restaurant: {{venue_name}}
 - Party size: {{party_size}}
@@ -52,6 +59,8 @@ const body = {
           callback_number: '+15555550100',
           table_notes: 'none',
           opener: 'Hi, this is an AI assistant calling for Mahil. Do you take reservations?',
+          call_purpose: 'book',
+          hold_minutes: 0,
         },
       },
       prompt: {
@@ -74,7 +83,8 @@ const body = {
     data_collection: {
       booked: {
         type: 'boolean',
-        description: 'True only if the restaurant confirmed a reservation.',
+        description:
+          'True only if the restaurant agreed to what you asked: the booking, the change, the cancellation, or holding the table.',
       },
       confirmed_time: {
         type: 'string',

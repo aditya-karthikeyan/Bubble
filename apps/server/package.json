@@ -30,8 +30,6 @@
     "p4:number": "tsx --env-file-if-exists=../../.env scripts/voice/number.ts",
     "p4:testcall": "tsx --env-file-if-exists=../../.env scripts/voice/testcall.ts",
     "p4:phase0": "tsx --env-file-if-exists=../../.env scripts/voice/phase0.ts",
-    "p4:phase0": "tsx --env-file-if-exists=../../.env scripts/voice/phase0.ts",
-    "sim": "tsx --env-file-if-exists=../../.env scripts/sim.ts",
     "p4:calltest": "tsx --env-file-if-exists=../../.env scripts/voice/calltest.ts"
   },
   "dependencies": {

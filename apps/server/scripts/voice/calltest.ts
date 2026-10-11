@@ -1,9 +1,10 @@
 /**
- * pnpm p4:calltest [--only N]
+ * pnpm p4:calltest [--only N] [--auto]
  * Five real calls through the ElevenLabs caller to TEST_CALL_NUMBER, with a teammate playing the
  * restaurant: available, full with a time inside the window, full all night, voicemail, deposit.
  * Runs the real adapter against an in-memory database and waits for each result (polling, so no
- * public webhook is needed). Prints a results table.
+ * public webhook is needed). Prints a results table. --auto waits 20 s between calls instead of
+ * Enter, for runs without an interactive terminal.
  */
 import { createInterface } from 'node:readline/promises';
 import type { CallOutcome, CallResult } from '@bubbleworks/shared';
@@ -73,12 +74,19 @@ async function main(): Promise<void> {
   const venue = demoVenue(env('TEST_CALL_NUMBER'));
   // Tonight at 7 PM venue-local, as the booking request carries it.
   const startAt = new Date(`${new Date().toISOString().slice(0, 10)}T23:00:00.000Z`).toISOString();
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const auto = process.argv.includes('--auto');
+  const rl = auto ? null : createInterface({ input: process.stdin, output: process.stdout });
   const rows: string[][] = [];
 
   for (const [i, s] of SCENARIOS.entries()) {
     if (only !== null && only !== i + 1) continue;
-    await rl.question(`\n${i + 1}/5 ${s.name}. Teammate: ${s.script}\nPress Enter to dial... `);
+    const cue = `\n${i + 1}/5 ${s.name}. Teammate: ${s.script}`;
+    if (auto) {
+      console.log(`${cue}\nDialing in 20 s...`);
+      await new Promise((r) => setTimeout(r, 20_000));
+    } else {
+      await rl!.question(`${cue}\nPress Enter to dial... `);
+    }
     const t0 = Date.now();
     const result = new Promise<CallResult>((resolve) => (resolveResult = resolve));
     await caller.book({
@@ -108,7 +116,7 @@ async function main(): Promise<void> {
     ]);
     console.log(`-> ${r?.outcome ?? 'timeout'} in ${secs}s: ${r?.summary ?? ''}`);
   }
-  rl.close();
+  rl?.close();
   caller.stop();
 
   const head = ['#', 'scenario', 'expected', 'got', 'result', 'time', 'summary'];

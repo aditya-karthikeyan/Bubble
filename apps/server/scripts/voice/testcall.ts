@@ -52,6 +52,8 @@ async function main(): Promise<void> {
           booking_name: 'Mahil',
           callback_number: process.env['TWILIO_PHONE_NUMBER'] ?? 'this number',
           table_notes: 'none',
+          call_purpose: 'book',
+          hold_minutes: 0,
           // Test-number calls skip the AI disclosure; real bookings keep it.
           opener: 'Hey! Quick question, do you guys take reservations?',
         },

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { BACKUP_PHONE, DEMO_PHONE, conversation, setup, unlisted } from './test-fixtures.js';
+import {
+  BACKUP_PHONE,
+  DEMO_PHONE,
+  conversation,
+  primary,
+  setup,
+  unlisted,
+} from './test-fixtures.js';
 
 function transcription(id: string, collected: Record<string, unknown>) {
   return { type: 'post_call_transcription' as const, data: conversation(id, collected) };
@@ -158,6 +165,79 @@ describe('ElevenLabsCaller', () => {
     expect(api.calls[0]!.dynamicVariables['opener']).toBe(
       'Hey! Quick question, do you guys take reservations?',
     );
+  });
+
+  it('modifies, cancels, and holds through the same agent with a call purpose', async () => {
+    const { api, caller, results, plan } = setup();
+    await caller.modify({
+      planId: plan.id,
+      bookingId: 'booking_1',
+      venue: primary,
+      partySize: 5,
+      startAt: '2026-10-10T23:00:00.000Z',
+      reservationName: 'Ava',
+      idempotencyKey: 'modify:1',
+    });
+    await caller.cancel({
+      planId: plan.id,
+      bookingId: 'booking_1',
+      venue: primary,
+      reservationName: 'Ava',
+      idempotencyKey: 'cancel:1',
+    });
+    await caller.holdTable({
+      planId: plan.id,
+      bookingId: 'booking_1',
+      venue: primary,
+      partySize: 4,
+      startAt: '2026-10-10T23:00:00.000Z',
+      holdMinutes: 15,
+      idempotencyKey: 'hold:1',
+    });
+    expect(api.calls.map((c) => c.dynamicVariables['call_purpose'])).toEqual([
+      'modify',
+      'cancel',
+      'hold',
+    ]);
+    expect(api.calls[0]!.dynamicVariables).toMatchObject({ party_size: 5, booking_name: 'Ava' });
+    expect(api.calls[2]!.dynamicVariables).toMatchObject({
+      hold_minutes: 15,
+      preferred_time: '7:00 PM',
+    });
+    expect(api.calls[2]!.dynamicVariables['opener']).toBe(
+      'Hi, this is an AI assistant calling for our group, about the 7:00 PM table.',
+    );
+
+    for (const id of ['conv_1', 'conv_2', 'conv_3']) {
+      await caller.handleWebhook(transcription(id, { booked: true }));
+    }
+    expect(results.map((r) => r.outcome)).toEqual(['modified', 'cancelled', 'booked']);
+    expect(results[1]!.venueId).toBeNull();
+    expect(results[2]!.summary).toBe(
+      'The Demo Table is holding the 7:00 PM table for 15 more minutes.',
+    );
+  });
+
+  it('never reports failed for a modify, cancel, or hold, so a booked plan is not failed', async () => {
+    const { caller, results, plan } = setup();
+    await caller.holdTable({
+      planId: plan.id,
+      bookingId: 'booking_1',
+      venue: primary,
+      partySize: 4,
+      startAt: '2026-10-10T23:00:00.000Z',
+      holdMinutes: 10,
+      idempotencyKey: 'hold:2',
+    });
+    await caller.handleWebhook(transcription('conv_1', { booked: false, failure_reason: 'other' }));
+    await caller.cancel({
+      planId: plan.id,
+      bookingId: 'booking_1',
+      venue: unlisted,
+      reservationName: 'Ava',
+      idempotencyKey: 'cancel:2',
+    });
+    expect(results.map((r) => r.outcome)).toEqual(['declined', 'declined']);
   });
 
   it('ignores unknown conversations and audio events', async () => {

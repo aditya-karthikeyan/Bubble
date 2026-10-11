@@ -7,8 +7,10 @@
  *   caller.start();
  */
 import type { CallerPort } from '@bubbleworks/shared';
+import { eq } from 'drizzle-orm';
 import { FakeCaller } from '@bubbleworks/shared/fakes';
 import type { FastifyInstance } from 'fastify';
+import { bookings } from '../db/schema.js';
 import type { Runtime } from '../runtime.js';
 import { ElevenLabsCaller, type CallResultSink } from './adapter.js';
 import type { CallerConfig } from './config.js';
@@ -30,7 +32,7 @@ export interface Caller {
 
 export interface CreateCallerOptions {
   config: CallerConfig;
-  runtime: Pick<Runtime, 'handle' | 'bus' | 'log'>;
+  runtime: Pick<Runtime, 'handle' | 'db' | 'bus' | 'log'>;
   onResult: CallResultSink;
   /** Test override for the ElevenLabs HTTP client. */
   api?: ElevenLabsApi;
@@ -39,7 +41,10 @@ export interface CreateCallerOptions {
 export function createCaller(options: CreateCallerOptions): Caller {
   const { config, runtime, onResult } = options;
   if (config.CALLER_MODE === 'fake') {
-    const fake = new FakeCaller(onResult, { log: (line) => runtime.log.info({}, line) });
+    const fake = new FakeCaller(onResult, {
+      delayMs: 3000,
+      log: (line) => runtime.log.info({}, line),
+    });
     return {
       mode: 'fake',
       port: fake,
@@ -61,6 +66,12 @@ export function createCaller(options: CreateCallerOptions): Caller {
     bus: runtime.bus,
     onResult,
     config,
+    bookingDetails: (bookingId) => {
+      const b = runtime.db.select().from(bookings).where(eq(bookings.id, bookingId)).get();
+      return b
+        ? { reservationName: b.reservationName, startAt: b.startAt, partySize: b.partySize }
+        : null;
+    },
     log: runtime.log,
   });
   return {

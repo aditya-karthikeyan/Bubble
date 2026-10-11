@@ -40,9 +40,6 @@
     "p4:number": "pnpm --filter @bubbleworks/server p4:number",
     "p4:testcall": "pnpm --filter @bubbleworks/server p4:testcall",
     "p4:phase0": "pnpm --filter @bubbleworks/server p4:phase0",
-    "p4:phase0": "pnpm --filter @bubbleworks/server p4:phase0",
-    "sim": "pnpm --filter @bubbleworks/server sim",
-    "p1:phase2": "pnpm --filter @bubbleworks/server sim basic",
     "p4:calltest": "pnpm --filter @bubbleworks/server p4:calltest"
   },
   "devDependencies": {
