@@ -5,6 +5,7 @@
  */
 import type { ReactNode } from 'react';
 import { Clock } from './clock';
+import { WatchLive } from './watch-live';
 
 export { AeroWindow, setMinimized, TaskButton } from './aero-window';
 
@@ -236,7 +237,10 @@ export function Taskbar({ children, tray }: { children?: ReactNode; tray?: React
       <a className="start-orb" href="/" aria-label="Bubbleworks home">
         <span />
       </a>
-      <div className="tasks">{children}</div>
+      <div className="tasks">
+        <WatchLive />
+        {children}
+      </div>
       <div className="tray">
         {tray}
         <Clock />

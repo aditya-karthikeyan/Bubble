@@ -1,7 +1,7 @@
 /**
  * Hard-fact compatibility between a venue and one member's facts. Deterministic rules only.
  *
- * ASSUMPTIONS (logged in docs/team-log/P1.md):
+ * ASSUMPTIONS:
  * 1. A religious diet is satisfiable at a venue that can serve a compatible vegetarian or vegan
  *    meal, because OSM rarely tags halal/kosher. Tagged halal/kosher venues qualify directly.
  * 2. Allergies exclude venues whose cuisine is high risk for that allergen unless the venue tags
