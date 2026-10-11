@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GooglePlacesSource, cuisineFromTypes, hoursFromPeriods, placeToVenue } from './places.js';
+import { openDb } from '../db/client.js';
+import { listVenues, pruneVenues, upsertVenues } from './repo.js';
 
 const PLACE = {
   id: 'ChIJabc',
@@ -51,10 +53,16 @@ describe('Google Places mapping', () => {
     expect(cuisineFromTypes('middle_eastern_restaurant', [], null)).toBe('middle_eastern');
     expect(cuisineFromTypes('hamburger_restaurant', [], null)).toBe('american');
     const fast = placeToVenue(
-      { ...PLACE, primaryType: 'fast_food_restaurant', types: ['fast_food_restaurant', 'food'] },
+      {
+        ...PLACE,
+        primaryType: 'fast_food_restaurant',
+        types: ['fast_food_restaurant', 'restaurant', 'food'],
+      },
       null,
     )!;
     expect(fast.style).toBe('fast_food');
+    // A "restaurant" that says it does not take reservations is not a place you book.
+    expect(placeToVenue({ ...PLACE, reservable: false }, null)!.style).toBe('fast_food');
     expect(hoursFromPeriods([])).toBeNull();
   });
 
@@ -85,5 +93,21 @@ describe('Google Places mapping', () => {
     const body = JSON.parse(calls[0]!.init.body as string);
     expect(body.textQuery).toBe('chinese restaurant');
     expect(body.locationBias.circle.radius).toBe(4800);
+  });
+
+  it('survives the seed prune, so a plan locked on a live venue outlives a restart', () => {
+    const handle = openDb(':memory:');
+    const db = handle.db;
+    const live = placeToVenue(PLACE, 'chinese')!;
+    const seeded = { ...live, id: 'venue_osm_1', name: 'Seeded' };
+    const stale = { ...live, id: 'venue_osm_2', name: 'Closed since' };
+    upsertVenues(db, [live, seeded, stale]);
+    pruneVenues(db, [seeded.id]);
+    expect(
+      listVenues(db)
+        .map((v) => v.id)
+        .sort(),
+    ).toEqual([live.id, seeded.id]);
+    handle.close();
   });
 });

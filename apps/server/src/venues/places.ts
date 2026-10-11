@@ -9,6 +9,7 @@
 import { Venue, type GeoPoint, type MealKind, type WeeklyHours } from '@bubbleworks/shared';
 import type { Logger } from '../events/bus.js';
 import { dietTagsFor, normalizePhone } from './osm.js';
+import { LIVE_VENUE_PREFIX } from './repo.js';
 
 export interface VenueSearch {
   center: GeoPoint;
@@ -156,14 +157,21 @@ export function placeToVenue(place: Place, asked: string | null): Venue | null {
   const hours = hoursFromPeriods(place.regularOpeningHours?.periods);
   if (!phone || !hours || !place.location || !place.displayName?.text) return null;
   const cuisine = cuisineFromTypes(place.primaryType, place.types, asked);
+  // Places you book: Google says reservable. Counter service, takeout, and anything that says it
+  // does not take reservations is fast_food, so a dinner plan never calls a taco counter.
   const types = new Set([place.primaryType ?? '', ...(place.types ?? [])]);
-  const fast = [...types].some((t) => FAST_TYPES.has(t)) && !types.has('restaurant');
-  const style = fast || place.dineIn === false ? 'fast_food' : 'sit_down';
+  const fast = [...types].some((t) => FAST_TYPES.has(t));
+  const style =
+    place.reservable === true && !fast
+      ? 'sit_down'
+      : fast || place.dineIn === false || place.reservable === false
+        ? 'fast_food'
+        : 'sit_down';
   const priceLevel = PRICE[place.priceLevel ?? ''] ?? 2;
   const dietTags = new Set(dietTagsFor({}, cuisine));
   if (place.servesVegetarianFood) dietTags.add('vegetarian');
   return Venue.parse({
-    id: `venue_gp_${place.id}`,
+    id: `${LIVE_VENUE_PREFIX}${place.id}`,
     name: place.displayName.text,
     cuisine,
     cuisineTags: [place.primaryType ?? cuisine],

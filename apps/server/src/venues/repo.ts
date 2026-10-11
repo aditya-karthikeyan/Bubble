@@ -3,7 +3,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { eq, notInArray } from 'drizzle-orm';
+import { and, eq, notInArray, notLike } from 'drizzle-orm';
 import { Venue as VenueSchema, type Venue } from '@bubbleworks/shared';
 import { z } from 'zod';
 import type { Db } from '../db/client.js';
@@ -48,10 +48,19 @@ export function upsertVenues(db: Db, list: Venue[]): number {
   return count;
 }
 
-/** Remove venues no longer in data/venues.json (closed or moved), so stale rows never reach the solver. */
+/** Ids of venues found live (Google Places) start with this; the seed never prunes them. */
+export const LIVE_VENUE_PREFIX = 'venue_gp_';
+
+/**
+ * Remove seeded venues no longer in data/venues.json (closed or moved), so stale rows never reach
+ * the solver. Live venues stay: a plan may be locked on one across a restart.
+ */
 export function pruneVenues(db: Db, keepIds: string[]): number {
   if (keepIds.length === 0) return 0;
-  return db.delete(venues).where(notInArray(venues.id, keepIds)).run().changes;
+  return db
+    .delete(venues)
+    .where(and(notInArray(venues.id, keepIds), notLike(venues.id, `${LIVE_VENUE_PREFIX}%`)))
+    .run().changes;
 }
 
 export function listVenues(db: Db): Venue[] {

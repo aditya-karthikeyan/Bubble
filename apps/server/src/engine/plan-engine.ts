@@ -248,7 +248,7 @@ export class BubbleworksEngine implements PlanEngine {
     for (const m of members) busy[m.userId] = m.busy;
     const time = decideStartTime(intent.startMinutes, busy, intent.date, this.tz, this.planNow());
     const ctx = this.ctx(plan, time.startMinutes);
-    const preview = solve({ venues: this.rt.venues(), members, ctx });
+    const preview = solve({ venues: this.venuePool(), members, ctx });
     const style = decideStyleQuestion(preview.feasible, intent.style ?? null);
     const cuisine = decideCuisineQuestion(preview.feasible, members, ctx, intent.cuisine);
     this.log.info(
@@ -593,7 +593,7 @@ export class BubbleworksEngine implements PlanEngine {
       case 'booked_backup': {
         if (plan.state !== 'BOOKING') return;
         const venueId = result.venueId ?? booking.venueId;
-        const venue = this.rt.venues().find((v) => v.id === venueId);
+        const venue = this.venuePool().find((v) => v.id === venueId);
         if (!venue) throw new Error(`booked at unknown venue ${venueId}`);
         const startAt = result.confirmedStartAt ?? booking.startAt;
         this.rt.db
@@ -772,7 +772,7 @@ export class BubbleworksEngine implements PlanEngine {
           `modified:${party.length}`,
           `Updated the table to ${party.length}. ${result.summary}`.trim(),
         );
-        const venue = this.rt.venues().find((v) => v.id === booking.venueId);
+        const venue = this.venuePool().find((v) => v.id === booking.venueId);
         if (venue) {
           await this.publish(plan.id, { type: 'doer_status', doer: 'splitter', state: 'started' });
           const r = await this.deps.doers.splitter.send({
@@ -822,7 +822,7 @@ export class BubbleworksEngine implements PlanEngine {
       .from(bookings)
       .where(and(eq(bookings.planId, planId), eq(bookings.status, 'booked')))
       .get();
-    const venue = booking ? this.rt.venues().find((v) => v.id === booking.venueId) : null;
+    const venue = booking ? this.venuePool().find((v) => v.id === booking.venueId) : null;
     if (!booking || !venue) return;
     const party = this.rt.plans
       .members(planId)
@@ -874,7 +874,7 @@ export class BubbleworksEngine implements PlanEngine {
       .from(bookings)
       .where(and(eq(bookings.planId, planId), eq(bookings.status, 'booked')))
       .get();
-    const venue = booking ? this.rt.venues().find((v) => v.id === booking.venueId) : null;
+    const venue = booking ? this.venuePool().find((v) => v.id === booking.venueId) : null;
     if (booking && venue) {
       await this.deps.caller.cancel({
         planId,
@@ -938,7 +938,7 @@ export class BubbleworksEngine implements PlanEngine {
           .where(and(eq(bookings.planId, plan.id), eq(bookings.status, 'booked')))
           .get();
         if (booking) {
-          const venue = this.rt.venues().find((v) => v.id === booking.venueId);
+          const venue = this.venuePool().find((v) => v.id === booking.venueId);
           if (venue)
             await this.deps.caller.cancel({
               planId: plan.id,
@@ -1165,7 +1165,7 @@ export class BubbleworksEngine implements PlanEngine {
       : (plan.intent.startMinutes ?? SOLVER.default_start_min);
     const ctx = this.ctx(plan, startMinutes);
     const result = solve({
-      venues: this.rt.venues(),
+      venues: this.venuePool(),
       members,
       ctx,
       vetoedVenueIds: [...(this.vetoed.get(planId) ?? [])],
@@ -1274,8 +1274,8 @@ export class BubbleworksEngine implements PlanEngine {
     const plan = this.rt.plans.mustGet(planId);
     if (!plan.chosenVenueId || !plan.startAt)
       throw new Error(`plan ${planId} has no choice to book`);
-    const venue = this.rt.venues().find((v) => v.id === plan.chosenVenueId);
-    const backup = this.rt.venues().find((v) => v.id === plan.backupVenueId) ?? null;
+    const venue = this.venuePool().find((v) => v.id === plan.chosenVenueId);
+    const backup = this.venuePool().find((v) => v.id === plan.backupVenueId) ?? null;
     if (!venue) throw new Error(`venue ${plan.chosenVenueId} missing`);
     const members = this.rt.plans.members(planId);
     const party = members.filter((m) => m.status === 'in' || m.status === 'represented');
@@ -1401,7 +1401,7 @@ export class BubbleworksEngine implements PlanEngine {
       .where(and(eq(bookings.planId, plan.id), eq(bookings.status, 'needs_human')))
       .get();
     if (!booking) return;
-    const venue = this.rt.venues().find((v) => v.id === booking.venueId);
+    const venue = this.venuePool().find((v) => v.id === booking.venueId);
     if (answer === 'yes') {
       this.rt.db
         .update(bookings)
@@ -1457,7 +1457,7 @@ export class BubbleworksEngine implements PlanEngine {
     const plan = this.rt.plans.mustGet(planId);
     const vetoed = this.vetoed.get(planId) ?? new Set<string>();
     const analysis = analyzeDeadlock(
-      this.rt.venues().filter((v) => !vetoed.has(v.id)),
+      this.venuePool().filter((v) => !vetoed.has(v.id)),
       members,
       ctx,
       {
@@ -1493,7 +1493,7 @@ export class BubbleworksEngine implements PlanEngine {
       this.now().getTime() + this.rt.timers.deadlines.private_ask_ms,
     ).toISOString();
     for (const c of picks) {
-      const venue = this.rt.venues().find((v) => v.id === c.enablesVenueIds[0]);
+      const venue = this.venuePool().find((v) => v.id === c.enablesVenueIds[0]);
       const text = await this.askWriter.write({
         kind: c.kind,
         from: c.from,
@@ -1580,7 +1580,7 @@ export class BubbleworksEngine implements PlanEngine {
     const startMinutes = plan.startAt
       ? this.minutesOf(plan.startAt)
       : (plan.intent.startMinutes ?? SOLVER.default_start_min);
-    const analysis = analyzeDeadlock(this.rt.venues(), members, this.ctx(plan, startMinutes), {
+    const analysis = analyzeDeadlock(this.venuePool(), members, this.ctx(plan, startMinutes), {
       minStartMinutes: earliestStart(plan.intent.date, this.tz, this.planNow()),
     });
     await this.noFit(
@@ -1684,7 +1684,7 @@ export class BubbleworksEngine implements PlanEngine {
     location: GeoPoint | null,
   ): GeoPoint | null {
     if (!location) return null;
-    const venues = this.rt.venues();
+    const venues = this.venuePool();
     if (venues.length === 0) return location;
     const nearest = Math.min(...venues.map((v) => walkMinutes(distanceM(location, v.location))));
     if (nearest <= this.travelLimit() + MAX_DISTANCE_SLACK_MIN) return location;
@@ -1719,7 +1719,7 @@ export class BubbleworksEngine implements PlanEngine {
   ): boolean {
     const vetoed = this.vetoed.get(planId) ?? new Set<string>();
     const analysis = analyzeDeadlock(
-      this.rt.venues().filter((v) => !vetoed.has(v.id)),
+      this.venuePool().filter((v) => !vetoed.has(v.id)),
       members,
       ctx,
       { minStartMinutes: earliestStart(plan.intent.date, this.tz, this.planNow()) },
@@ -1757,6 +1757,15 @@ export class BubbleworksEngine implements PlanEngine {
         'live venue search failed, using stored venues',
       );
     }
+  }
+
+  /**
+   * Venues the solver may pick. With a live source, The Demo Table stays out: the plan picks a
+   * real place and the call is redirected to the demo phone instead.
+   */
+  private venuePool(): Venue[] {
+    const all = this.rt.venues();
+    return this.deps.venueSource ? all.filter((v) => !v.isDemo) : all;
   }
 
   private agentFirst(): boolean {
@@ -1805,7 +1814,7 @@ export class BubbleworksEngine implements PlanEngine {
     const cuisine = ctx.cuisine;
     if (!cuisine || this.cuisineSwitch(plan.id) !== 'none') return false;
     const vetoed = this.vetoed.get(plan.id) ?? new Set<string>();
-    const venues = this.rt.venues().filter((v) => !vetoed.has(v.id));
+    const venues = this.venuePool().filter((v) => !vetoed.has(v.id));
     if (filterCandidates(venues, members, ctx).feasible.length > 0) return false;
     const fallback = solve({ venues, members, ctx: { ...ctx, cuisine: null } }).winner;
     // Nothing fits even without the cuisine: the deadlock breaker takes it from here.
@@ -2005,7 +2014,7 @@ export class BubbleworksEngine implements PlanEngine {
       : (plan.intent.startMinutes ?? SOLVER.default_start_min);
     const base = { ...this.ctx(plan, startMinutes), cuisine: null };
     const vetoed = this.vetoed.get(plan.id) ?? new Set<string>();
-    const venues = this.rt.venues().filter((v) => !vetoed.has(v.id));
+    const venues = this.venuePool().filter((v) => !vetoed.has(v.id));
     const fits = (style: VenueStyle | null) =>
       filterCandidates(venues, members, { ...base, style }).feasible;
 
@@ -2098,10 +2107,10 @@ export class BubbleworksEngine implements PlanEngine {
 
   private explain(plan: Plan): string {
     const venue = plan.chosenVenueId
-      ? this.rt.venues().find((v) => v.id === plan.chosenVenueId)
+      ? this.venuePool().find((v) => v.id === plan.chosenVenueId)
       : null;
     const backup = plan.backupVenueId
-      ? this.rt.venues().find((v) => v.id === plan.backupVenueId)
+      ? this.venuePool().find((v) => v.id === plan.backupVenueId)
       : null;
     const party = this.rt.plans.inCount(plan.id);
     switch (plan.state) {
