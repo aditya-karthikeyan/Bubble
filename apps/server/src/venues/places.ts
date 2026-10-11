@@ -50,7 +50,8 @@ const PRICE: Record<string, number> = {
   PRICE_LEVEL_EXPENSIVE: 3,
   PRICE_LEVEL_VERY_EXPENSIVE: 4,
 };
-const TYPICAL_COST: Record<number, number> = { 1: 12, 2: 22, 3: 38, 4: 60 };
+/** Dollars a head by Google price level. Moderate is $10-25 on Google, so $20, not $22. */
+const TYPICAL_COST: Record<number, number> = { 1: 12, 2: 20, 3: 38, 4: 60 };
 
 /** Counter service, takeout, and coffee: not places you book. */
 const FAST_TYPES = new Set([
