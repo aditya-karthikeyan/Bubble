@@ -21,13 +21,15 @@ export interface Target extends Point {
   /** How far the node floats around its target, in px. */
   wander: number;
   opacity: number;
+  /** Booked: fly into this venue and get absorbed, in this order. */
+  absorb?: { venueId: string; order: number };
 }
 
 export interface Layout {
   venues: Record<string, Target & { leader: boolean; dim: boolean }>;
   bubbles: Record<string, Target>;
   /** Bubbles the consensus bubble wraps, and where it sits. */
-  consensus: { members: string[]; at: Point; r: number } | null;
+  consensus: { members: string[]; at: Point; r: number; absorbing: boolean } | null;
   doers: Partial<Record<DoerKind, Target>>;
   /** Where doers are born when they split off: the consensus centre. */
   doerOrigin: Point | null;
@@ -62,6 +64,7 @@ function spiral(i: number, n: number, c: Point, rx: number, ry: number): Point {
 export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
   const s = sizes(size);
   const settled = phase === 'locked' || phase === 'summary';
+  const booked = phase === 'summary';
   const area = safeArea(size, settled || phase === 'closed');
   const span = Math.min(size.w * 0.84, 960);
   const left = (size.w - span) / 2;
@@ -82,12 +85,22 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
   for (const v of live) {
     const chosen = v.venueId === leaderId;
     const gone = v.eliminated || (settled && !chosen);
+    // The chosen place waits on top while locked, then becomes the hero at the centre once booked.
     const at =
-      settled && chosen ? { x: size.w / 2, y: area.top + s.venue * 1.1 } : slot[v.venueId]!;
+      booked && chosen
+        ? { ...centre }
+        : settled && chosen
+          ? { x: size.w / 2, y: area.top + s.venue * 1.1 }
+          : slot[v.venueId]!;
     venues[v.venueId] = {
       ...at,
       y: gone ? -s.venue * 3 : at.y,
-      r: chosen && (vm.merged || settled) ? s.venue * 1.25 : s.venue,
+      r:
+        booked && chosen
+          ? s.venue * 1.7
+          : chosen && (vm.merged || settled)
+            ? s.venue * 1.25
+            : s.venue,
       wander: gone ? 0 : settled ? s.venue * 0.15 : s.venue * 0.35,
       opacity: gone ? 0 : 1,
       leader: chosen,
@@ -125,8 +138,9 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
         x: clusterAt.x + Math.cos(a) * ring * 0.85,
         y: clusterAt.y + Math.sin(a) * ring * 0.85,
         r: inside,
-        wander: s.bubble * 0.12,
+        wander: booked ? 0 : s.bubble * 0.12,
         opacity: 1,
+        ...(booked && leaderId ? { absorb: { venueId: leaderId, order: k } } : {}),
       };
       return;
     }
@@ -170,16 +184,20 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
   }
 
   const consensus =
-    merged.length >= 2 && clusterAt ? { members: merged, at: clusterAt, r: consensusR } : null;
+    merged.length >= 2 && clusterAt
+      ? { members: merged, at: clusterAt, r: consensusR, absorbing: booked }
+      : null;
 
   const doers: Layout['doers'] = {};
   if (settled) {
-    const ring = consensusR + s.doer * 1.7;
+    // Around the consensus bubble while locked, around the destination once booked.
+    const ring = booked ? s.venue * 1.7 + s.doer * 1.9 : consensusR + s.doer * 1.7;
     DOER_KINDS.forEach((kind, i) => {
       const a = -Math.PI / 4 - (i * Math.PI) / 2;
       doers[kind] = {
-        x: centre.x + Math.cos(a) * ring * 1.1,
-        y: centre.y - Math.sin(a) * ring * 0.92,
+        // Wider than tall, so the destination's name below it stays clear.
+        x: centre.x + Math.cos(a) * ring * (booked ? 1.32 : 1.1),
+        y: centre.y - Math.sin(a) * ring * (booked ? 0.86 : 0.92),
         r: s.doer,
         wander: s.doer * 0.12,
         opacity: 1,

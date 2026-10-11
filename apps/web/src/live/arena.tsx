@@ -14,8 +14,7 @@ import type { BubblePageStatus, DoerKind, DoerState } from '@bubbleworks/shared'
 import {
   forceCollide,
   forceSimulation,
-  forceX,
-  forceY,
+  type Force,
   type Simulation,
   type SimulationNodeDatum,
 } from 'd3-force';
@@ -42,7 +41,21 @@ interface Node extends SimulationNodeDatum {
   py: number;
   tx: number;
   ty: number;
+  /** Booked: the venue node this bubble flies into, and when it takes off. */
+  absorbInto?: string;
+  absorbAt?: number;
+  /** Where it waits until take-off, and its radius before shrinking. */
+  hx?: number;
+  hy?: number;
+  rBase?: number;
+  absorbed?: boolean;
+  /** The destination while it absorbs: collisions add both radii, so it must yield too. */
+  swallowing?: boolean;
 }
+
+/** Stagger between bubbles taking off into the destination, and the pause before the first. */
+const ABSORB_FIRST_MS = 700;
+const ABSORB_STAGGER_MS = 420;
 
 const STATUS_HUE: Record<BubblePageStatus, string> = {
   fits: 'fits',
@@ -273,7 +286,47 @@ function syncNode(
   n.opt = t.opacity;
   n.tx = t.x;
   n.ty = t.y;
+  if (t.absorb) {
+    const into = `v:${t.absorb.venueId}`;
+    if (n.absorbInto !== into) {
+      n.absorbInto = into;
+      n.absorbAt = performance.now() + ABSORB_FIRST_MS + t.absorb.order * ABSORB_STAGGER_MS;
+      n.hx = n.x ?? t.x;
+      n.hy = n.y ?? t.y;
+      n.rBase = t.r;
+      n.absorbed = false;
+    }
+  } else {
+    n.absorbInto = undefined;
+    n.absorbAt = undefined;
+  }
   return n;
+}
+
+/** Collision radius. Labels need room too: venue names sit below orbs, statuses below bubbles. */
+function collideRadius(n: Node): number {
+  // Headed into the destination, or the destination itself: no collisions, so it can swallow.
+  if (n.absorbInto || n.swallowing) return 0;
+  return n.r * (n.kind === 'venue' ? 1.75 : n.kind === 'doer' ? 1.3 : 1.25) + 3;
+}
+
+/**
+ * Spring toward each node's target, read fresh every tick. d3's forceX/forceY cache their
+ * targets at initialization, which would freeze the floating orbits.
+ */
+function seek(): Force<Node, undefined> {
+  let nodes: Node[] = [];
+  const force = (alpha: number) => {
+    const k = 0.0035 + 0.04 * alpha;
+    for (const n of nodes) {
+      n.vx = (n.vx ?? 0) + (n.tx - n.x!) * k;
+      n.vy = (n.vy ?? 0) + (n.ty - n.y!) * k;
+    }
+  };
+  force.initialize = (ns: Node[]) => {
+    nodes = ns;
+  };
+  return force;
 }
 
 export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
@@ -293,27 +346,41 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
 
   // One simulation for the page's lifetime; it idles warm so things keep floating.
   useEffect(() => {
+    const collide = forceCollide<Node>(collideRadius).strength(0.7).iterations(2);
     const s = forceSimulation<Node>([])
       .alphaDecay(0.01)
       .alphaTarget(0.12)
-      .velocityDecay(0.32)
-      .force(
-        'collide',
-        // Labels need room too: venue names sit below the orb, statuses below bubbles.
-        forceCollide<Node>(
-          (n) => n.r * (n.kind === 'venue' ? 1.75 : n.kind === 'doer' ? 1.3 : 1.25) + 3,
-        )
-          .strength(0.7)
-          .iterations(2),
-      )
-      .force('x', forceX<Node>((n) => n.tx).strength(0.045))
-      .force('y', forceY<Node>((n) => n.ty).strength(0.045))
+      .velocityDecay(0.3)
+      .force('collide', collide)
+      .force('seek', seek())
       .on('tick', () => {
         const now = performance.now();
+
         for (const n of s.nodes()) {
           // Each node orbits its target slowly: two sines at their own frequencies.
           n.tx = n.bx + Math.sin(now * n.fx1 + n.px) * n.wander;
           n.ty = n.by + Math.cos(now * n.fy1 + n.py) * n.wander * 0.8;
+          const into = n.absorbInto ? nodes.current.get(n.absorbInto) : undefined;
+          if (into && n.absorbAt !== undefined) {
+            if (now < n.absorbAt) {
+              // Wait in the consensus bubble for its turn.
+              n.tx = n.hx!;
+              n.ty = n.hy!;
+            } else {
+              // Pulled into the destination: shrink and fade as it gets close.
+              n.tx = into.x!;
+              n.ty = into.y!;
+              const d = Math.hypot(n.x! - into.x!, n.y! - into.y!);
+              const near = Math.min(1, Math.max(0, (d - into.r * 0.3) / (into.r * 1.6)));
+              n.opt = near;
+              n.rt = n.rBase! * (0.3 + 0.7 * near);
+              if (!n.absorbed && near < 0.08) {
+                // Gulp: the venue swells a little with each bubble it takes in.
+                n.absorbed = true;
+                into.r += into.rt * 0.12;
+              }
+            }
+          }
           n.r += (n.rt - n.r) * 0.06;
           n.op += (n.opt - n.op) * 0.05;
           const el = els.current.get(n.id);
@@ -325,6 +392,8 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
             el.style.opacity = n.op.toFixed(3);
           }
         }
+        // forceCollide caches radii; refresh them as nodes grow, shrink, and take off.
+        collide.radius(collideRadius);
         // The consensus bubble wraps its members wherever they actually are.
         const c = layoutRef.current?.consensus;
         const cs = consensusState.current;
@@ -346,9 +415,14 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
             const k = cs.op < 0.01 ? 1 : 0.12;
             cs.x += (x - cs.x) * k;
             cs.y += (y - cs.y) * k;
-            cs.r += (Math.max(reach + 10, c.r) - cs.r) * 0.08;
+            cs.r += ((c.absorbing ? reach + 10 : Math.max(reach + 10, c.r)) - cs.r) * 0.08;
           }
-          cs.op += (1 - cs.op) * 0.05;
+          // While absorbing, it dissolves with its members.
+          const target =
+            c.absorbing && members.length
+              ? members.reduce((t, m) => t + m.op, 0) / members.length
+              : 1;
+          cs.op += (target - cs.op) * 0.05;
         } else {
           cs.op += (0 - cs.op) * 0.08;
         }
@@ -388,6 +462,10 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
       const origin = layout.doerOrigin ?? { x: t.x, y: t.y };
       next.set(`d:${kind}`, syncNode(nodes.current, `d:${kind}`, 'doer', t, origin));
     }
+    const swallower = layout.consensus?.absorbing
+      ? Object.entries(layout.venues).find(([, v]) => v.leader)?.[0]
+      : undefined;
+    for (const n of next.values()) n.swallowing = n.kind === 'venue' && n.id === `v:${swallower}`;
     nodes.current = next;
     const list = [...next.values()];
     if (reduced) {
@@ -397,7 +475,8 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
         n.x = n.bx;
         n.y = n.by;
         n.r = n.rt;
-        n.op = n.opt;
+        n.op = n.absorbInto ? 0 : n.opt;
+        if (n.absorbInto) n.opt = 0;
       }
       s.nodes(list);
       // Settle collisions without animating, then draw once at rest.

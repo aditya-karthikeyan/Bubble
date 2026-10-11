@@ -90,6 +90,26 @@ describe('arena layout', () => {
     }
   });
 
+  it('flies the crew into the destination and absorbs them once booked, one after another', () => {
+    const vm = reduceAll(BASIC);
+    const l = computeLayout(vm, phaseOf(vm), PHONE);
+    const venue = l.venues['venue_demo']!;
+    expect(venue.leader).toBe(true);
+    expect(l.consensus?.absorbing).toBe(true);
+    const orders = l.consensus!.members.map((id) => l.bubbles[id]!.absorb);
+    expect(orders.map((a) => a?.venueId)).toEqual([
+      'venue_demo',
+      'venue_demo',
+      'venue_demo',
+      'venue_demo',
+    ]);
+    expect(orders.map((a) => a?.order)).toEqual([0, 1, 2, 3]);
+    // The doers re-form around the destination.
+    for (const d of Object.values(l.doers)) {
+      expect(Math.hypot(d.x - venue.x, d.y - venue.y)).toBeGreaterThan(venue.r + d.r);
+    }
+  });
+
   it('sends a bubble that left off the top, faded', () => {
     const vm = reduceAll(upTo('bubble_left'));
     expect(computeLayout(vm, 'gathering', PHONE).bubbles['user_eli']).toBeUndefined();
