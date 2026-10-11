@@ -719,7 +719,10 @@ export class DbBubbleService implements BubbleService {
       case 'forget_me_confirm': {
         this.setPending(user.id, null);
         if (yes && Date.parse(pending.expiresAt) > this.now().getTime()) {
-          await reply('Done. Everything I knew about you is gone. Text me anytime to start over.');
+          const again = this.deps.signupUrl
+            ? ` To start over, sign up again here: ${this.deps.signupUrl}`
+            : ' Text me anytime to start over.';
+          await reply(`Done. Everything I knew about you is gone.${again}`);
           await this.forgetUser(user.id);
           return true;
         }
