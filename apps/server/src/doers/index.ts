@@ -35,6 +35,7 @@ import { silentLogger, type Logger } from '../events/bus.js';
 import type { TimerService } from '../timers/service.js';
 import { distanceM } from '../venues/geo.js';
 import { buildIcs, signBookingToken, verifyBookingToken } from './ics.js';
+import { LedgerWriter } from './ledger.js';
 
 /** Per-person estimate by venue price level, USD (role prompt: 1 = 15, 2 = 30, 3 = 55). */
 export const COST_BY_PRICE_LEVEL: Record<number, number> = { 1: 15, 2: 30, 3: 55, 4: 85 };
@@ -78,6 +79,7 @@ export class Doers implements DoerPorts {
   /** planId -> userIds already reported late, so the caller is asked once per member. */
   private readonly reportedLate = new Map<string, Set<string>>();
 
+  readonly ledger: LedgerWriter;
   readonly inviter: DoerPorts['inviter'];
   readonly splitter: DoerPorts['splitter'];
   readonly watcher: DoerPorts['watcher'];
@@ -95,6 +97,8 @@ export class Doers implements DoerPorts {
       if (p['p3'] === 'watch') await this.watchTick(String(p['bookingId']), t.planId);
     });
     d.bus?.subscribe('*', (e) => this.onEvent(e));
+    this.ledger = new LedgerWriter(d.db, { now: this.now, log: this.log });
+    if (d.bus) this.ledger.attach(d.bus);
   }
 
   // -- Inviter ---------------------------------------------------------------
@@ -170,23 +174,23 @@ export class Doers implements DoerPorts {
       return { ok: false, detail: 'Nobody has a Venmo handle yet' };
     }
 
-    const paidCount = (userId: string) =>
+    const count = (userId: string, kind: 'paid' | 'compromised') =>
       Number(
         this.d.db
           .select({ n: sql<number>`count(*)` })
           .from(ledger)
-          .where(
-            and(eq(ledger.userId, userId), eq(ledger.kind, 'paid'), eq(ledger.groupId, groupId)),
-          )
+          .where(and(eq(ledger.userId, userId), eq(ledger.kind, kind), eq(ledger.groupId, groupId)))
           .get()?.n ?? 0,
       );
-    // Fewest times paid in this crew; ties go to the earliest to join the plan, then by id.
+    // Fewest times paid in this crew. Ties go to whoever has compromised least, so the person
+    // who keeps bending is not also the one fronting the bill; then join order, then id.
     const order = new Map(s.members.map((m, i) => [m.userId, i]));
     const payer = withHandle
-      .map((x) => ({ ...x, paid: paidCount(x.u.id) }))
+      .map((x) => ({ ...x, paid: count(x.u.id, 'paid'), bent: count(x.u.id, 'compromised') }))
       .sort(
         (a, b) =>
           a.paid - b.paid ||
+          a.bent - b.bent ||
           (order.get(a.u.id) ?? 99) - (order.get(b.u.id) ?? 99) ||
           a.u.id.localeCompare(b.u.id),
       )[0]!;

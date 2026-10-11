@@ -35,6 +35,7 @@
     "p3:phase3": "pnpm --filter @bubbleworks/server p3:phase3",
     "p1:edge": "pnpm --filter @bubbleworks/server edge",
     "p1:speed": "pnpm --filter @bubbleworks/server speed",
+    "p3:phase4": "pnpm --filter @bubbleworks/server p3:phase4",
     "demo:reset": "pnpm --filter @bubbleworks/server demo:reset"
   },
   "devDependencies": {
