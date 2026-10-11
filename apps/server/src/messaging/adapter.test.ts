@@ -407,8 +407,8 @@ describe('inbound', () => {
     ]);
   });
 
-  it('hands location pins to onLocation with the member id', async () => {
-    const { messaging } = await setup();
+  it('hands location pins to the bubble with the member id', async () => {
+    const { messaging, inbox } = await setup();
     const pins: Array<{ userId: string; lat: number; lng: number }> = [];
     messaging.onLocation(async (l) => void pins.push({ userId: l.userId, lat: l.lat, lng: l.lng }));
     await messaging.handleInbound({
@@ -420,6 +420,16 @@ describe('inbound', () => {
       at,
     });
     expect(pins).toEqual([{ userId: AVA.id, lat: 35.9097, lng: -79.0475 }]);
+    // And as a private message with location set (P3's contract, #41).
+    expect(inbox.private).toEqual([
+      {
+        messageId: 'loc1',
+        userId: AVA.id,
+        text: '',
+        at,
+        location: { lat: 35.9097, lng: -79.0475 },
+      },
+    ]);
   });
 
   it('drops duplicates and unregistered phones, and marks first-time senders onboarded', async () => {

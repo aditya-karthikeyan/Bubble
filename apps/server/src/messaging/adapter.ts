@@ -360,10 +360,17 @@ export class SpectrumMessaging implements MessagingPort {
     }
 
     switch (event.kind) {
-      case 'location':
-        if (!this.handlers.location.length) {
-          this.o.log.warn({ userId: user.id }, 'location pin received but nobody handles it');
-        }
+      case 'location': {
+        // P3's contract (#41): the pin reaches the bubble as a private message with `location`
+        // set and empty text. onLocation stays for anything else that wants pins.
+        const pin: InboundPrivateMessage & { location: { lat: number; lng: number } } = {
+          messageId: event.providerId,
+          userId: user.id,
+          text: '',
+          at: event.at,
+          location: { lat: event.lat, lng: event.lng },
+        };
+        await this.emit(this.handlers.private, pin);
         await this.emit(this.handlers.location, {
           userId: user.id,
           messageId: event.providerId,
@@ -372,6 +379,7 @@ export class SpectrumMessaging implements MessagingPort {
           at: event.at,
         });
         return;
+      }
       case 'text': {
         let flushNow = false;
         for (const handler of this.rawText) {
