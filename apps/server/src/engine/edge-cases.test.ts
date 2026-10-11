@@ -291,6 +291,25 @@ describe('edge cases', () => {
     expect(h.rt.db.select().from(bookings).all()[0]!.status).toBe('booked');
   });
 
+  it('a failed call drops that venue and reruns instead of failing the plan', async () => {
+    h.caller.dispose();
+    h.rt.close();
+    h = harness({ scriptedOutcomes: ['failed', 'booked'] });
+    const planId = await h.toLocked();
+    const first = h.rt.plans.get(planId)!.chosenVenueId;
+    await h.advance(DEADLINES.veto_window_ms + 1);
+    await h.settle();
+    const plan = h.rt.plans.get(planId)!;
+    expect(plan.state).toBe('LOCKED');
+    expect(plan.chosenVenueId).not.toBe(first);
+    expect(
+      h.events.some((e) => e.type === 'doer_status' && e.doer === 'caller' && e.state === 'failed'),
+    ).toBe(true);
+    await h.advance(DEADLINES.veto_window_ms + 1);
+    await h.settle();
+    expect(h.rt.plans.get(planId)!.state).toBe('BOOKED');
+  });
+
   it('member leaves the crew during deliberation: dropped and rerun', async () => {
     const planId = await h.toLocked();
     await h.engine.handleMemberChange({
