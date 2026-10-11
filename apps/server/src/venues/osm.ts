@@ -130,8 +130,21 @@ export function addressFor(tags: Record<string, string>): string | null {
 export interface Rejection {
   id: string;
   name: string;
-  reason: 'no_name' | 'no_phone' | 'no_hours' | 'unparsable_hours' | 'no_location';
+  reason: 'no_name' | 'no_phone' | 'no_hours' | 'unparsable_hours' | 'no_location' | 'closed';
   raw?: string;
+}
+
+/** OSM marks a closed business with lifecycle prefixes or end dates; opening_hours may say off. */
+export function looksClosed(tags: Record<string, string>): boolean {
+  if (
+    Object.keys(tags).some((k) =>
+      /^(disused|was|abandoned|demolished|removed|razed|closed):/.test(k),
+    )
+  )
+    return true;
+  if (tags['end_date'] || tags['closed'] === 'yes' || tags['disused'] === 'yes') return true;
+  const oh = (tags['opening_hours'] ?? '').trim().toLowerCase();
+  return oh === 'off' || oh === 'closed';
 }
 
 export function elementToVenue(el: OverpassElement): { venue: Venue } | { rejection: Rejection } {
@@ -139,6 +152,7 @@ export function elementToVenue(el: OverpassElement): { venue: Venue } | { reject
   const id = `venue_osm_${el.type[0]}${el.id}`;
   const name = t['name']?.trim() ?? '';
   if (!name) return { rejection: { id, name: '(unnamed)', reason: 'no_name' } };
+  if (looksClosed(t)) return { rejection: { id, name, reason: 'closed' } };
   const phone = normalizePhone(t['phone'] ?? t['contact:phone']);
   if (!phone) return { rejection: { id, name, reason: 'no_phone' } };
   const rawHours = t['opening_hours'];

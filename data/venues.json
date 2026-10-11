@@ -538,64 +538,6 @@
     "isDemo": false
   },
   {
-    "id": "venue_osm_n2763321664",
-    "name": "Kipos Greek Taverna",
-    "cuisine": "mediterranean",
-    "dietTags": [
-      "vegetarian"
-    ],
-    "accessibilityTags": [],
-    "priceLevel": 2,
-    "typicalCostUsd": 22,
-    "hours": [
-      [
-        {
-          "open": 1020,
-          "close": 1260
-        }
-      ],
-      [],
-      [
-        {
-          "open": 690,
-          "close": 1290
-        }
-      ],
-      [
-        {
-          "open": 690,
-          "close": 1290
-        }
-      ],
-      [
-        {
-          "open": 690,
-          "close": 1290
-        }
-      ],
-      [
-        {
-          "open": 690,
-          "close": 1350
-        }
-      ],
-      [
-        {
-          "open": 690,
-          "close": 1350
-        }
-      ]
-    ],
-    "phone": "+19194250760",
-    "location": {
-      "lat": 35.9101744,
-      "lng": -79.0628881
-    },
-    "address": "431 West Franklin Street, Chapel Hill, NC, 27516",
-    "neighborhood": null,
-    "isDemo": false
-  },
-  {
     "id": "venue_osm_n2805273060",
     "name": "Moge Tea",
     "cuisine": "coffee",
@@ -838,69 +780,6 @@
       "lng": -79.0548338
     },
     "address": "127 East Franklin Street, Chapel Hill, NC, 27514",
-    "neighborhood": null,
-    "isDemo": false
-  },
-  {
-    "id": "venue_osm_n3316380639",
-    "name": "[B]SKI'S The Wrap Redefined",
-    "cuisine": "sandwich",
-    "dietTags": [
-      "vegetarian"
-    ],
-    "accessibilityTags": [],
-    "priceLevel": 1,
-    "typicalCostUsd": 12,
-    "hours": [
-      [
-        {
-          "open": 660,
-          "close": 1620
-        }
-      ],
-      [
-        {
-          "open": 660,
-          "close": 1320
-        }
-      ],
-      [
-        {
-          "open": 660,
-          "close": 1620
-        }
-      ],
-      [
-        {
-          "open": 660,
-          "close": 1620
-        }
-      ],
-      [
-        {
-          "open": 660,
-          "close": 1680
-        }
-      ],
-      [
-        {
-          "open": 660,
-          "close": 1680
-        }
-      ],
-      [
-        {
-          "open": 660,
-          "close": 1680
-        }
-      ]
-    ],
-    "phone": "+19199699727",
-    "location": {
-      "lat": 35.9139117,
-      "lng": -79.0542539
-    },
-    "address": null,
     "neighborhood": null,
     "isDemo": false
   },
@@ -1577,67 +1456,6 @@
       "lng": -79.0555196
     },
     "address": "107 East Franklin Street, Chapel Hill, NC, 27514",
-    "neighborhood": null,
-    "isDemo": false
-  },
-  {
-    "id": "venue_osm_w44343001",
-    "name": "Mama Dip's",
-    "cuisine": "american",
-    "dietTags": [],
-    "accessibilityTags": [],
-    "priceLevel": 2,
-    "typicalCostUsd": 22,
-    "hours": [
-      [
-        {
-          "open": 480,
-          "close": 1260
-        }
-      ],
-      [
-        {
-          "open": 480,
-          "close": 1290
-        }
-      ],
-      [
-        {
-          "open": 480,
-          "close": 1290
-        }
-      ],
-      [
-        {
-          "open": 480,
-          "close": 1290
-        }
-      ],
-      [
-        {
-          "open": 480,
-          "close": 1290
-        }
-      ],
-      [
-        {
-          "open": 480,
-          "close": 1290
-        }
-      ],
-      [
-        {
-          "open": 480,
-          "close": 1290
-        }
-      ]
-    ],
-    "phone": "+19199425837",
-    "location": {
-      "lat": 35.9116042,
-      "lng": -79.063383
-    },
-    "address": "408 West Rosemary Street, Chapel Hill, NC, 27516",
     "neighborhood": null,
     "isDemo": false
   },

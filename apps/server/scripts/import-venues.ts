@@ -20,6 +20,17 @@ const MIRRORS = [
 
 const OUT = resolve(import.meta.dirname, '../../../data/venues.json');
 
+/**
+ * Venues OSM still lists that are gone or moved. Checked 2026-10-11 against local news; keep the
+ * reason so the next import can re-check. The caller must never ring a dead number.
+ */
+const REMOVED: Record<string, string> = {
+  venue_osm_n3316380639: "[B]SKI'S The Wrap Redefined closed January 2019 (Daily Tar Heel)",
+  venue_osm_w44343001: "Mama Dip's Kitchen closed permanently 22 July 2025 (Chapelboro, ABC11)",
+  venue_osm_n2763321664:
+    'Kipos Greek Taverna moved to Eastgate Crossing in 2020; OSM pin is the old Franklin St spot',
+};
+
 async function fetchOverpass(): Promise<unknown> {
   const { lat, lng } = HACKATHON_CENTER;
   const query = `[out:json][timeout:120];(nwr["amenity"~"^(restaurant|fast_food|cafe)$"](around:${VENUE_RADIUS_M},${lat},${lng}););out center tags;`;
@@ -56,7 +67,12 @@ async function main(): Promise<void> {
     ? (JSON.parse(readFileSync(resolve(rawPath), 'utf8')) as unknown)
     : await fetchOverpass();
 
-  const { venues, rejections } = convertOverpass(raw);
+  const { venues: converted, rejections } = convertOverpass(raw);
+  const venues = converted.filter((v) => {
+    const why = REMOVED[v.id];
+    if (why) console.log(`  removed: ${v.name}: ${why}`);
+    return !why;
+  });
   const all = [demoVenue(), ...venues];
   writeFileSync(OUT, `${JSON.stringify(all, null, 2)}\n`);
 

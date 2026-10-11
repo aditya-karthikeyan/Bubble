@@ -9,7 +9,7 @@ import { DEMO_GROUP, DEMO_MEMBERS, PERSONAS, PERSONA_FACTS } from '@bubbleworks/
 import type { Db } from './client.js';
 import { facts, groupMembers, groups, users } from './schema.js';
 import { DEMO_VENUE_ID, HACKATHON_CENTER } from '../venues/demo-venue.js';
-import { loadVenuesFile, setVenuePhone, upsertVenues } from '../venues/repo.js';
+import { loadVenuesFile, pruneVenues, setVenuePhone, upsertVenues } from '../venues/repo.js';
 
 export interface SeedOptions {
   venuesPath?: string;
@@ -96,6 +96,10 @@ export function seedDatabase(db: Db, options: SeedOptions = {}): SeedResult {
 
   const venueList = loadVenuesFile(options.venuesPath);
   const venueCount = upsertVenues(db, venueList);
+  pruneVenues(
+    db,
+    venueList.map((v) => v.id),
+  );
   if (options.demoVenuePhone) setVenuePhone(db, DEMO_VENUE_ID, options.demoVenuePhone);
 
   return {
