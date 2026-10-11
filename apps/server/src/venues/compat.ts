@@ -24,6 +24,27 @@ export const ALLERGEN_RISK_CUISINES: Record<string, readonly string[]> = {
   sesame: ['middle_eastern', 'mediterranean', 'chinese', 'asian', 'korean'],
 };
 
+/**
+ * Meat-centric kitchens where "no pork" / "no beef" is not a safe bet even with a veg option.
+ * Matched against the raw OSM cuisine tags and the folded cuisine key.
+ */
+const PORK_HEAVY = new Set(['hot_dog', 'bbq', 'barbecue', 'german', 'pork', 'ribs', 'sausage']);
+const BEEF_HEAVY = new Set([
+  'burger',
+  'hot_dog',
+  'steak_house',
+  'steak',
+  'bbq',
+  'barbecue',
+  'kbbq',
+  'korean_bbq',
+]);
+const MEAT_EXCLUSIONS: Record<string, ReadonlySet<string>> = {
+  no_pork: PORK_HEAVY,
+  no_beef: BEEF_HEAVY,
+  no_red_meat: new Set([...PORK_HEAVY, ...BEEF_HEAVY, 'lamb']),
+};
+
 const DIET_SATISFIED_BY: Record<string, readonly string[]> = {
   vegetarian: ['vegetarian', 'vegan'],
   vegan: ['vegan'],
@@ -50,6 +71,14 @@ export function checkHardFact(venue: Venue, fact: Fact): Incompatibility | null 
   const tags = new Set(venue.dietTags);
   switch (fact.type) {
     case 'diet': {
+      const excluded = MEAT_EXCLUSIONS[fact.value];
+      if (excluded) {
+        const kitchen = [venue.cuisine, ...(venue.cuisineTags ?? [])];
+        const risky = kitchen.some((c) => excluded.has(c));
+        return risky
+          ? { factType: fact.type, value: fact.value, reason: 'meat_heavy_kitchen' }
+          : null;
+      }
       const ok = (DIET_SATISFIED_BY[fact.value] ?? [fact.value]).some((t) => tags.has(t));
       return ok ? null : { factType: fact.type, value: fact.value, reason: 'no_diet_option' };
     }
