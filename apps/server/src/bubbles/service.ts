@@ -19,6 +19,7 @@ import {
   type BusyInterval,
   type CrewDirectory,
   type Fact,
+  type FactType,
   type GeoPoint,
   type Group,
   type InboundPrivateMessage,
@@ -98,6 +99,31 @@ const QUESTIONS: Record<OnboardingStep, string> = {
 const FORGET_ME_WINDOW_MS = 5 * 60_000;
 /** A location pin sent in iMessage stands in for Find My this long. */
 const PIN_TTL_MS = 6 * 3_600_000;
+
+/** Fact types each onboarding question saves, for answers saved before answers were tracked. */
+const STEP_FACTS: Record<OnboardingStep, readonly FactType[]> = {
+  diet_allergy: ['diet', 'allergy', 'religious_diet', 'accessibility'],
+  budget: ['budget_max'],
+  neighborhood: ['neighborhood'],
+  favorites: ['favorite_venue', 'other'],
+  venmo: ['venmo_handle', 'payment_handle'],
+};
+/** Words that name a question in "change my diet", "fix my budget", "redo my venmo". */
+const STEP_WORDS: Record<OnboardingStep, RegExp> = {
+  diet_allergy: /^(diet|allerg|food|eat)/,
+  budget: /^budget/,
+  neighborhood: /^(area|neighbou?rhood)/,
+  favorites: /^(favou?rite|spot|place)/,
+  venmo: /^(venmo|payment|pay|cash|zelle|paypal)/,
+};
+const REDO_NAMED =
+  /^(?:can i |let me |i want to |i need to |pls |please )?(?:change|fix|update|edit|redo)\s+(?:my\s+|the\s+)?(diet\w*|allerg\w*|food\w*|eat\w*|budget|area|neighbou?rhood|favou?rites?|spots?|places?|venmo|payments?|pay\w*|cash ?app|zelle|paypal)\b/i;
+/** "go back", "wait i messed up", "that was a typo": a short message about the last answer. */
+const REDO_BACK =
+  /^(?:(?:wait|oh|ah|oops|sorry|hold on|no|ugh|hmm|actually)[,!.\s]+)*(?:go back|back|undo|oops|redo(?: that)?|change (?:that|my (?:last )?answer)|(?:can i |let me )(?:redo|change|fix|go back)(?: (?:that|it))?)\b/i;
+const REDO_MISTAKE =
+  /\b(?:messed up|screwed up|made a (?:mistake|typo)|wrong answer|was a typo|typo'?d|mistyped|was wrong)\b/i;
+const REDO_MEANT = /^(?:oops|sorry|wait|no)?[,!.\s]*i meant\s+(.+)$/i;
 
 export interface BubbleServiceDeps {
   db: Db;
@@ -417,7 +443,41 @@ export class DbBubbleService implements BubbleService {
       return true;
     }
 
+    // An edited message: if it answered an onboarding question, redo that answer.
+    if (m.editOf) {
+      const answers = this.state(user.id).answers ?? {};
+      const step = (Object.keys(answers) as OnboardingStep[]).find(
+        (k) => answers[k]?.messageId === m.editOf,
+      );
+      if (step && text) {
+        await this.redoAnswer(user, step, text, m.editOf, reply, 'Saw your edit. Updated');
+      } else if (text) {
+        this.learn({ messageId: m.messageId, userId: user.id, text, at: m.at });
+      }
+      return true;
+    }
+
+    const redo = this.parseRedo(user.id, text);
+    if (redo) {
+      if (this.state(user.id).pending?.kind === 'allergy_confirm') this.setPending(user.id, null);
+      if (redo.answer) {
+        await this.redoAnswer(user, redo.step, redo.answer, m.messageId, reply);
+        return true;
+      }
+      this.setPending(user.id, { kind: 'redo_step', step: redo.step });
+      const fast = this.state(user.id).onboardingStep?.startsWith('fast:') ?? false;
+      await reply(
+        `No problem, let's redo that one.\n\n${question(redo.step, fast).replace(/^\d\/\d /, '')}`,
+      );
+      return true;
+    }
+
     const state = this.state(user.id);
+    if (state.pending?.kind === 'redo_step') {
+      this.setPending(user.id, null);
+      await this.redoAnswer(user, state.pending.step as OnboardingStep, text, m.messageId, reply);
+      return true;
+    }
     if (state.pending && (await this.answerPending(user, state.pending, text, reply))) {
       return true;
     }
@@ -431,7 +491,7 @@ export class DbBubbleService implements BubbleService {
     if (!state.onboardingCompletedAt) {
       if (!state.onboardingStep) await this.startOnboarding(user.id, reply);
       else if (isDone(state.onboardingStep)) await this.finishOnboarding(user, reply);
-      else await this.answerOnboarding(user, state.onboardingStep, text, reply);
+      else await this.answerOnboarding(user, state.onboardingStep, text, m.messageId, reply);
       return true;
     }
 
@@ -653,6 +713,9 @@ export class DbBubbleService implements BubbleService {
     const no = isNo(text);
 
     switch (pending.kind) {
+      case 'redo_step':
+        return false; // route() answers it before this
+
       case 'forget_me_confirm': {
         this.setPending(user.id, null);
         if (yes && Date.parse(pending.expiresAt) > this.now().getTime()) {
@@ -748,44 +811,145 @@ export class DbBubbleService implements BubbleService {
     user: User,
     raw: string,
     text: string,
+    messageId: string,
     reply: Reply,
   ): Promise<void> {
     const { step, fast } = decodeStep(raw);
     const steps: readonly OnboardingStep[] = fast ? FAST_STEPS : ONBOARDING_STEPS;
+    const saved = await this.applyAnswer(user.id, step, text);
+    if (!saved) {
+      await reply('Just a number works, like 25. Or say skip.');
+      return;
+    }
+    this.rememberAnswer(user.id, step, messageId, saved);
+
+    const next = steps[steps.indexOf(step) + 1] ?? null;
+    this.upsertState(user.id, {
+      onboardingStep: next ? encodeStep(next, fast) : fast ? 'fast:done' : 'done',
+    });
+    if (await this.askAllergyConfirm(user.id, saved, reply)) return;
+    await this.continueOnboarding(user, reply);
+  }
+
+  /**
+   * Saves one onboarding answer and returns the facts it produced. Null when a budget answer
+   * has no number (the caller asks again).
+   */
+  private async applyAnswer(
+    userId: string,
+    step: OnboardingStep,
+    text: string,
+  ): Promise<Fact[] | null> {
+    const out: Fact[] = [];
     const noSplit = step === 'venmo' && isNoSplit(text);
-    if (noSplit) this.recordNoSplit(user.id, 'onboarding');
+    if (noSplit) out.push(this.recordNoSplit(userId, 'onboarding'));
     // The payment question reads handles by format, so a bare phone or email is Zelle.
     const handles =
       step === 'venmo' && !noSplit && !isSkip(text)
         ? parsePaymentHandles(text, { bareContact: true })
         : [];
-    if (handles.length) this.savePayHandles(user.id, handles, 'onboarding');
+    if (handles.length) out.push(...this.savePayHandles(userId, handles, 'onboarding'));
     const extracted =
       isSkip(text) || noSplit || handles.length
         ? []
         : await this.deps.extractor.extract(text, step);
-    const saved = await this.saveExtracted(user.id, extracted, step, text);
+    out.push(...(await this.saveExtracted(userId, extracted, step, text)));
+    if (step === 'budget' && !isSkip(text) && !out.some((f) => f.type === 'budget_max')) {
+      return null;
+    }
+    return out;
+  }
 
-    if (step === 'budget' && !isSkip(text) && !saved.some((f) => f.type === 'budget_max')) {
+  private rememberAnswer(userId: string, step: string, messageId: string, saved: Fact[]): void {
+    const answers = { ...(this.state(userId).answers ?? {}) };
+    answers[step] = { messageId, factIds: saved.map((f) => f.id) };
+    this.upsertState(userId, { answers });
+  }
+
+  /**
+   * Drops what an earlier answer to this question saved. Answers from before this was tracked
+   * fall back to the question's onboarding fact types.
+   */
+  private forgetAnswer(userId: string, step: OnboardingStep): void {
+    const answers = { ...(this.state(userId).answers ?? {}) };
+    const ids =
+      answers[step]?.factIds ??
+      this.facts
+        .active(userId)
+        .filter(
+          (f) =>
+            f.source === 'onboarding' && f.expiresAt === null && STEP_FACTS[step].includes(f.type),
+        )
+        .map((f) => f.id);
+    if (ids.length) this.facts.delete(ids);
+    delete answers[step];
+    this.upsertState(userId, { answers });
+  }
+
+  /**
+   * Re-answers one onboarding question, from an edited message or the reply after "go back".
+   * Keeps the person's place in onboarding.
+   */
+  private async redoAnswer(
+    user: User,
+    step: OnboardingStep,
+    text: string,
+    messageId: string,
+    reply: Reply,
+    lead = 'Updated',
+  ): Promise<void> {
+    this.forgetAnswer(user.id, step);
+    const saved = await this.applyAnswer(user.id, step, text);
+    if (!saved) {
+      this.setPending(user.id, { kind: 'redo_step', step });
       await reply('Just a number works, like 25. Or say skip.');
       return;
     }
-
-    const allergies = saved.filter((f) => f.type === 'allergy' && !f.confirmed);
-    const next = steps[steps.indexOf(step) + 1] ?? null;
-    this.upsertState(user.id, {
-      onboardingStep: next ? encodeStep(next, fast) : fast ? 'fast:done' : 'done',
-    });
-
-    if (allergies.length) {
-      this.setPending(user.id, { kind: 'allergy_confirm', factIds: allergies.map((f) => f.id) });
-      const list = joinNames(allergies.map((f) => f.value.replace(/_/g, ' ')));
-      await reply(
-        `Quick check, since this one is never bent for anyone: you're allergic to ${list}? (yes/no)`,
-      );
-      return;
-    }
+    this.rememberAnswer(user.id, step, messageId, saved);
+    const what = saved.length ? saved.map((f) => this.describe(f)).join('; ') : 'cleared that one';
+    await reply(`${lead}: ${what}.`);
+    this.log.info({ userId: user.id, step, facts: saved.length }, 'onboarding answer redone');
+    if (await this.askAllergyConfirm(user.id, saved, reply)) return;
     await this.continueOnboarding(user, reply);
+  }
+
+  /** "go back", "oops I meant vegan", "change my diet": which question, and an inline answer. */
+  private parseRedo(
+    userId: string,
+    text: string,
+  ): { step: OnboardingStep; answer: string | null } | null {
+    const st = this.state(userId);
+    const named = REDO_NAMED.exec(text);
+    if (named) {
+      const word = named[1]!.toLowerCase();
+      const step = (Object.keys(STEP_WORDS) as OnboardingStep[]).find((k) =>
+        STEP_WORDS[k].test(word),
+      );
+      return step ? { step, answer: null } : null;
+    }
+    // "go back" only means something during onboarding: the question before the open one.
+    if (st.onboardingCompletedAt || !st.onboardingStep) return null;
+    const meant = REDO_MEANT.exec(text);
+    const back = REDO_BACK.test(text) || (text.length <= 60 && REDO_MISTAKE.test(text));
+    if (!meant && !back) return null;
+    const { step, fast } = decodeStep(st.onboardingStep);
+    const steps: readonly OnboardingStep[] = fast ? FAST_STEPS : ONBOARDING_STEPS;
+    const at = isDone(st.onboardingStep) ? steps.length : steps.indexOf(step);
+    const prev = steps[at - 1];
+    if (!prev) return null;
+    return { step: prev, answer: meant?.[1]?.trim() || null };
+  }
+
+  /** Asks the yes/no for allergies saved unconfirmed. True when it asked. */
+  private async askAllergyConfirm(userId: string, saved: Fact[], reply: Reply): Promise<boolean> {
+    const allergies = saved.filter((f) => f.type === 'allergy' && !f.confirmed);
+    if (!allergies.length) return false;
+    this.setPending(userId, { kind: 'allergy_confirm', factIds: allergies.map((f) => f.id) });
+    const list = joinNames(allergies.map((f) => f.value.replace(/_/g, ' ')));
+    await reply(
+      `Quick check, since this one is never bent for anyone: you're allergic to ${list}? (yes/no)`,
+    );
+    return true;
   }
 
   /** Asks the next question, or wraps up when every question is answered. */
@@ -914,7 +1078,7 @@ export class DbBubbleService implements BubbleService {
     userId: string,
     handles: PayHandle[],
     source: 'onboarding' | 'chat',
-  ): void {
+  ): Fact[] {
     const methods = new Set(handles.map((h) => h.method));
     const stale = this.facts.active(userId).filter((f) => {
       if (f.type === 'venmo_handle') return f.value === NO_SPLIT || methods.has('venmo');
@@ -923,7 +1087,7 @@ export class DbBubbleService implements BubbleService {
       return old !== null && methods.has(old.method);
     });
     if (stale.length) this.facts.delete(stale.map((f) => f.id));
-    for (const h of handles) {
+    const saved = handles.map((h) =>
       this.facts.record({
         userId,
         type: 'payment_handle',
@@ -933,14 +1097,15 @@ export class DbBubbleService implements BubbleService {
         source,
         confirmed: true,
         expiresAt: null,
-      });
-    }
+      }),
+    );
     this.log.info({ userId, methods: [...methods] }, 'payment handles saved');
+    return saved;
   }
 
   /** Opts out of bill splits. Replaces any Venmo handle (single-valued). */
-  private recordNoSplit(userId: string, source: 'onboarding' | 'chat'): void {
-    this.facts.record({
+  private recordNoSplit(userId: string, source: 'onboarding' | 'chat'): Fact {
+    const fact = this.facts.record({
       userId,
       type: 'venmo_handle',
       value: NO_SPLIT,
@@ -951,6 +1116,7 @@ export class DbBubbleService implements BubbleService {
       expiresAt: null,
     });
     this.log.info({ userId, source }, 'opted out of splits');
+    return fact;
   }
 
   private matchVenue(name: string): string | null {
@@ -1217,6 +1383,7 @@ export class DbBubbleService implements BubbleService {
         pinLat: null,
         pinLng: null,
         pinAt: null,
+        answers: null,
         updatedAt: this.now().toISOString(),
       }
     );

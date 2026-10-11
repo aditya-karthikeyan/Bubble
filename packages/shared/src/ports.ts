@@ -116,6 +116,11 @@ export interface InboundPrivateMessage {
   at: IsoDateTime;
   /** A location pin the person sent (iMessage + → Location → Share). The bubble stores it. */
   location?: GeoPoint | null;
+  /**
+   * Set when the person edited an earlier message (iMessage message.edited): the messageId of
+   * the original. `text` is the edited text and `messageId` must be new (e.g. "<id>:edit:<ts>").
+   */
+  editOf?: string;
 }
 
 export interface PollVote {

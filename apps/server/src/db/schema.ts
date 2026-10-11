@@ -298,7 +298,12 @@ export type BubblePending =
   /** A hard fact learned from chat, waiting for a yes before it counts as confirmed. */
   | { kind: 'fact_confirm'; factIds: string[] }
   | { kind: 'crew_confirm'; groupId: string }
-  | { kind: 'forget_me_confirm'; expiresAt: string };
+  | { kind: 'forget_me_confirm'; expiresAt: string }
+  /** "go back" / "change my diet": the next message re-answers this onboarding question. */
+  | { kind: 'redo_step'; step: string };
+
+/** Per onboarding question: the message that answered it and the facts it saved. */
+export type BubbleAnswers = Record<string, { messageId: string; factIds: string[] }>;
 
 /** Per-person conversation state: onboarding progress and the pending yes/no question. */
 export const bubbleState = sqliteTable('bubble_state', {
@@ -317,6 +322,8 @@ export const bubbleState = sqliteTable('bubble_state', {
   pinLat: real('pin_lat'),
   pinLng: real('pin_lng'),
   pinAt: text('pin_at'),
+  /** Which message answered each onboarding question, so an edit or "go back" can redo it. */
+  answers: text('answers', { mode: 'json' }).$type<BubbleAnswers>(),
   updatedAt: text('updated_at').notNull(),
 });
 
