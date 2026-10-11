@@ -12,7 +12,7 @@ import type {
 } from '@bubbleworks/shared';
 import { DEMO_GROUP, FakeCrewDirectory, PERSONAS } from '@bubbleworks/shared/fakes';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { silentLogger } from '../events/bus.js';
+import { silentLogger, type Logger } from '../events/bus.js';
 import { SpectrumMessaging } from './adapter.js';
 import { BundleStore, clockTime, headcountText, type QuestionDecision } from './bundle.js';
 import { StubClassifier } from './classifier.js';
@@ -71,7 +71,11 @@ class RecordingEngine implements PlanEngine {
   }
 }
 
-async function setup(classifier = new StubClassifier(), isOnboarded?: (userId: string) => boolean) {
+async function setup(
+  classifier = new StubClassifier(),
+  isOnboarded?: (userId: string) => boolean,
+  log: Logger = silentLogger,
+) {
   const transport = new FakeTransport('imessage');
   const sqlite = new Database(':memory:');
   const bundles = new BundleStore(sqlite);
@@ -92,7 +96,7 @@ async function setup(classifier = new StubClassifier(), isOnboarded?: (userId: s
     engine,
     bundles,
     classifier,
-    log: silentLogger,
+    log,
     audit,
     ...(isOnboarded ? { isOnboarded } : {}),
   });
@@ -182,6 +186,48 @@ describe('PlanIntake', () => {
       at,
     });
     expect(engine.headcounts).toEqual([{ planId: 'plan_1', userId: BEN.id, in: true, at }]);
+  });
+
+  it('logs a headcount when it arrives, before the engine call that may lock the plan', async () => {
+    // Two taps a second apart: the second one answers for the last person, so its engine call
+    // deliberates and locks. Its log line must still sit before the lock, not after it.
+    const order: string[] = [];
+    const log: Logger = {
+      ...silentLogger,
+      info: (obj, msg) => {
+        if (msg === 'headcount') order.push(`log ${String(obj['userId'])}`);
+      },
+    };
+    const { transport, engine, port, text } = await setup(new StubClassifier(), undefined, log);
+    engine.handleHeadcount = async (input) => {
+      engine.headcounts.push(input);
+      order.push(`engine ${input.userId}`);
+    };
+    await text(AVA.handle, 'dinner today?', 'in_1');
+    await vi.runAllTimersAsync();
+    for (const who of [BEN, CHLOE]) {
+      const copy = transport.sends().find((s) => s.chatId === `any;-;${who.handle}`)!;
+      await port.handleInbound({
+        kind: 'reaction',
+        providerId: `rx_${who.id}`,
+        phone: who.handle,
+        targetMessageId: copy.messageId,
+        emoji: '👍',
+        removed: false,
+        at,
+      });
+    }
+    await text(PERSONAS[3]!.handle, "I'm in", 'in_2');
+    await vi.runAllTimersAsync();
+    const dev = PERSONAS[3]!.id;
+    expect(order).toEqual([
+      `log ${BEN.id}`,
+      `engine ${BEN.id}`,
+      `log ${CHLOE.id}`,
+      `engine ${CHLOE.id}`,
+      `log ${dev}`,
+      `engine ${dev}`,
+    ]);
   });
 
   it('parses RSVP replies with rules and asks Haiku only when unclear', async () => {
