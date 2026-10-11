@@ -73,7 +73,7 @@ describe('filter', () => {
     expect(result.winner?.name).toBe('Chipotle');
     expect(result.feasible.every((v) => v.cuisine === 'mexican')).toBe(true);
   });
-  it('a cuisine that clashes with the style relaxes the style, then the cuisine', () => {
+  it('a cuisine that clashes with the style relaxes the style, never the cuisine', () => {
     const people = [member('user_dev', { hardFacts: [], softFacts: [] })];
     const indian = filterCandidates(venues, people, {
       ...ctx,
@@ -88,8 +88,8 @@ describe('filter', () => {
       style: 'fast_food',
       cuisine: 'ethiopian',
     });
-    expect(none.feasible.length).toBeGreaterThan(0);
-    expect(none.feasible.every((v) => v.style === 'fast_food')).toBe(true);
+    // The engine asks the voters before dropping a cuisine; the solver never does it silently.
+    expect(none.feasible).toEqual([]);
   });
   it('distance filter uses the member location when known', () => {
     const far = member('user_dev', { location: { lat: 35.95, lng: -79.0 } });
