@@ -26,7 +26,9 @@
     "edge": "tsx --env-file-if-exists=../../.env scripts/edge.ts",
     "speed": "tsx --env-file-if-exists=../../.env scripts/speed.ts",
     "p3:phase4": "tsx --env-file-if-exists=../../.env scripts/p3/phase4.ts",
-    "demo:reset": "tsx --env-file-if-exists=../../.env scripts/demo-reset.ts"
+    "demo:reset": "tsx --env-file-if-exists=../../.env scripts/demo-reset.ts",
+    "p2:phase3": "tsx --env-file-if-exists=../../.env scripts/p2-phase3.ts",
+    "p3:smoke": "tsx --env-file-if-exists=../../.env scripts/p3/smoke.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
