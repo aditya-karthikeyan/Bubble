@@ -62,7 +62,7 @@ export function SignupForm() {
 
   if (state.kind === 'done') {
     return (
-      <div className="glass" aria-live="polite">
+      <div className="signup-success" aria-live="polite">
         <h2 style={{ margin: '0 0 4px', fontSize: 22 }}>Your bubble is ready</h2>
         {state.bubbleNumber ? (
           <>
@@ -98,18 +98,13 @@ export function SignupForm() {
   }
 
   return (
-    <form className="glass" onSubmit={submit} noValidate>
-      <ol className="steps">
-        <li>Sign up and get your own bubble number.</li>
-        <li>Text your bubble. It learns what you eat, spend, and like.</li>
-        <li>Tell it who your crew is. Then just text &ldquo;dinner tonight?&rdquo;</li>
-      </ol>
-      <label htmlFor="name">Name</label>
+    <form className="signup-form" onSubmit={submit}>
+      <label htmlFor="name">Your name</label>
       <input
         id="name"
         name="name"
         autoComplete="name"
-        placeholder="Ava Chen"
+        placeholder="What should we call you?"
         maxLength={80}
         required
       />
@@ -119,7 +114,7 @@ export function SignupForm() {
         name="email"
         type="email"
         autoComplete="email"
-        placeholder="ava@example.com"
+        placeholder="you@example.com"
         required
       />
       <label htmlFor="phone">iPhone number</label>
@@ -138,13 +133,16 @@ export function SignupForm() {
         </p>
       )}
       <button className="button" type="submit" disabled={state.kind === 'sending'}>
-        {state.kind === 'sending' ? 'Making your bubble...' : 'Get your bubble'}
+        {state.kind === 'sending' ? 'Making your bubble...' : 'Bring my bubble to life'}{' '}
+        <span aria-hidden="true">↗</span>
       </button>
-      <p className="fine">
-        Bubbleworks works over iMessage. Your details stay with your bubble: nobody in your crew
-        sees your budget, diet, or location. Text &ldquo;forget me&rdquo; any time to delete
-        everything.
-      </p>
+      <div className="privacy-note">
+        <span aria-hidden="true">♧</span>
+        <p>
+          Your world stays yours. Your crew never sees your budget, diet, or location. Text
+          &ldquo;forget me&rdquo; to delete your details.
+        </p>
+      </div>
     </form>
   );
 }

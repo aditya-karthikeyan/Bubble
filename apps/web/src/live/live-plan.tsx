@@ -1,6 +1,7 @@
 'use client';
 
 import { Arena } from './arena';
+import { Navigation } from '../../app/aero';
 import { usePlanFeed, type FeedStatus } from './use-plan-feed';
 import { PHASE_COPY, phaseOf } from './view-model';
 
@@ -30,6 +31,7 @@ export function PhaseBanner({
   return (
     <header className="hud-top">
       <div className="hud-title">
+        <span className="mini-label">A LITTLE TEAMWORK, LIVE</span>
         <h1>{title}</h1>
         <p>{line}</p>
       </div>
@@ -75,6 +77,7 @@ export function LivePlan({ token, replay }: { token: string; replay: string | nu
     <main className="stage">
       <Bokeh />
       <Arena vm={vm} phase={phase} />
+      <Navigation live />
       <PhaseBanner title={copy.title} line={copy.line} status={status} />
       {status === 'offline' && (
         <p className="hud-alert">Can&apos;t reach Bubbleworks right now. Retrying…</p>
@@ -103,6 +106,45 @@ export function LivePlan({ token, replay }: { token: string; replay: string | nu
           )}
         </section>
       )}
+      <footer className="live-dock">
+        <ol className="live-progress" aria-label="Plan progress">
+          <li
+            className={phase === 'gathering' ? 'current' : ''}
+            aria-current={phase === 'gathering' ? 'step' : undefined}
+          >
+            Gather
+          </li>
+          <li
+            className={['candidates', 'convergence', 'deadlock'].includes(phase) ? 'current' : ''}
+            aria-current={
+              ['candidates', 'convergence', 'deadlock'].includes(phase) ? 'step' : undefined
+            }
+          >
+            Find a place
+          </li>
+          <li
+            className={phase === 'locked' ? 'current' : ''}
+            aria-current={phase === 'locked' ? 'step' : undefined}
+          >
+            Make it happen
+          </li>
+          <li
+            className={['summary', 'complete'].includes(phase) ? 'current' : ''}
+            aria-current={['summary', 'complete'].includes(phase) ? 'step' : undefined}
+          >
+            See you there
+          </li>
+        </ol>
+        <div className="live-info">
+          <strong>{vm.bubbles.filter((b) => b.present).length} bubbles</strong>
+          <span className="privacy-label"> · Your preferences stay private.</span>
+        </div>
+        {replay && (
+          <button className="replay-control" type="button" onClick={restart}>
+            ↻ Restart demo
+          </button>
+        )}
+      </footer>
     </main>
   );
 }

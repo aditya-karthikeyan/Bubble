@@ -130,9 +130,11 @@ function GlassDefs() {
     <defs>
       {Object.entries(hues).map(([k, [hi, mid, lo]]) => (
         <radialGradient key={k} id={`g-${k}`} cx="38%" cy="32%" r="75%">
-          <stop offset="0%" stopColor={hi} />
-          <stop offset="45%" stopColor={mid} stopOpacity="0.92" />
-          <stop offset="100%" stopColor={lo} stopOpacity="0.95" />
+          <stop offset="0%" stopColor={hi} stopOpacity="0.72" />
+          <stop offset="38%" stopColor={mid} stopOpacity="0.46" />
+          <stop offset="78%" stopColor={lo} stopOpacity="0.75" />
+          <stop offset="93%" stopColor={mid} stopOpacity="0.85" />
+          <stop offset="100%" stopColor="#edffff" stopOpacity="0.95" />
         </radialGradient>
       ))}
       <radialGradient id="g-shine" cx="50%" cy="50%" r="50%">
@@ -153,6 +155,20 @@ function GlassDefs() {
         <stop offset="50%" stopColor="#9fe3ff" stopOpacity="0.6" />
         <stop offset="100%" stopColor="#c7b8ff" stopOpacity="0.8" />
       </linearGradient>
+      <linearGradient id="g-cap" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="white" stopOpacity="0.95" />
+        <stop offset="100%" stopColor="white" stopOpacity="0.06" />
+      </linearGradient>
+      <pattern
+        id="g-landscape"
+        patternUnits="objectBoundingBox"
+        width="1"
+        height="1"
+        viewBox="0 0 320 320"
+        preserveAspectRatio="xMidYMid slice"
+      >
+        <image href="/images/aero-world.webp" width="480" height="320" x="-80" />
+      </pattern>
     </defs>
   );
 }
@@ -161,11 +177,27 @@ function GlassDefs() {
 function Orb({ hue }: { hue: string }) {
   return (
     <>
-      <circle r={1.08} fill="#0b3550" opacity={0.1} cy={0.06} />
+      <circle r={1.03} fill="#0b3550" opacity={0.13} cy={0.05} />
+      <circle r={1} fill="url(#g-landscape)" opacity={0.7} transform="rotate(180)" />
       <circle r={1} fill={`url(#g-${hue})`} />
       <circle r={1} fill="url(#g-inner)" />
+      <ellipse
+        cx={-0.08}
+        cy={-0.49}
+        rx={0.73}
+        ry={0.36}
+        fill="url(#g-cap)"
+        transform="rotate(-18)"
+      />
       <ellipse cx={-0.32} cy={-0.42} rx={0.46} ry={0.3} fill="url(#g-shine)" />
-      <circle r={1} fill="none" stroke="url(#g-rim)" strokeWidth={0.05} />
+      <path
+        d="M -0.7 0.56 Q 0 1.08 0.7 0.56"
+        fill="none"
+        stroke="#c7fff3"
+        strokeWidth={0.035}
+        opacity={0.8}
+      />
+      <circle r={1} fill="none" stroke="url(#g-rim)" strokeWidth={0.035} />
     </>
   );
 }

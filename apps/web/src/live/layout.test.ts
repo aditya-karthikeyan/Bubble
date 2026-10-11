@@ -11,6 +11,15 @@ const PHONE: Size = { w: 390, h: 844 };
 const LAPTOP: Size = { w: 1440, h: 900 };
 
 describe('arena layout', () => {
+  it('keeps candidate bubbles clear of the navigation and phase panel', () => {
+    const vm = reduceAll(upTo('round_complete'));
+    for (const size of [PHONE, LAPTOP]) {
+      const layout = computeLayout(vm, phaseOf(vm), size);
+      for (const venue of Object.values(layout.venues)) {
+        expect(venue.y - venue.r - venue.wander).toBeGreaterThanOrEqual(200);
+      }
+    }
+  });
   it('keeps every visible target on screen, on a phone and a laptop', () => {
     for (const size of [PHONE, LAPTOP]) {
       for (let i = 1; i <= BASIC.length; i++) {

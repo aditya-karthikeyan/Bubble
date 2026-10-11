@@ -49,8 +49,8 @@ export function sizes(size: Size) {
 
 /** Space the overlay text leaves free. */
 function safeArea(size: Size, sheet: boolean) {
-  const top = 112;
-  const bottom = sheet ? 170 : 40;
+  const top = size.h <= 650 && size.w > 760 ? 158 : 220;
+  const bottom = sheet ? 240 : 95;
   return { top, bottom: size.h - bottom, height: size.h - bottom - top };
 }
 
