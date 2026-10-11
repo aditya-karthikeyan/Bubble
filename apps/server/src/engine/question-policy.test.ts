@@ -11,6 +11,7 @@ import {
   decideStartTime,
   earliestStart,
   zonedInstant,
+  decideStyleQuestion,
 } from './question-policy.js';
 
 const venues: Venue[] = loadVenuesFile(VENUES_FIXTURE);
@@ -118,5 +119,22 @@ describe('start time never in the past', () => {
     expect(
       decideStartTime(null, {}, '2026-10-10', tz, new Date('2026-10-10T21:00:00.000Z')),
     ).toMatchObject({ startMinutes: 19 * 60, bumped: false });
+  });
+});
+
+describe('style question', () => {
+  it('asks only when feasible venues span both styles and nothing was named', () => {
+    const both = venues
+      .filter((v) => v.style === 'fast_food')
+      .slice(0, 2)
+      .concat(venues.filter((v) => (v.style ?? 'sit_down') === 'sit_down').slice(0, 2));
+    expect(decideStyleQuestion(both, null)).toMatchObject({ ask: true });
+    expect(decideStyleQuestion(both, 'fast_food').ask).toBe(false);
+    expect(
+      decideStyleQuestion(
+        venues.filter((v) => v.style === 'fast_food'),
+        null,
+      ).ask,
+    ).toBe(false);
   });
 });

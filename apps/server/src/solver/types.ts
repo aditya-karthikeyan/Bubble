@@ -1,4 +1,4 @@
-import type { Fact, GeoPoint, MealKind, Venue } from '@bubbleworks/shared';
+import type { Fact, GeoPoint, MealKind, Venue, VenueStyle } from '@bubbleworks/shared';
 
 /** Everything the solver knows about one participating bubble. Server-internal. */
 export interface SolverMember {
@@ -23,9 +23,11 @@ export interface SolverContext {
   groupCenter: GeoPoint | null;
   /** Meal being planned; coffee shops only count for coffee, and never for dinner. */
   meal?: MealKind;
+  /** Decided style (style poll or intent words); venues of the other style are out. */
+  style?: VenueStyle | null;
 }
 
-export type InfeasibleReason = 'closed' | 'meal' | 'diet' | 'budget' | 'distance';
+export type InfeasibleReason = 'closed' | 'meal' | 'style' | 'diet' | 'budget' | 'distance';
 
 export interface Infeasibility {
   venueId: string;

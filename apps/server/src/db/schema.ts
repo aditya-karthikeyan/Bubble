@@ -28,6 +28,7 @@ import type {
   PlanMemberStatus,
   PlanState,
   PollKind,
+  VenueStyle,
 } from '@bubbleworks/shared';
 
 export const users = sqliteTable('users', {
@@ -207,6 +208,8 @@ export const venues = sqliteTable('venues', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   cuisine: text('cuisine').notNull(),
+  cuisineTags: text('cuisine_tags', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  style: text('style').$type<VenueStyle>().notNull().default('sit_down'),
   dietTags: text('diet_tags', { mode: 'json' }).$type<string[]>().notNull(),
   accessibilityTags: text('accessibility_tags', { mode: 'json' }).$type<string[]>().notNull(),
   priceLevel: integer('price_level').notNull(),
@@ -310,6 +313,10 @@ export const bubbleState = sqliteTable('bubble_state', {
   /** Presence the person set with a command (busy, sleeping, driving), until presenceUntil. */
   presence: text('presence').$type<'focus' | 'sleep' | 'driving'>(),
   presenceUntil: text('presence_until'),
+  /** Last location pin the person sent their bubble in iMessage (+ → Location), and when. */
+  pinLat: real('pin_lat'),
+  pinLng: real('pin_lng'),
+  pinAt: text('pin_at'),
   updatedAt: text('updated_at').notNull(),
 });
 

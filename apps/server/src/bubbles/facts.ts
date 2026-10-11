@@ -5,7 +5,8 @@
  * - Single-valued types (budget_max, neighborhood, venmo_handle): a newer fact replaces the older
  *   one with the same lifetime. A temporary fact (expiresAt set) never deletes a permanent one;
  *   the active value is the newest unexpired fact.
- * - diet: a newer diet replaces the older one.
+ * - diet: a newer main diet (vegetarian, vegan, pescatarian) replaces the older main diet. The
+ *   rest (gluten_free, dairy_free, no_pork, no_beef) stack, so "no pork or beef" keeps both.
  * - Every other type is multi-valued: the same (type, value) is updated in place, not duplicated.
  * - cuisine_like and cuisine_avoid on the same cuisine cancel: the newer one wins.
  *
@@ -27,8 +28,10 @@ const SINGLE_VALUED: ReadonlySet<FactType> = new Set<FactType>([
   'budget_max',
   'neighborhood',
   'venmo_handle',
-  'diet',
 ]);
+
+/** Diets that exclude each other: a newer one replaces the older. */
+const MAIN_DIETS: ReadonlySet<string> = new Set(['vegetarian', 'vegan', 'pescatarian']);
 
 /** Newest first. Same-millisecond writes break ties by insertion order, never by random id. */
 const NEWEST_FIRST = [desc(facts.createdAt), desc(sql`rowid`)] as const;
@@ -81,10 +84,14 @@ export class FactStore {
     const saved = this.db.transaction((tx) => {
       const existing = tx.select().from(facts).where(eq(facts.userId, fact.userId)).all();
 
-      if (SINGLE_VALUED.has(fact.type)) {
+      const mainDiet = fact.type === 'diet' && MAIN_DIETS.has(fact.value);
+      if (SINGLE_VALUED.has(fact.type) || mainDiet) {
         const temporary = fact.expiresAt !== null;
         const replaced = existing.filter(
-          (f) => f.type === fact.type && (f.expiresAt !== null) === temporary,
+          (f) =>
+            f.type === fact.type &&
+            (f.expiresAt !== null) === temporary &&
+            (!mainDiet || MAIN_DIETS.has(f.value)),
         );
         if (replaced.length) {
           tx.delete(facts)
@@ -206,7 +213,7 @@ export function describeFact(f: Pick<Fact, 'type' | 'value'>): string {
   const v = f.value.replace(/_/g, ' ');
   switch (f.type) {
     case 'diet':
-      return `you eat ${v}`;
+      return f.value.startsWith('no_') ? `you don't eat ${v.slice(3)}` : `you eat ${v}`;
     case 'allergy':
       return `you're allergic to ${v}`;
     case 'religious_diet':

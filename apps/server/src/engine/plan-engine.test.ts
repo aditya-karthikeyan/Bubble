@@ -98,10 +98,18 @@ describe('BubbleworksEngine', () => {
     await h.engine.handleHeadcount({ planId, userId: 'user_eli', in: false, at: h.at() });
     expect(h.rt.plans.get(planId)?.state).toBe('GATHERING'); // poll still open
 
-    const pollId = poll && 'input' in poll ? poll.input.pollId : '';
-    const option = poll && 'input' in poll ? poll.input.options[0]!.key : '';
-    for (const u of ['user_ava', 'user_ben', 'user_chloe', 'user_dev']) {
-      await h.engine.handleVote({ planId, pollId, userId: u, choices: [option], at: h.at() });
+    // Vote in every poll the bundle asked (style first when present, then cuisine).
+    for (const sent of h.messaging.sent.filter((x) => x.kind === 'poll')) {
+      if (!('input' in sent)) continue;
+      for (const u of ['user_ava', 'user_ben', 'user_chloe', 'user_dev']) {
+        await h.engine.handleVote({
+          planId,
+          pollId: sent.input.pollId,
+          userId: u,
+          choices: [sent.input.options[0]!.key],
+          at: h.at(),
+        });
+      }
     }
     // Everyone answered and the poll is decided: deliberation ran and locked without waiting.
     const locked = h.rt.plans.get(planId)!;
@@ -152,8 +160,12 @@ describe('BubbleworksEngine', () => {
         ? bubbles.bubbles.find((b) => b.userId === 'user_eli')?.status
         : null,
     ).toBe('represented');
-    // Named cuisine: no poll was asked.
-    expect(h.messaging.sent.some((s) => s.kind === 'poll')).toBe(false);
+    // Named cuisine: no cuisine poll was asked (a style poll may still go out).
+    const cuisinePolls = h.messaging.sent.filter(
+      (x) =>
+        x.kind === 'poll' && 'input' in x && !x.input.options.some((o) => o.key === 'sit_down'),
+    );
+    expect(cuisinePolls).toHaveLength(0);
   });
 
   describe('deadlock breaker', () => {
@@ -361,6 +373,63 @@ describe('BubbleworksEngine', () => {
     expect(h.rt.plans.get(planId!)?.state).toBe('CANCELLED');
     expect(h.rt.timers.pending(planId!)).toEqual([]);
     expect(h.events.at(-1)?.type).toBe('plan_closed');
+  });
+
+  it('asks sit-down vs fast food first and filters the solver by the answer', async () => {
+    // Dev and Ben have no diet limits, so their feasible set spans burgers both ways.
+    const crew = await h.rt.crews.createCrew({
+      name: 'two',
+      createdByUserId: 'user_dev',
+      memberIds: ['user_ben'],
+    });
+    await h.rt.crews.confirmMember(crew.id, 'user_ben');
+    const { planId } = await h.engine.handleIntent({
+      chatId: crew.chatId,
+      userId: 'user_dev',
+      messageId: 'm1',
+      text: 'dinner?',
+      at: h.at(),
+    });
+    const polls = h.messaging.sent.filter((x) => x.kind === 'poll');
+    const stylePoll = polls.find(
+      (p) => 'input' in p && p.input.options.some((o) => o.key === 'fast_food'),
+    );
+    expect(stylePoll).toBeDefined();
+    expect(polls[0]).toBe(stylePoll); // style is asked first
+    await h.engine.handleHeadcount({ planId: planId!, userId: 'user_ben', in: true, at: h.at() });
+    for (const sent of polls) {
+      if (!('input' in sent)) continue;
+      const choice = sent.input.options.some((o) => o.key === 'fast_food')
+        ? 'fast_food'
+        : sent.input.options[0]!.key;
+      for (const u of ['user_dev', 'user_ben']) {
+        await h.engine.handleVote({
+          planId: planId!,
+          pollId: sent.input.pollId,
+          userId: u,
+          choices: [choice],
+          at: h.at(),
+        });
+      }
+    }
+    const plan = h.rt.plans.get(planId!)!;
+    expect(plan.state).toBe('LOCKED');
+    const winner = h.rt.venues().find((v) => v.id === plan.chosenVenueId)!;
+    expect(winner.style).toBe('fast_food');
+  });
+
+  it('a typed style skips the style poll', async () => {
+    await h.engine.handleIntent({
+      chatId: CHAT,
+      userId: 'user_ava',
+      messageId: 'm1',
+      text: 'sit-down dinner tonight?',
+      at: h.at(),
+    });
+    const polls = h.messaging.sent.filter((x) => x.kind === 'poll');
+    expect(
+      polls.every((p) => 'input' in p && !p.input.options.some((o) => o.key === 'sit_down')),
+    ).toBe(true);
   });
 
   it('a poll vote from an undecided member counts as in', async () => {
