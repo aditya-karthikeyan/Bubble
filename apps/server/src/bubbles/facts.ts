@@ -234,6 +234,13 @@ export function describeFact(f: Pick<Fact, 'type' | 'value'>): string {
       return f.value === NO_SPLIT
         ? 'you pay for yourself, no bill splits'
         : `your Venmo is ${f.value}`;
+    case 'payment_handle': {
+      const [kind, handle] = f.value.split(':', 2);
+      const label =
+        { venmo: 'Venmo', cashapp: 'Cash App', zelle: 'Zelle', paypal: 'PayPal' }[kind ?? ''] ??
+        kind;
+      return `friends can pay you back on ${label} at ${handle ?? f.value}`;
+    }
     case 'other':
       return f.value;
   }

@@ -239,6 +239,13 @@ BOOKING (`CallerPort.book`, `doer_status`) -> `handleCallResult` -> BOOKED (`boo
 inviter, splitter, watcher) | declined/no answer -> rerun with the venue removed. No feasible
 venue -> DEADLOCK -> breaker (above). Commands: wait, resume, cancel, veto, why.
 
+## Payments (P3 Splitter, P2 onboarding question)
+
+`FactType` includes `payment_handle` with value `<kind>:<handle>`: `venmo:@x`, `cashapp:$x`,
+`zelle:+1555...` or `zelle:a@b.c`, `paypal:x`. A person may have several. `venmo_handle` stays
+for older facts. The Splitter lists the payer's methods with the amount pre-filled, the method
+both people share first.
+
 ## Invariants every module keeps
 
 1. No bubble reveals another person's constraint anywhere.
