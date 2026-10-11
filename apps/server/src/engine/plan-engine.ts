@@ -876,7 +876,7 @@ export class BubbleworksEngine implements PlanEngine {
       await this.deps.caller.cancel({
         planId,
         bookingId: booking.id,
-        venue,
+        venue: this.dialable(venue),
         reservationName: booking.reservationName,
         idempotencyKey: idempotencyKey(planId, 'cancel_call', booking.id),
       });
@@ -902,7 +902,7 @@ export class BubbleworksEngine implements PlanEngine {
     await this.deps.caller.modify({
       planId,
       bookingId: booking.id,
-      venue,
+      venue: this.dialable(venue),
       partySize: party.length,
       startAt: booking.startAt,
       reservationName: booking.reservationName,
@@ -924,7 +924,7 @@ export class BubbleworksEngine implements PlanEngine {
       await this.deps.caller.cancel({
         planId,
         bookingId: booking.id,
-        venue,
+        venue: this.dialable(venue),
         reservationName: booking.reservationName,
         idempotencyKey: idempotencyKey(planId, 'cancel_call', booking.id),
       });
@@ -988,7 +988,7 @@ export class BubbleworksEngine implements PlanEngine {
             await this.deps.caller.cancel({
               planId: plan.id,
               bookingId: booking.id,
-              venue,
+              venue: this.dialable(venue),
               reservationName: booking.reservationName,
               idempotencyKey: idempotencyKey(plan.id, 'cancel_call', booking.id),
             });
@@ -1362,13 +1362,11 @@ export class BubbleworksEngine implements PlanEngine {
       state: 'started',
       detail: `Calling ${venue.name}`,
     });
-    const dial = (v: Venue) =>
-      this.deps.callRedirectPhone ? { ...v, phone: this.deps.callRedirectPhone } : v;
     const handle = await this.deps.caller.book({
       planId,
       bookingId,
-      venue: dial(venue),
-      backupVenue: backup ? dial(backup) : backup,
+      venue: this.dialable(venue),
+      backupVenue: backup ? this.dialable(backup) : backup,
       partySize: party.length,
       startAt: plan.startAt,
       reservationName,
@@ -1820,6 +1818,11 @@ export class BubbleworksEngine implements PlanEngine {
   private venuePool(): Venue[] {
     const all = this.rt.venues();
     return this.deps.venueSource ? all.filter((v) => !v.isDemo) : all;
+  }
+
+  /** Rehearsals ring the demo phone for every call, not just the booking. */
+  private dialable(v: Venue): Venue {
+    return this.deps.callRedirectPhone ? { ...v, phone: this.deps.callRedirectPhone } : v;
   }
 
   private agentFirst(): boolean {
