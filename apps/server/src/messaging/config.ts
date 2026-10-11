@@ -17,6 +17,8 @@ const Env = z
       .optional(),
     /** app: iMessage app card with a page preview (default). richlink: bare URL bubble. */
     MESSAGING_LINK_STYLE: z.enum(['app', 'richlink']).default('app'),
+    /** Send "Voting closed: X". Off by default: the live card already shows the plan moved on. */
+    MESSAGING_ANNOUNCE_POLL_CLOSE: z.stringbool().default(false),
   })
   .refine(
     (env) =>

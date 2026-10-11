@@ -25,6 +25,7 @@
     "p3:phase3": "tsx --env-file-if-exists=../../.env scripts/p3/phase3.ts",
     "edge": "tsx --env-file-if-exists=../../.env scripts/edge.ts",
     "speed": "tsx --env-file-if-exists=../../.env scripts/speed.ts",
+    "p2:e2e-seed": "tsx --env-file-if-exists=../../.env scripts/p2-e2e-seed.ts",
     "p3:phase4": "tsx --env-file-if-exists=../../.env scripts/p3/phase4.ts",
     "demo:reset": "tsx --env-file-if-exists=../../.env scripts/demo-reset.ts",
     "p3:smoke": "tsx --env-file-if-exists=../../.env scripts/p3/smoke.ts",
