@@ -73,12 +73,11 @@ export class LiveSurfaces {
         const timeText = this.clock(event.startAt);
         const bundle = this.o.bundles.byPlan(event.planId);
         if (!bundle) return;
-        const live = bundle.pageUrl ? ` Watch live: ${bundle.pageUrl}` : '';
         await this.o.port.sendGroupText({
           chatId: bundle.chatId,
           text:
             `🔒 Found a spot: ${event.venue.name}, ${timeText}, ${event.partySize} people. ` +
-            `Calling to book now. Say "veto" in the next minute to change it.${live}`,
+            `Calling to book now. Say "veto" in the next minute to change it.`,
           idempotencyKey: idempotencyKey(event.planId, 'surface', 'locked', event.venue.venueId),
         });
         this.o.log.info({ planId: event.planId, venue: event.venue.name }, 'locked line sent');

@@ -11,7 +11,7 @@ import { bookings, bubbleState, ledger } from '../db/schema.js';
 import type { Runtime } from '../runtime.js';
 import { INTENT, testRuntime } from '../test-helpers.js';
 import { buildIcs, signBookingToken, verifyBookingToken } from './ics.js';
-import { Doers, etaMinutes, type LateNotice } from './index.js';
+import { Doers, etaMinutes, mapsLink, type LateNotice } from './index.js';
 
 const ALPHA_PIE = 'venue_osm_n13256222785'; // price level 2, Franklin St
 const CHIPOTLE = 'venue_osm_w44343155'; // price level 1 (OSM fast_food)
@@ -130,7 +130,7 @@ describe('Doers', () => {
       expect(r).toEqual({ ok: true, detail: 'Invites sent to 4' });
       const text = dmsTo('user_dev')[0]!;
       expect(text).toMatch(
-        /^✅ Booked: Alpha Pie, 7:30 PM, table for 4 under Ava\. Add it to your calendar: /,
+        /^✅ Booked: Alpha Pie, 7:30 PM, table for 4 under Ava\.\n📍 .+ · https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=\S+\nAdd it to your calendar: /,
       );
       const url = /https:\/\/bw\.test(\/ics\/\S+)/.exec(text)![1]!;
 
@@ -144,6 +144,15 @@ describe('Doers', () => {
       expect(res.body).toContain('Confirmation BW42');
       expect((await app.inject({ method: 'GET', url: '/ics/x.y.ics' })).statusCode).toBe(404);
       await app.close();
+    });
+
+    it('links the map by address, else by coordinates', () => {
+      expect(mapsLink({ address: '106 W Franklin St, Chapel Hill', location: ALPHA })).toBe(
+        'https://www.google.com/maps/search/?api=1&query=106%20W%20Franklin%20St%2C%20Chapel%20Hill',
+      );
+      expect(mapsLink({ address: null, location: ALPHA })).toBe(
+        'https://www.google.com/maps/search/?api=1&query=35.9151753%2C-79.0540312',
+      );
     });
 
     it('signs links and folds long lines', () => {
