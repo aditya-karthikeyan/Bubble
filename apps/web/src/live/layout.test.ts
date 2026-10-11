@@ -1,7 +1,7 @@
 import { PlanEvent } from '@bubbleworks/shared';
 import { describe, expect, it } from 'vitest';
 import basic from '../../fixtures/basic.json';
-import { computeLayout, safeArea, sizes, type Size } from './layout';
+import { computeLayout, CREW, safeArea, sizes, venueNode, type Size } from './layout';
 import { phaseOf, reduceAll } from './view-model';
 
 const BASIC = basic.map((e) => PlanEvent.parse(e));
@@ -9,6 +9,7 @@ const upTo = (type: PlanEvent['type']) =>
   BASIC.slice(0, BASIC.findIndex((e) => e.type === type) + 1);
 const PHONE: Size = { w: 390, h: 844 };
 const LAPTOP: Size = { w: 1440, h: 900 };
+const SMALL_PHONE: Size = { w: 375, h: 667 };
 
 describe('arena layout', () => {
   it('randomizes people while keeping helper agents grouped consistently', () => {
@@ -32,8 +33,8 @@ describe('arena layout', () => {
       }
     }
   });
-  it('keeps every visible target on screen, on a phone and a laptop', () => {
-    for (const size of [PHONE, LAPTOP]) {
+  it('keeps every visible target on screen, on phones and a laptop', () => {
+    for (const size of [PHONE, SMALL_PHONE, LAPTOP]) {
       for (let i = 1; i <= BASIC.length; i++) {
         const vm = reduceAll(BASIC.slice(0, i));
         const l = computeLayout(vm, phaseOf(vm), size);
@@ -41,6 +42,7 @@ describe('arena layout', () => {
           ...Object.values(l.venues),
           ...Object.values(l.bubbles),
           ...Object.values(l.doers),
+          ...(l.crew ? [l.crew] : []),
         ].filter((t) => t.opacity > 0);
         for (const t of visible) {
           expect(t.x - t.r, `${size.w} ${i} ${JSON.stringify(t)}`).toBeGreaterThanOrEqual(-1);
@@ -117,20 +119,44 @@ describe('arena layout', () => {
     }
   });
 
-  it('flies the crew into the destination and absorbs them once booked, one after another', () => {
+  it('absorbs everyone into one crew bubble, one after another, once the place is locked', () => {
+    const vm = reduceAll(upTo('plan_locked'));
+    for (const size of [PHONE, LAPTOP]) {
+      const l = computeLayout(vm, 'locked', size);
+      const crew = l.crew!;
+      expect(crew.members).toEqual(['user_ava', 'user_ben', 'user_chloe', 'user_dev']);
+      expect(crew.absorb).toBeUndefined();
+      const orders = crew.members.map((id) => l.bubbles[id]!.absorb);
+      expect(orders.map((a) => a?.into)).toEqual([CREW, CREW, CREW, CREW]);
+      expect(orders.map((a) => a?.order)).toEqual([0, 1, 2, 3]);
+      // Bigger than any one person, and the doers float clear of it.
+      expect(crew.r).toBeGreaterThan(l.bubbles['user_ava']!.r * 2);
+      for (const d of Object.values(l.doers)) {
+        expect(Math.hypot(d.x - crew.x, d.y - crew.y)).toBeGreaterThan(crew.r + d.r);
+      }
+    }
+    expect(computeLayout(reduceAll(upTo('bubble_merged')), 'convergence', PHONE).crew).toBeNull();
+  });
+
+  it('fits the crew and its doers between the windows on short phones and landscape', () => {
+    const vm = reduceAll(upTo('plan_locked'));
+    for (const size of [SMALL_PHONE, { w: 390, h: 664 }, { w: 844, h: 390 }]) {
+      const l = computeLayout(vm, 'locked', size);
+      const area = safeArea(size, true);
+      for (const t of [l.crew!, ...Object.values(l.doers)]) {
+        expect(t.y - t.r, `${size.w}x${size.h}`).toBeGreaterThanOrEqual(area.top);
+        expect(t.y + t.r, `${size.w}x${size.h}`).toBeLessThanOrEqual(area.bottom);
+      }
+    }
+  });
+
+  it('sends the crew bubble into the destination once booked', () => {
     const vm = reduceAll(BASIC);
     const l = computeLayout(vm, 'summary', PHONE);
     const venue = l.venues['venue_demo']!;
     expect(venue.leader).toBe(true);
     expect(l.consensus?.absorbing).toBe(true);
-    const orders = l.consensus!.members.map((id) => l.bubbles[id]!.absorb);
-    expect(orders.map((a) => a?.venueId)).toEqual([
-      'venue_demo',
-      'venue_demo',
-      'venue_demo',
-      'venue_demo',
-    ]);
-    expect(orders.map((a) => a?.order)).toEqual([0, 1, 2, 3]);
+    expect(l.crew!.absorb).toEqual({ into: venueNode('venue_demo'), order: 0 });
     // The doers re-form around the destination.
     for (const d of Object.values(l.doers)) {
       expect(Math.hypot(d.x - venue.x, d.y - venue.y)).toBeGreaterThan(venue.r);
@@ -141,14 +167,15 @@ describe('arena layout', () => {
     const vm = reduceAll(BASIC);
     expect(phaseOf(vm)).toBe('complete');
     const l = computeLayout(vm, 'complete', PHONE);
-    expect(Object.values(l.doers).map((d) => d.absorb?.venueId)).toEqual([
-      'venue_demo',
-      'venue_demo',
-      'venue_demo',
-      'venue_demo',
+    expect(Object.values(l.doers).map((d) => d.absorb?.into)).toEqual([
+      venueNode('venue_demo'),
+      venueNode('venue_demo'),
+      venueNode('venue_demo'),
+      venueNode('venue_demo'),
     ]);
     const people = Object.values(l.bubbles).filter((b) => b.opacity > 0);
-    expect(people.every((b) => b.absorb?.venueId === 'venue_demo')).toBe(true);
+    expect(people.every((b) => b.absorb?.into === CREW)).toBe(true);
+    expect(l.crew!.absorb?.into).toBe(venueNode('venue_demo'));
     expect(l.venues['venue_demo']!.r).toBeGreaterThan(
       computeLayout(vm, 'summary', PHONE).venues['venue_demo']!.r,
     );

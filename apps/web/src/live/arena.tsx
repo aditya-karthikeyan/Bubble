@@ -19,7 +19,7 @@ import {
   type SimulationNodeDatum,
 } from 'd3-force';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { computeLayout, safeArea, type Layout, type Size, type Target } from './layout';
+import { computeLayout, CREW, safeArea, type Layout, type Size, type Target } from './layout';
 import { STATUS_LABEL, type Phase, type ViewModel } from './view-model';
 import {
   createDrift,
@@ -34,7 +34,7 @@ import {
 
 interface Node extends SimulationNodeDatum {
   id: string;
-  kind: 'bubble' | 'venue' | 'doer';
+  kind: 'bubble' | 'venue' | 'doer' | 'crew';
   /** Target centre and float radius from the layout. */
   bx: number;
   by: number;
@@ -48,7 +48,7 @@ interface Node extends SimulationNodeDatum {
   drift: Drift;
   tx: number;
   ty: number;
-  /** Booked: the venue node this bubble flies into, and when it takes off. */
+  /** The node this one flies into (the crew bubble or the venue), and when it takes off. */
   absorbInto?: string;
   absorbAt?: number;
   /** Where it waits until take-off, and its radius before shrinking. */
@@ -58,6 +58,9 @@ interface Node extends SimulationNodeDatum {
   absorbed?: boolean;
   /** The destination while it absorbs: collisions add both radii, so it must yield too. */
   swallowing?: boolean;
+  /** Crew bubble: who it takes in, and its full radius once everyone is inside. */
+  members?: string[];
+  rFull?: number;
 }
 
 /** Stagger between bubbles taking off into the destination, and the pause before the first. */
@@ -116,6 +119,7 @@ function useViewport(): Size | null {
 /** Hues per orb kind: highlight, body, and edge. */
 const HUES: Record<string, [string, string, string]> = {
   fits: ['#e2f8ff', '#5cc9f3', '#1576c4'],
+  crew: ['#effcff', '#66d6f6', '#1a6fc0'],
   stretch: ['#fff4d8', '#f6b74e', '#c06d0e'],
   firm: ['#ffe3dc', '#f07c69', '#b0392b'],
   rep: ['#f0e9ff', '#a996ee', '#5b45b6'],
@@ -280,6 +284,52 @@ export function VenueOrb({
   );
 }
 
+/** Most names the crew bubble lists before it shows "+N more". */
+const CREW_LINES = 5;
+
+/**
+ * The one bubble the crew becomes once the place is decided. Each name starts hidden and fades
+ * in as that person's bubble is absorbed (the arena reveals it by `data-member`).
+ */
+export function CrewBubble({ names }: { names: { id: string; name: string }[] }) {
+  const listed = names.length > CREW_LINES ? names.slice(0, CREW_LINES - 1) : names;
+  const more = names.length - listed.length;
+  const lines = listed.length + (more ? 1 : 0);
+  const gap = Math.min(0.3, 1.2 / Math.max(lines, 1));
+  const top = (-(lines - 1) * gap) / 2;
+  return (
+    <g>
+      <Orb hue="crew" />
+      {listed.map((n, i) => (
+        <text
+          key={n.id}
+          className="orb-name crew-name"
+          data-member={n.id}
+          y={top + i * gap}
+          fontSize={gap * 0.78}
+          style={{ opacity: 0 }}
+        >
+          {clip(n.name, 10)}
+        </text>
+      ))}
+      {more > 0 && (
+        <text
+          className="orb-name crew-name"
+          data-more=""
+          y={top + listed.length * gap}
+          fontSize={gap * 0.62}
+          style={{ opacity: 0 }}
+        >
+          +{more} more
+        </text>
+      )}
+      <text className="orb-sub" y={1.28} fontSize={0.2}>
+        Your crew
+      </text>
+    </g>
+  );
+}
+
 export function DoerBubble({
   kind,
   state,
@@ -331,7 +381,7 @@ function syncNode(
   n.tx ??= spawn.x;
   n.ty ??= spawn.y;
   if (t.absorb) {
-    const into = `v:${t.absorb.venueId}`;
+    const into = t.absorb.into;
     if (n.absorbInto !== into) {
       n.absorbInto = into;
       n.absorbAt = performance.now() + ABSORB_FIRST_MS + t.absorb.order * ABSORB_STAGGER_MS;
@@ -347,11 +397,19 @@ function syncNode(
   return n;
 }
 
+/** Show a person's name inside the crew bubble once their bubble lands in it. */
+function revealName(crew: SVGGElement | undefined, memberId: string) {
+  const name =
+    crew?.querySelector<SVGTextElement>(`[data-member="${CSS.escape(memberId)}"]`) ??
+    crew?.querySelector<SVGTextElement>('[data-more]');
+  if (name) name.style.opacity = '1';
+}
+
 /** Collision radius. Labels need room too: venue names sit below orbs, statuses below bubbles. */
 function collideRadius(n: Node): number {
   // Headed into the destination, or the destination itself: no collisions, so it can swallow.
   if (n.absorbInto || n.swallowing) return 0;
-  return n.r * (n.kind === 'venue' ? 1.75 : n.kind === 'doer' ? 1.3 : 1.25) + 3;
+  return n.r * (n.kind === 'venue' ? 1.75 : n.kind === 'doer' ? 1.3 : 1.15) + 3;
 }
 
 /**
@@ -424,8 +482,8 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
             n.drift,
             now,
             {
-              left: Math.max(radius, n.bx - n.wander),
-              right: Math.min((viewport?.w ?? n.bx) - radius, n.bx + n.wander),
+              left: Math.max((area?.left ?? 0) + radius, n.bx - n.wander),
+              right: Math.min((area?.right ?? n.bx) - radius, n.bx + n.wander),
               top: Math.max(minY + radius, n.by - n.wander),
               bottom: Math.min(maxY, n.by + n.wander),
             },
@@ -437,12 +495,31 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
             n.tx = n.bx;
             n.ty = n.by;
           }
+          if (n.kind === 'crew' && n.members?.length) {
+            // The crew bubble grows with each person it takes in and yields collisions until full.
+            const inside = n.members.filter((id) => nodes.current.get(id)?.absorbed).length;
+            const pending = inside < n.members.length;
+            n.swallowing = pending;
+            if (!n.absorbInto) n.rt = n.rFull! * (0.45 + 0.55 * (inside / n.members.length));
+            else if (pending && n.absorbAt !== undefined) {
+              // Joined late: let everyone get inside before the crew heads for the venue.
+              n.absorbAt = Math.max(n.absorbAt, now + 400);
+            }
+          }
           const into = n.absorbInto ? nodes.current.get(n.absorbInto) : undefined;
           if (into && n.absorbAt !== undefined) {
             if (now < n.absorbAt) {
               // Wait near its own gathering position for its turn.
               n.tx = n.hx!;
               n.ty = n.hy!;
+            } else if (n.absorbed) {
+              // Inside: ride along with it, hidden, so its collisions can't push us back out.
+              n.x = n.tx = into.x!;
+              n.y = n.ty = into.y!;
+              n.vx = 0;
+              n.vy = 0;
+              n.opt = 0;
+              n.op = 0;
             } else {
               // Pulled into the destination: shrink and fade as it gets close.
               n.tx = into.x!;
@@ -452,9 +529,10 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
               n.opt = near;
               n.rt = n.rBase! * (0.3 + 0.7 * near);
               if (!n.absorbed && near < 0.08) {
-                // Gulp: the venue swells a little with each bubble it takes in.
+                // Gulp: the destination swells a little with each bubble it takes in.
                 n.absorbed = true;
                 into.r += into.rt * 0.12;
+                if (into.kind === 'crew') revealName(els.current.get(into.id), n.id);
               }
             }
           }
@@ -462,8 +540,8 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
             // Collisions can shove an orb past the edge or under the plan window; hold it in.
             const m = n.r + 4;
             const top = area.top - 6 + n.r;
-            if (n.x! < m || n.x! > viewport.w - m) {
-              n.x = Math.min(viewport.w - m, Math.max(m, n.x!));
+            if (n.x! < area.left + m || n.x! > area.right - m) {
+              n.x = Math.min(area.right - m, Math.max(area.left + m, n.x!));
               n.vx = 0;
             }
             if (n.y! < top) {
@@ -511,9 +589,9 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
         // The finale sits centred in the space between the plan window and the booking dialog.
         const room = safeArea(current.size, true);
         const centreY = room.top + room.height / 2;
-        ending.x += (current.size.w / 2 - ending.x) * 0.035;
+        ending.x += (room.left + room.width / 2 - ending.x) * 0.035;
         ending.y += (centreY - ending.y) * 0.035;
-        const maxRadius = Math.max(40, Math.min(current.size.w * 0.37, room.height * 0.46, 190));
+        const maxRadius = Math.max(40, Math.min(room.width * 0.37, room.height * 0.46, 190));
         const frame = finaleFrame(
           ending.elapsed,
           Math.min(ending.initial, maxRadius * 0.65),
@@ -588,11 +666,28 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
         syncNode(nodes.current, `d:${kind}`, 'doer', t, origin, random.current),
       );
     }
+    if (layout.crew) {
+      const crew = syncNode(
+        nodes.current,
+        CREW,
+        'crew',
+        layout.crew,
+        spawn(layout.crew),
+        random.current,
+      );
+      crew.members = layout.crew.members;
+      crew.rFull = layout.crew.r;
+      next.set(CREW, crew);
+    }
     // Whatever is being absorbed, the destination must yield its collisions to take it in.
-    const swallower = [...Object.values(layout.bubbles), ...Object.values(layout.doers)].find(
-      (t) => t.absorb,
-    )?.absorb?.venueId;
-    for (const n of next.values()) n.swallowing = n.kind === 'venue' && n.id === `v:${swallower}`;
+    const swallowers = new Set(
+      [
+        ...Object.values(layout.bubbles),
+        ...Object.values(layout.doers),
+        ...(layout.crew ? [layout.crew] : []),
+      ].flatMap((t) => (t.absorb ? [t.absorb.into] : [])),
+    );
+    for (const n of next.values()) n.swallowing = swallowers.has(n.id);
     nodes.current = next;
     const list = [...next.values()];
     if (reduced) {
@@ -603,8 +698,12 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
         n.y = n.by;
         n.r = n.rt;
         n.op = n.absorbInto ? 0 : n.opt;
-        if (n.absorbInto) n.opt = 0;
+        if (n.absorbInto) {
+          n.opt = 0;
+          n.absorbed = true;
+        }
       }
+      for (const id of layout.crew?.members ?? []) revealName(els.current.get(CREW), id);
       s.nodes(list);
       // Settle collisions without animating, then draw once at rest.
       s.tick(40);
@@ -672,6 +771,16 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
             )
           : null,
       )}
+      {layout.crew &&
+        group(
+          CREW,
+          <CrewBubble
+            names={layout.crew.members.map((id) => ({
+              id,
+              name: vm.bubbles.find((b) => b.userId === id)?.displayName ?? '',
+            }))}
+          />,
+        )}
       {settled &&
         (Object.keys(layout.doers) as DoerKind[]).map((kind) =>
           group(
