@@ -178,7 +178,7 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
         crews: runtime.crews,
         ...(attachOptions.isOnboarded ? { isOnboarded: attachOptions.isOnboarded } : {}),
       });
-      port.setCrewPick((userId, text) => intake!.crewPick(userId, text));
+      port.setPendingAnswer((userId) => intake!.pendingAnswer(userId));
       intake.start();
       return intake;
     },

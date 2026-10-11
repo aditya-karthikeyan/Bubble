@@ -64,7 +64,8 @@ import {
   parsePaymentHandles,
   type PayHandle,
 } from './payments.js';
-import { PassiveLearner, type LearnInput } from './learner.js';
+import { parseCommand } from '../engine/intent.js';
+import { mightContainFact, PassiveLearner, type LearnInput } from './learner.js';
 import { mightBeReaction, type ReactionClassifier } from './reactions.js';
 import {
   inQuietHours,
@@ -537,7 +538,35 @@ export class DbBubbleService implements BubbleService {
     }
     // Not for the bubble: the engine gets it, and the learner reads it in the background.
     this.learn({ messageId: m.messageId, userId: user.id, text, at: m.at });
-    return false;
+    // A plan command ("cancel", "wait") goes on to the engine.
+    if (!text || parseCommand(text)) return false;
+    // Nothing else answered it, and a bubble never leaves a DM on read.
+    if (!mightContainFact(text)) {
+      await reply(FALLBACK_TEXT);
+      return true;
+    }
+    void this.answerAfterLearning(user.id, m.messageId, reply).catch((err: unknown) =>
+      this.log.warn({ userId: user.id, err: (err as Error).message }, 'fallback reply failed'),
+    );
+    return true;
+  }
+
+  /**
+   * A DM that might state a fact: once the learner has read it, a hard fact already got its
+   * yes/no, a soft one gets a nod, and nothing learned gets the fallback line.
+   */
+  private async answerAfterLearning(
+    userId: string,
+    messageId: string,
+    reply: Reply,
+  ): Promise<void> {
+    const facts = await this.learner.whenLearned(messageId);
+    if (facts === 0) {
+      await reply(FALLBACK_TEXT);
+      return;
+    }
+    if (this.state(userId).pending?.kind === 'fact_confirm') return;
+    await reply("Got it, I'll remember that 🫧");
   }
 
   /** Feed any message the person wrote (DM or crew plan thread) to the background learner. */
@@ -1494,6 +1523,10 @@ export interface CrewDeclaration {
   members: string[];
   name: string | null;
 }
+
+/** The last word on a DM nothing else handled: what the bubble can do. */
+export const FALLBACK_TEXT =
+  "I plan meals with your crew 🫧 Try: dinner with the boys, feeling indian. Or tell me something to remember, like I'm vegetarian.";
 
 const PLAN_LIKE =
   /\b(dinner|lunch|brunch|breakfast|coffee|drinks|boba|dessert|eat|food|hungry|restaurant)\b/i;
