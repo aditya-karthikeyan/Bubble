@@ -209,6 +209,15 @@ cancels the other ask with a thank-you, and reruns the solver with the accepted 
 or the `ask_timeout` fall back to a time shift (30/60 min either way) or a takeout close.
 Allergy, religious diet, accessibility, and diet are never relaxed.
 
+Edge cases (Phase 4, all in the engine): a headcount change in DELIBERATING / DEADLOCK / LOCKED
+reruns the solver; in BOOKED / DAY_OF it calls `CallerPort.modify` and re-runs the splitter
+(cancel + close when fewer than two remain); a late joiner the bubble has not met triggers
+`BubbleService.onNewMember`. An organizer's "actually tomorrow" / "make it 8 instead" cancels
+any booking and restarts; a different meal or day on the same chat is a second plan scoped by
+its own id. A `needs_human` call result (deposit) opens a private yes/no ask to the organizer:
+yes books under them, no removes the venue and reruns. On boot, `kick` reschedules the call
+timeout for a plan that was mid-call, so a crashed server resumes.
+
 Engine flow: `handleIntent` -> DETECTED -> question policy -> bundle (P2 `renderBundle`) ->
 GATHERING -> headcount and votes (`isPollDecided` early close, else `poll_deadline`) ->
 silent members represented (Focus, sleep, driving, with confirmed hard facts) or dropped ->
