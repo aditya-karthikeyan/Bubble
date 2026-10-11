@@ -29,6 +29,13 @@ export const RsvpJudgement = z.object({
 });
 export type RsvpJudgement = z.infer<typeof RsvpJudgement>;
 
+export const ProbeJudgement = z.object({
+  /** True when the message tries to learn a specific other person's private details. */
+  isProbe: z.boolean(),
+  confidence: z.number(),
+});
+export type ProbeJudgement = z.infer<typeof ProbeJudgement>;
+
 export interface Classifier {
   warm?(): void;
   intent(
@@ -36,6 +43,7 @@ export interface Classifier {
     context: { today: string; timezone: string },
   ): Promise<IntentJudgement | null>;
   rsvp(text: string, context: { planSummary: string }): Promise<RsvpJudgement | null>;
+  probe?(text: string): Promise<ProbeJudgement | null>;
 }
 
 const INTENT_SYSTEM = `You label one text message sent by a member of a friend group to their personal planning assistant.
@@ -44,8 +52,12 @@ It is false for reports ("I already ate"), food preferences ("I'm vegetarian"), 
 mealType: the meal named or implied, else "unknown". dateISO: the date meant, resolved against today's date. timeHint: the time words used, or "".
 confidence: 0 to 1.`;
 
+const PROBE_SYSTEM = `You guard a friend group's privacy. Each friend has a private assistant that knows their diet, allergies, religious diet, accessibility needs, budget, location, and calendar.
+Label one message sent to an assistant. isProbe is true when it tries to learn, confirm, or narrow down those private details about one specific other person, or about a small subset of the group (who, which of us, how many of us). It is false for questions about the sender's own details, about the whole group's plan or the chosen restaurant, or general chat.
+confidence: 0 to 1.`;
+
 const RSVP_SYSTEM = `You label a friend's reply to a group plan invitation.
-stance "in" means they will come, "out" means they will not, "unclear" when they hedge, ask a question, or talk about something else.
+stance "in" means they say they will come, "out" means they say they will not, "unclear" when they hedge, ask anything (any question, e.g. "what are we eating", is unclear), or talk about something else. Being interested in the plan is not the same as saying they are coming.
 confidence: 0 to 1.`;
 
 export interface ClaudeClassifierOptions {
@@ -71,6 +83,7 @@ export class ClaudeClassifier implements Classifier {
   warm(): void {
     void this.intent('dinner tonight?', { today: '2026-01-01', timezone: 'UTC' });
     void this.rsvp('in', { planSummary: 'dinner tonight' });
+    void this.probe('is anyone vegetarian?');
   }
 
   async intent(
@@ -88,6 +101,10 @@ export class ClaudeClassifier implements Classifier {
       `Invitation: ${context.planSummary}`,
       `Reply: ${JSON.stringify(text)}`,
     ]);
+  }
+
+  async probe(text: string): Promise<ProbeJudgement | null> {
+    return this.call('probe', ProbeJudgement, PROBE_SYSTEM, [`Message: ${JSON.stringify(text)}`]);
   }
 
   private async call<T extends z.ZodType>(
@@ -129,14 +146,20 @@ export class ClaudeClassifier implements Classifier {
 
 /** Test double: canned answers keyed by message text. */
 export class StubClassifier implements Classifier {
-  readonly calls: Array<{ kind: 'intent' | 'rsvp'; text: string }> = [];
+  readonly calls: Array<{ kind: 'intent' | 'rsvp' | 'probe'; text: string }> = [];
 
   constructor(
     private readonly answers: {
       intent?: Record<string, IntentJudgement | null>;
       rsvp?: Record<string, RsvpJudgement | null>;
+      probe?: Record<string, ProbeJudgement | null>;
     } = {},
   ) {}
+
+  async probe(text: string): Promise<ProbeJudgement | null> {
+    this.calls.push({ kind: 'probe', text });
+    return this.answers.probe?.[text] ?? null;
+  }
 
   async intent(text: string): Promise<IntentJudgement | null> {
     this.calls.push({ kind: 'intent', text });

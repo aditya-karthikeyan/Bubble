@@ -10,6 +10,7 @@ import { z } from 'zod';
 const PhotonUser = z.object({
   id: z.string(),
   phoneNumber: z.string(),
+  firstName: z.string().nullable().optional(),
   assignedPhoneNumber: z.string().nullable().optional(),
 });
 
@@ -72,6 +73,16 @@ export class PhotonUsers {
     const bubbleNumber = await this.bubbleNumberFor(input.phone);
     if (!bubbleNumber) throw new Error('Photon registered the user but assigned no bubble number');
     return { bubbleNumber };
+  }
+
+  /** Phone -> first name, for scripts that build a crew from registered users. */
+  async firstNames(): Promise<Map<string, string>> {
+    const res = await this.fetchImpl(this.url, { headers: { authorization: this.auth } });
+    if (!res.ok) throw new Error(`Photon user list failed (${res.status})`);
+    const body = ListResponse.parse(await res.json());
+    return new Map(
+      body.data.users.flatMap((u) => (u.firstName ? [[u.phoneNumber, u.firstName] as const] : [])),
+    );
   }
 
   async bubbleNumberFor(phone: string): Promise<string | null> {
