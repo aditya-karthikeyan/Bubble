@@ -15,7 +15,7 @@
  * presence expires (sleep ends 07:00). Messages carry names, times, and amounts only; never
  * another member's facts.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
   idempotencyKey,
@@ -30,7 +30,16 @@ import {
 } from '@bubbleworks/shared';
 import type { DbBubbleService } from '../bubbles/service.js';
 import type { Db } from '../db/client.js';
-import { bookings, bubbleState, ledger, planMembers, plans, timers, venues } from '../db/schema.js';
+import {
+  audit,
+  bookings,
+  bubbleState,
+  ledger,
+  planMembers,
+  plans,
+  timers,
+  venues,
+} from '../db/schema.js';
 import { silentLogger, type Logger } from '../events/bus.js';
 import type { TimerService } from '../timers/service.js';
 import { distanceM } from '../venues/geo.js';
@@ -113,7 +122,7 @@ export class Doers implements DoerPorts {
     for (const u of people) {
       await this.dm(
         u,
-        `${s.venue.name}, ${when}, table for ${s.partySize} under ${s.reservationName}. ` +
+        `${s.venue.name}, ${when}, table for ${people.length} under ${s.reservationName}. ` +
           `Add it to your calendar: ${url}`,
         `${s.idempotencyKey}:${u.id}`,
       );
@@ -176,35 +185,63 @@ export class Doers implements DoerPorts {
       return { ok: false, detail: 'Nobody has a Venmo handle yet' };
     }
 
+    // History only: this plan's own rows (a first split's paid row) must not count against anyone.
     const count = (userId: string, kind: 'paid' | 'compromised') =>
       Number(
         this.d.db
           .select({ n: sql<number>`count(*)` })
           .from(ledger)
-          .where(and(eq(ledger.userId, userId), eq(ledger.kind, kind), eq(ledger.groupId, groupId)))
+          .where(
+            and(
+              eq(ledger.userId, userId),
+              eq(ledger.kind, kind),
+              eq(ledger.groupId, groupId),
+              ne(ledger.planId, s.planId),
+            ),
+          )
           .get()?.n ?? 0,
       );
-    // Fewest times paid in this crew. Ties go to whoever has compromised least, so the person
-    // who keeps bending is not also the one fronting the bill; then join order, then id.
+    // A re-split keeps the payer if they are still attending, so the bill never flips.
+    // Otherwise: fewest times paid in this crew; ties go to whoever has compromised least (the
+    // person who keeps bending is not also the one fronting the bill); then join order, then id.
+    const prior = this.lastSplit(s.bookingId);
     const order = new Map(s.members.map((m, i) => [m.userId, i]));
-    const payer = withHandle
-      .map((x) => ({ ...x, paid: count(x.u.id, 'paid'), bent: count(x.u.id, 'compromised') }))
-      .sort(
-        (a, b) =>
-          a.paid - b.paid ||
-          a.bent - b.bent ||
-          (order.get(a.u.id) ?? 99) - (order.get(b.u.id) ?? 99) ||
-          a.u.id.localeCompare(b.u.id),
-      )[0]!;
+    const payer =
+      withHandle.find((x) => x.u.id === prior?.payerId) ??
+      withHandle
+        .map((x) => ({ ...x, paid: count(x.u.id, 'paid'), bent: count(x.u.id, 'compromised') }))
+        .sort(
+          (a, b) =>
+            a.paid - b.paid ||
+            a.bent - b.bent ||
+            (order.get(a.u.id) ?? 99) - (order.get(b.u.id) ?? 99) ||
+            a.u.id.localeCompare(b.u.id),
+        )[0]!;
 
-    const total = each * s.partySize;
+    // Count only who is attending now (in or represented), never s.partySize from the booking.
+    const total = each * people.length;
     const note = `${s.venue.name} ${shortDay(s.startAt)}`;
     const handle = payer.handle.replace(/^@/, '');
     const link = `https://venmo.com/?txn=pay&recipients=${encodeURIComponent(handle)}&amount=${each}&note=${encodeURIComponent(note)}`;
 
+    // A rerun after someone dropped (the engine re-splits on a table change): anyone on the
+    // last split who is no longer attending is told they are off the bill.
+    const nowIds = new Set(people.map((u) => u.id));
+    for (const id of prior?.userIds ?? []) {
+      if (nowIds.has(id)) continue;
+      const gone = await this.d.crews.userById(id);
+      if (!gone) continue;
+      await this.dm(
+        gone,
+        `Plans changed and you're not on ${s.venue.name} anymore, so you're off the bill. ` +
+          'Ignore the earlier Venmo link.',
+        `${s.idempotencyKey}:offbill:${id}`,
+      );
+    }
+
     await this.dm(
       payer.u,
-      `You're covering ${s.venue.name} this time, about $${total} for ${s.partySize} ($${each} each). ` +
+      `You're covering ${s.venue.name} this time, about $${total} for ${people.length} ($${each} each). ` +
         "I'll send everyone else a Venmo link to you. It rotates, so next time is someone else.",
       `${s.idempotencyKey}:payer`,
     );
@@ -219,6 +256,8 @@ export class Doers implements DoerPorts {
       requests++;
     }
 
+    // One paid row per booking; a re-split moves it to the current payer and total.
+    const at = this.now().toISOString();
     this.d.db
       .insert(ledger)
       .values({
@@ -229,10 +268,22 @@ export class Doers implements DoerPorts {
         kind: 'paid',
         amount: total,
         note: s.venue.name,
-        at: this.now().toISOString(),
+        at,
       })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({ target: ledger.id, set: { userId: payer.u.id, amount: total, at } })
       .run();
+    this.d.db
+      .insert(audit)
+      .values({
+        planId: s.planId,
+        at,
+        actor: 'p3_splitter',
+        action: 'split_sent',
+        detail: { bookingId: s.bookingId, payerId: payer.u.id, userIds: [...nowIds], each },
+      })
+      .run();
+    // Keep the fairness ledger in step with who is actually attending.
+    this.ledger.recordPlan(s.planId);
     this.log.info({ planId: s.planId, payer: payer.u.id, each, requests }, 'split sent');
     return { ok: true, detail: `${payer.u.displayName} covers, ${requests} Venmo links sent` };
   }
@@ -461,15 +512,38 @@ export class Doers implements DoerPorts {
   }
 
   private async attending(s: BookingSummary): Promise<User[]> {
-    const ids = s.members
-      .filter((m) => m.status === 'in' || m.status === 'represented')
-      .map((m) => m.userId);
+    // The database is the source of truth: someone who said no after the summary was built
+    // must not get an invite or a bill. Order follows the summary (join order).
+    const current = new Map(
+      this.d.db
+        .select({ userId: planMembers.userId, status: planMembers.status })
+        .from(planMembers)
+        .where(eq(planMembers.planId, s.planId))
+        .all()
+        .map((m) => [m.userId, m.status]),
+    );
+    const ordered = [...new Set([...s.members.map((m) => m.userId), ...current.keys()])];
     const out: User[] = [];
-    for (const id of ids) {
+    for (const id of ordered) {
+      const status = current.get(id);
+      if (status !== 'in' && status !== 'represented') continue;
       const u = await this.d.crews.userById(id);
       if (u) out.push(u);
     }
     return out;
+  }
+
+  private lastSplit(bookingId: string): { userIds: string[]; payerId: string } | null {
+    const rows = this.d.db
+      .select({ detail: audit.detail })
+      .from(audit)
+      .where(and(eq(audit.actor, 'p3_splitter'), eq(audit.action, 'split_sent')))
+      .orderBy(desc(audit.id))
+      .all();
+    const hit = rows.find((r) => r.detail?.['bookingId'] === bookingId)?.detail;
+    return hit
+      ? { userIds: (hit['userIds'] as string[]) ?? [], payerId: String(hit['payerId']) }
+      : null;
   }
 
   private groupIdOf(planId: string): string {

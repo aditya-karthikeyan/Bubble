@@ -175,11 +175,84 @@ describe('Doers', () => {
         'Ben is covering Alpha Pie. Your share is about $30: ' +
           'https://venmo.com/?txn=pay&recipients=ben-demo&amount=30&note=Alpha%20Pie%20Oct%2010',
       );
-      const rows = rt.db.select().from(ledger).where(eq(ledger.planId, s.planId)).all();
-      expect(rows).toMatchObject([{ userId: 'user_ben', kind: 'paid', amount: 120 }]);
+      const paidRows = () =>
+        rt.db
+          .select()
+          .from(ledger)
+          .where(eq(ledger.planId, s.planId))
+          .all()
+          .filter((r) => r.kind === 'paid');
+      expect(paidRows()).toMatchObject([{ userId: 'user_ben', kind: 'paid', amount: 120 }]);
 
+      const before = rt.db.select().from(ledger).where(eq(ledger.planId, s.planId)).all().length;
       await doers.splitter.send({ ...s, idempotencyKey: 'spl' });
-      expect(rt.db.select().from(ledger).where(eq(ledger.planId, s.planId)).all()).toHaveLength(1);
+      expect(paidRows()).toHaveLength(1);
+      expect(rt.db.select().from(ledger).where(eq(ledger.planId, s.planId)).all()).toHaveLength(
+        before,
+      );
+    });
+  });
+
+  describe('only people attending count', () => {
+    it('never invites, bills, or ledgers someone who said no, even after the summary was built', async () => {
+      const s = booking(); // Ava, Ben, Chloe in; Dev represented
+      rt.plans.upsertMember(s.planId, 'user_eli', 'out'); // said no from the start
+      // Chloe says no after the engine built the summary it hands the doers.
+      const stale = { ...s, members: rt.plans.members(s.planId) };
+      rt.plans.upsertMember(s.planId, 'user_chloe', 'out');
+
+      expect(await doers.inviter.send({ ...stale, idempotencyKey: 'inv' })).toEqual({
+        ok: true,
+        detail: 'Invites sent to 3',
+      });
+      expect(dmsTo('user_chloe')).toHaveLength(0);
+      expect(dmsTo('user_eli')).toHaveLength(0);
+      expect(dmsTo('user_ava')[0]).toContain('table for 3 under Ava');
+
+      const r = await doers.splitter.send({ ...stale, idempotencyKey: 'spl' });
+      expect(r.detail).toBe('Ava covers, 2 Venmo links sent');
+      expect(dmsTo('user_ava').at(-1)).toMatch(/about \$90 for 3 \(\$30 each\)/);
+      expect(dmsTo('user_chloe')).toHaveLength(0);
+      expect(dmsTo('user_eli')).toHaveLength(0);
+
+      const kinds = rt.db
+        .select()
+        .from(ledger)
+        .where(eq(ledger.planId, s.planId))
+        .all()
+        .map((x) => `${x.kind}:${x.userId}`);
+      expect(kinds.some((k) => k.endsWith('user_chloe') || k.endsWith('user_eli'))).toBe(false);
+    });
+
+    it('re-split after a dropout: off-the-bill note, new total, paid row and ledger follow', async () => {
+      const s = booking();
+      await doers.splitter.send({ ...s, idempotencyKey: 'spl:4' });
+      expect(dmsTo('user_chloe').at(-1)).toMatch(/Your share is about \$30/);
+
+      rt.plans.upsertMember(s.planId, 'user_chloe', 'out'); // drops after booking
+      await doers.splitter.send({ ...s, idempotencyKey: 'spl:3' }); // engine re-splits for 3
+      expect(dmsTo('user_chloe').at(-1)).toBe(
+        "Plans changed and you're not on Alpha Pie anymore, so you're off the bill. Ignore the earlier Venmo link.",
+      );
+      expect(dmsTo('user_ava').at(-1)).toMatch(/about \$90 for 3/);
+      const rows = rt.db.select().from(ledger).where(eq(ledger.planId, s.planId)).all();
+      expect(rows.filter((x) => x.kind === 'paid')).toMatchObject([
+        { userId: 'user_ava', amount: 90 },
+      ]);
+      expect(rows.some((x) => x.userId === 'user_chloe')).toBe(false);
+    });
+
+    it('the Watcher only watches people attending', async () => {
+      const s = booking();
+      rt.plans.upsertMember(s.planId, 'user_ben', 'out');
+      await doers.watcher.start(s);
+      nowMs = Date.parse('2026-10-10T23:25:00.000Z');
+      const report = (await doers.watchTick(s.bookingId, s.planId))!;
+      expect(report.members.map((m) => m.userId).sort()).toEqual([
+        'user_ava',
+        'user_chloe',
+        'user_dev',
+      ]);
     });
   });
 
