@@ -55,7 +55,7 @@ import { dayOfWeek } from '../venues/hours.js';
 import { HACKATHON_CENTER } from '../venues/demo-venue.js';
 import type { VenueSource } from '../venues/places.js';
 import { MAX_DISTANCE_SLACK_MIN, analyzeDeadlock, pickAsks } from './deadlock.js';
-import { parseIntent } from './intent.js';
+import { localDate, parseIntent } from './intent.js';
 import {
   cuisineSwitchAsk,
   cuisineSwitchNotice,
@@ -206,7 +206,13 @@ export class BubbleworksEngine implements PlanEngine {
     } else if (same) {
       // Same meal, same day, no change asked: a repeat joins the open plan. A different meal or
       // day on the same chat becomes a second plan, scoped by its own id, poll, and messages.
+      // Never silent: tell the sender, privately, where the open plan stands.
       this.log.info({ planId: same.id, state: same.state }, 'intent ignored: plan already open');
+      await this.deps.messaging.sendPrivateText({
+        userId: input.userId,
+        text: this.alreadyOpenText(same),
+        idempotencyKey: idempotencyKey(same.id, 'already_open', input.messageId),
+      });
       return { planId: same.id, created: false };
     }
     const started = Date.now();
@@ -2175,6 +2181,44 @@ export class BubbleworksEngine implements PlanEngine {
       default:
         return `The plan is ${plan.state.toLowerCase()}.`;
     }
+  }
+
+  /** One line to someone who asks for a plan the crew already has. Plan facts only, never a member's. */
+  private alreadyOpenText(plan: Plan): string {
+    const venue = plan.chosenVenueId
+      ? this.venuePool().find((v) => v.id === plan.chosenVenueId)
+      : null;
+    const startIso =
+      plan.startAt ??
+      (plan.intent.startMinutes !== null
+        ? this.startAtIso(plan.intent.date, plan.intent.startMinutes)
+        : null);
+    const time = startIso ? this.localClock(startIso) : null;
+    switch (plan.state) {
+      case 'BOOKED':
+      case 'DAY_OF':
+        if (venue && time)
+          return `You're already booked: ${venue.name}, ${time}, table for ${this.rt.plans.inCount(plan.id)}. Say "cancel" to drop it and start over.`;
+        break;
+      case 'LOCKED':
+      case 'BOOKING':
+        if (venue && time) return `Already on it: ${venue.name} at ${time}, booking now.`;
+        break;
+      default:
+        break;
+    }
+    return `Already planning ${plan.intent.meal} ${this.dayWord(plan)} for the crew. Hang tight.`;
+  }
+
+  private dayWord(plan: Plan): string {
+    const now = this.now();
+    if (plan.intent.date === localDate(now, this.tz))
+      return plan.intent.meal === 'dinner' ? 'tonight' : 'today';
+    if (plan.intent.date === localDate(now, this.tz, 1)) return 'tomorrow';
+    const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long' }).format(
+      new Date(`${plan.intent.date}T12:00:00Z`),
+    );
+    return `on ${weekday}`;
   }
 
   private async renderPlainBundle(r: BundleRequest): Promise<void> {

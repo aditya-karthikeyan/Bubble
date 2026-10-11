@@ -392,6 +392,101 @@ describe('BubbleworksEngine', () => {
     expect(h.events.at(-1)?.type).toBe('plan_closed');
   });
 
+  describe('a repeat ask for a plan the crew already has', () => {
+    /** Intent plus three in, Eli out, polls closed by the deadline, veto window, booked. */
+    async function toBooked() {
+      const { planId } = await h.engine.handleIntent({
+        chatId: CHAT,
+        userId: 'user_ava',
+        messageId: 'm1',
+        text: 'dinner tonight?',
+        at: h.at(),
+      });
+      for (const u of ['user_ben', 'user_chloe', 'user_dev'])
+        await h.engine.handleHeadcount({ planId: planId!, userId: u, in: true, at: h.at() });
+      await h.engine.handleHeadcount({
+        planId: planId!,
+        userId: 'user_eli',
+        in: false,
+        at: h.at(),
+      });
+      if (h.rt.plans.get(planId!)?.state === 'GATHERING') await h.advance(DEADLINES.poll_ms + 1);
+      expect(h.rt.plans.get(planId!)?.state).toBe('LOCKED');
+      await h.advance(DEADLINES.veto_window_ms + 1);
+      await h.settle();
+      expect(h.rt.plans.get(planId!)?.state).toBe('BOOKED');
+      return planId!;
+    }
+    const privateTextsTo = (userId: string) =>
+      h.messaging.sent
+        .filter((s) => s.kind === 'private_text')
+        .flatMap((s) => ('input' in s && s.input.userId === userId ? [s.input.text] : []));
+
+    it('tells the sender privately that dinner is already booked, and starts nothing new', async () => {
+      const planId = await toBooked();
+      const venue = h.rt.venues().find((v) => v.id === h.rt.plans.get(planId)!.chosenVenueId)!;
+      const before = privateTextsTo('user_ben').length;
+      const again = await h.engine.handleIntent({
+        chatId: CHAT,
+        userId: 'user_ben',
+        messageId: 'm9',
+        text: 'dinner tonight?',
+        at: h.at(),
+      });
+      expect(again).toEqual({ planId, created: false });
+      expect(h.rt.plans.findActiveForChat(CHAT)).toHaveLength(1);
+      const texts = privateTextsTo('user_ben').slice(before);
+      expect(texts).toHaveLength(1);
+      expect(texts[0]).toContain(venue.name);
+      expect(texts[0]).toContain('cancel');
+      expect(texts[0]).toContain('table for 4');
+      expect(texts[0]!.length).toBeLessThanOrEqual(140);
+    });
+
+    it('a plan still gathering gets a hang-tight line', async () => {
+      const { planId } = await h.engine.handleIntent({
+        chatId: CHAT,
+        userId: 'user_ava',
+        messageId: 'm1',
+        text: 'dinner tonight?',
+        at: h.at(),
+      });
+      await h.engine.handleIntent({
+        chatId: CHAT,
+        userId: 'user_ben',
+        messageId: 'm2',
+        text: 'dinner tonight?',
+        at: h.at(),
+      });
+      expect(h.rt.plans.get(planId!)?.state).toBe('GATHERING');
+      expect(privateTextsTo('user_ben')).toEqual([
+        'Already planning dinner tonight for the crew. Hang tight.',
+      ]);
+    });
+
+    it('after "cancel" the same ask starts a fresh plan', async () => {
+      const planId = await toBooked();
+      await h.engine.handleCommand({
+        chatId: CHAT,
+        userId: 'user_ben',
+        command: 'cancel',
+        messageId: 'm10',
+        at: h.at(),
+      });
+      expect(h.rt.plans.get(planId)?.state).toBe('CANCELLED');
+      const fresh = await h.engine.handleIntent({
+        chatId: CHAT,
+        userId: 'user_ben',
+        messageId: 'm11',
+        text: 'dinner tonight?',
+        at: h.at(),
+      });
+      expect(fresh.created).toBe(true);
+      expect(fresh.planId).not.toBe(planId);
+      expect(h.rt.plans.get(fresh.planId!)?.state).toBe('GATHERING');
+    });
+  });
+
   it('asks sit-down vs fast food first and filters the solver by the answer', async () => {
     // Dev and Ben have no diet limits, so their feasible set spans burgers both ways.
     const crew = await h.rt.crews.createCrew({
