@@ -17,7 +17,7 @@ import { PlanStore } from './engine/plan-store.js';
 import { silentLogger, SqliteEventBus, type Logger } from './events/bus.js';
 import { TimerService, type TimerServiceOptions } from './timers/service.js';
 import { CandidateIndex } from './venues/candidates.js';
-import { listVenues } from './venues/repo.js';
+import { listVenues, upsertVenues } from './venues/repo.js';
 
 export interface RuntimeOptions {
   /** Overrides config.DATABASE_PATH. ':memory:' for tests. */
@@ -43,6 +43,8 @@ export interface Runtime {
   /** Replace the hard-facts source (P3's BubbleService) and drop cached candidate sets. */
   setHardFacts(fn: (userId: string) => Promise<Fact[]>): void;
   venues(): Venue[];
+  /** Live venues found for a plan join the table; caches are dropped. Returns the count. */
+  addVenues(list: Venue[]): number;
   close(): void;
 }
 
@@ -92,6 +94,13 @@ export function createRuntime(config: Config, options: RuntimeOptions = {}): Run
       candidates.invalidate();
     },
     venues: () => (venueCache ??= listVenues(db)),
+    addVenues: (list) => {
+      if (list.length === 0) return 0;
+      const n = upsertVenues(db, list);
+      venueCache = null;
+      candidates.invalidate();
+      return n;
+    },
     close: () => {
       timers.stop();
       handle.close();

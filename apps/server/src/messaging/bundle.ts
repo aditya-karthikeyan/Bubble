@@ -33,6 +33,8 @@ export interface QuestionDecision {
   /** Who started the plan, shown in the headcount line. */
   organizerName: string;
   meal: MealKind | null;
+  /** Cuisine named in the message ("feeling chinese"), shown in the headcount line. */
+  cuisine?: string | null;
   /** 0 = today, 1 = tomorrow. */
   dayOffset?: 0 | 1;
   /** Null when the engine's question policy skips the cuisine question. */
@@ -304,10 +306,13 @@ export function clockTime(iso: IsoDateTime, timezone: string): string {
 export function headcountText(decision: QuestionDecision): string {
   const when =
     decision.dayOffset === 1 ? 'tomorrow' : decision.meal === 'dinner' ? 'tonight' : 'today';
-  const what = decision.meal ?? 'food';
+  const meal = decision.meal ?? 'food';
+  const what = decision.cuisine
+    ? `${decision.cuisine.charAt(0).toUpperCase()}${decision.cuisine.slice(1)} ${meal}`
+    : meal;
   const closes = clockTime(decision.headcount.closesAt, decision.headcount.timezone);
   if (decision.headcount.mode === 'opt_out') {
-    return `🫧 ${decision.organizerName}'s making a plan for ${what} ${when}. You're counted in, reply "out" if you can't make it. Locking it in at ${closes}.`;
+    return `🫧 ${decision.organizerName}'s on ${what} ${when}. You're counted in, reply "out" if you can't make it. Locking a spot at ${closes}.`;
   }
   return `${decision.organizerName}'s making a plan for ${what} ${when}. Tap 👍 on this message if you're in.`;
 }

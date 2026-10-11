@@ -102,12 +102,17 @@ export class TemplateAskWriter implements AskWriter {
 }
 
 /** To a member who voted for a cuisine nothing that fits tonight serves. Poll labels read as names. */
-export function cuisineSwitchAsk(cuisine: string, venueName: string): string {
+export function cuisineSwitchAsk(cuisine: string, venueName: string, named = false): string {
+  if (named) {
+    return `Nothing ${cuisine} fits everyone tonight. OK to go with ${venueName} instead? Reply yes or no.`;
+  }
   return `${cuisine} won the vote, but no spot like that fits tonight. OK to switch to ${venueName}? Reply yes or no.`;
 }
 
 /** To everyone else while the voters are asked. */
-export function cuisineSwitchNotice(cuisine: string, venueName: string): string {
+export function cuisineSwitchNotice(cuisine: string, venueName: string, named = false): string {
+  if (named)
+    return `Nothing ${cuisine} fits everyone tonight. Checking whether ${venueName} works instead.`;
   return `${cuisine} won the vote, but no spot like that fits tonight. Checking with its voters about ${venueName}.`;
 }
 

@@ -52,7 +52,8 @@ export function memberInfeasibilities(
     });
   }
   const minutes = travelMinutes(member, venue, ctx);
-  if (minutes !== null && minutes > SOLVER.travel_limit_min + travelSlack) {
+  const limit = ctx.travelLimitMin ?? SOLVER.travel_limit_min;
+  if (minutes !== null && minutes > limit + travelSlack) {
     out.push({
       venueId: venue.id,
       userId: member.userId,
