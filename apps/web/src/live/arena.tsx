@@ -201,10 +201,13 @@ export function VenueOrb({
   name,
   cuisine,
   leader,
+  final,
 }: {
   name: string;
   cuisine: string;
   leader: boolean;
+  /** The one bubble the plan ends as: time and party under the name, instead of the cuisine. */
+  final: string | null;
 }) {
   return (
     <g>
@@ -216,8 +219,13 @@ export function VenueOrb({
         {clip(name, 18)}
       </text>
       <text className="orb-sub" y={1.86} fontSize={0.24}>
-        {cuisine}
+        {final ?? cuisine}
       </text>
+      {final && (
+        <text className="orb-name" y={0.06} fontSize={0.2}>
+          Plan complete
+        </text>
+      )}
     </g>
   );
 }
@@ -462,9 +470,10 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
       const origin = layout.doerOrigin ?? { x: t.x, y: t.y };
       next.set(`d:${kind}`, syncNode(nodes.current, `d:${kind}`, 'doer', t, origin));
     }
-    const swallower = layout.consensus?.absorbing
-      ? Object.entries(layout.venues).find(([, v]) => v.leader)?.[0]
-      : undefined;
+    // Whatever is being absorbed, the destination must yield its collisions to take it in.
+    const swallower = [...Object.values(layout.bubbles), ...Object.values(layout.doers)].find(
+      (t) => t.absorb,
+    )?.absorb?.venueId;
     for (const n of next.values()) n.swallowing = n.kind === 'venue' && n.id === `v:${swallower}`;
     nodes.current = next;
     const list = [...next.values()];
@@ -490,7 +499,7 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
 
   if (!size || !layout) return <svg className="arena" />;
 
-  const settled = phase === 'locked' || phase === 'summary';
+  const settled = phase === 'locked' || phase === 'summary' || phase === 'complete';
   const reg = (id: string) => (el: SVGGElement | null) => {
     if (el) els.current.set(id, el);
     else els.current.delete(id);
@@ -519,6 +528,11 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
                 name={v.name}
                 cuisine={v.cuisine}
                 leader={layout.venues[v.venueId]!.leader}
+                final={
+                  phase === 'complete' && layout.venues[v.venueId]!.leader && vm.booking
+                    ? `${new Date(vm.booking.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · table for ${vm.booking.partySize}`
+                    : null
+                }
               />,
             )
           : null,

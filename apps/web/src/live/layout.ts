@@ -63,8 +63,9 @@ function spiral(i: number, n: number, c: Point, rx: number, ry: number): Point {
 
 export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
   const s = sizes(size);
-  const settled = phase === 'locked' || phase === 'summary';
-  const booked = phase === 'summary';
+  const complete = phase === 'complete';
+  const booked = phase === 'summary' || complete;
+  const settled = phase === 'locked' || booked;
   const area = safeArea(size, settled || phase === 'closed');
   const span = Math.min(size.w * 0.84, 960);
   const left = (size.w - span) / 2;
@@ -96,11 +97,13 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
       ...at,
       y: gone ? -s.venue * 3 : at.y,
       r:
-        booked && chosen
-          ? s.venue * 1.7
-          : chosen && (vm.merged || settled)
-            ? s.venue * 1.25
-            : s.venue,
+        complete && chosen
+          ? s.venue * 2.4
+          : booked && chosen
+            ? s.venue * 1.7
+            : chosen && (vm.merged || settled)
+              ? s.venue * 1.25
+              : s.venue,
       wander: gone ? 0 : settled ? s.venue * 0.15 : s.venue * 0.35,
       opacity: gone ? 0 : 1,
       leader: chosen,
@@ -131,14 +134,13 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
     const home = spiral(i, present.length, centre, roam.x, roam.y);
     const k = merged.indexOf(id);
     if (k >= 0 && clusterAt) {
-      // Packed inside the consensus bubble.
-      const ring = merged.length === 1 ? 0 : consensusR - inside * 1.25;
-      const a = (k / merged.length) * Math.PI * 2 - Math.PI / 2;
+      // Loose inside the consensus bubble: scattered starts, each drifting on its own orbit.
+      const room = Math.max(0, consensusR - inside * 1.6);
+      const at = spiral(k, merged.length, clusterAt, room, room);
       bubbles[id] = {
-        x: clusterAt.x + Math.cos(a) * ring * 0.85,
-        y: clusterAt.y + Math.sin(a) * ring * 0.85,
+        ...at,
         r: inside,
-        wander: booked ? 0 : s.bubble * 0.12,
+        wander: booked ? 0 : room * 0.45,
         opacity: 1,
         ...(booked && leaderId ? { absorb: { venueId: leaderId, order: k } } : {}),
       };
@@ -190,17 +192,20 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
 
   const doers: Layout['doers'] = {};
   if (settled) {
-    // Around the consensus bubble while locked, around the destination once booked.
-    const ring = booked ? s.venue * 1.7 + s.doer * 1.9 : consensusR + s.doer * 1.7;
+    // Floating freely around the consensus bubble (locked) or the destination (booked): uneven
+    // angles and distances plus a wide orbit, so they never line up into a shape.
+    const ring = booked ? s.venue * 1.7 + s.doer * 2.1 : consensusR + s.doer * 1.9;
+    const tilt = [-0.35, 0.22, -0.12, 0.3];
+    const reach = [1.0, 1.22, 1.08, 1.3];
     DOER_KINDS.forEach((kind, i) => {
-      const a = -Math.PI / 4 - (i * Math.PI) / 2;
+      const a = -Math.PI / 3 + (i * Math.PI) / 2 + tilt[i]!;
       doers[kind] = {
-        // Wider than tall, so the destination's name below it stays clear.
-        x: centre.x + Math.cos(a) * ring * (booked ? 1.32 : 1.1),
-        y: centre.y - Math.sin(a) * ring * (booked ? 0.86 : 0.92),
+        x: centre.x + Math.cos(a) * ring * reach[i]! * 1.15,
+        y: centre.y + Math.sin(a) * ring * reach[i]! * 0.9,
         r: s.doer,
-        wander: s.doer * 0.12,
+        wander: complete ? 0 : s.doer * 0.75,
         opacity: 1,
+        ...(complete && leaderId ? { absorb: { venueId: leaderId, order: i } } : {}),
       };
     });
   }
@@ -208,7 +213,9 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
   // Nothing visible ever targets past the screen edge.
   const fit = (t: Target) => {
     if (t.opacity === 0) return;
-    t.x = clamp(t.x, t.r + 4, size.w - t.r - 4);
+    const m = t.r + t.wander + 4;
+    t.wander = Math.min(t.wander, Math.max(0, size.w / 2 - t.r - 8));
+    t.x = clamp(t.x, Math.min(m, size.w / 2), Math.max(size.w - m, size.w / 2));
     t.y = clamp(t.y, t.r + 4, size.h - t.r - 4);
   };
   [...Object.values(venues), ...Object.values(bubbles), ...Object.values(doers)].forEach(fit);

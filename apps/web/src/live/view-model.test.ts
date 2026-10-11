@@ -21,7 +21,14 @@ function phases(events: PlanEvent[]): Phase[] {
 
 describe('live page view model', () => {
   it('walks the basic plan through gathering, candidates, convergence, lock, and summary', () => {
-    expect(phases(BASIC)).toEqual(['gathering', 'candidates', 'convergence', 'locked', 'summary']);
+    expect(phases(BASIC)).toEqual([
+      'gathering',
+      'candidates',
+      'convergence',
+      'locked',
+      'summary',
+      'complete',
+    ]);
     const vm = reduceAll(BASIC);
     expect(vm.bubbles.filter((b) => b.present).map((b) => b.displayName)).toEqual([
       'Ava',
@@ -40,7 +47,7 @@ describe('live page view model', () => {
     expect(phases(DEADLOCK)).toContain('deadlock');
     const vm = reduceAll(DEADLOCK);
     expect(vm.openAsks).toEqual([]);
-    expect(phaseOf(vm)).toBe('summary');
+    expect(phaseOf(vm)).toBe('complete');
   });
 
   it('ignores events it has already seen, so replay plus live never double-applies', () => {

@@ -92,7 +92,7 @@ describe('arena layout', () => {
 
   it('flies the crew into the destination and absorbs them once booked, one after another', () => {
     const vm = reduceAll(BASIC);
-    const l = computeLayout(vm, phaseOf(vm), PHONE);
+    const l = computeLayout(vm, 'summary', PHONE);
     const venue = l.venues['venue_demo']!;
     expect(venue.leader).toBe(true);
     expect(l.consensus?.absorbing).toBe(true);
@@ -106,8 +106,36 @@ describe('arena layout', () => {
     expect(orders.map((a) => a?.order)).toEqual([0, 1, 2, 3]);
     // The doers re-form around the destination.
     for (const d of Object.values(l.doers)) {
-      expect(Math.hypot(d.x - venue.x, d.y - venue.y)).toBeGreaterThan(venue.r + d.r);
+      expect(Math.hypot(d.x - venue.x, d.y - venue.y)).toBeGreaterThan(venue.r);
     }
+  });
+
+  it('ends as one bubble: the doers are absorbed into the destination once the plan is complete', () => {
+    const vm = reduceAll(BASIC);
+    expect(phaseOf(vm)).toBe('complete');
+    const l = computeLayout(vm, 'complete', PHONE);
+    expect(Object.values(l.doers).map((d) => d.absorb?.venueId)).toEqual([
+      'venue_demo',
+      'venue_demo',
+      'venue_demo',
+      'venue_demo',
+    ]);
+    const people = Object.values(l.bubbles).filter((b) => b.opacity > 0);
+    expect(people.every((b) => b.absorb?.venueId === 'venue_demo')).toBe(true);
+    expect(l.venues['venue_demo']!.r).toBeGreaterThan(
+      computeLayout(vm, 'summary', PHONE).venues['venue_demo']!.r,
+    );
+  });
+
+  it('lets the doers float freely while booked, not in a fixed shape', () => {
+    const vm = reduceAll(BASIC);
+    const l = computeLayout(vm, 'summary', PHONE);
+    const ds = Object.values(l.doers);
+    expect(ds.every((d) => d.wander > d.r * 0.5)).toBe(true);
+    const dist = ds.map((d) =>
+      Math.round(Math.hypot(d.x - l.venues['venue_demo']!.x, d.y - l.venues['venue_demo']!.y)),
+    );
+    expect(new Set(dist).size).toBeGreaterThan(1);
   });
 
   it('sends a bubble that left off the top, faded', () => {

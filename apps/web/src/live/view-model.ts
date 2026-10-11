@@ -13,7 +13,14 @@ import type {
 } from '@bubbleworks/shared';
 
 export type Phase =
-  'gathering' | 'candidates' | 'convergence' | 'deadlock' | 'locked' | 'summary' | 'closed';
+  | 'gathering'
+  | 'candidates'
+  | 'convergence'
+  | 'deadlock'
+  | 'locked'
+  | 'summary'
+  | 'complete'
+  | 'closed';
 
 export const DOER_KINDS: readonly DoerKind[] = ['caller', 'inviter', 'splitter', 'watcher'];
 
@@ -148,8 +155,23 @@ export function reduceAll(events: readonly PlanEvent[], from: ViewModel = EMPTY)
 }
 
 /** The six visual phases (plus closed), derived so a late joiner lands on the right one. */
+const FINISHED: readonly DoerState[] = ['done', 'failed', 'needs_human'];
+
+/**
+ * Booked and the follow-up doers (invites, split) have finished. The watcher keeps watching for
+ * the rest of the night, so it never counts.
+ */
+export function planComplete(vm: ViewModel): boolean {
+  if (!vm.booking) return false;
+  return (['caller', 'inviter', 'splitter'] as const).every((k) => {
+    const d = vm.doers[k];
+    return d !== undefined && FINISHED.includes(d.state);
+  });
+}
+
 export function phaseOf(vm: ViewModel): Phase {
   if (vm.closedReason && vm.closedReason !== 'completed' && !vm.booking) return 'closed';
+  if (planComplete(vm)) return 'complete';
   if (vm.booking || vm.planState === 'BOOKED' || vm.planState === 'DAY_OF') return 'summary';
   if (vm.planState === 'CLOSED') return vm.booking ? 'summary' : 'closed';
   if (vm.locked || vm.planState === 'LOCKED' || vm.planState === 'BOOKING') return 'locked';
@@ -168,7 +190,8 @@ export const PHASE_COPY: Record<Phase, { title: string; line: string }> = {
   },
   deadlock: { title: 'Working it out', line: 'One private question is out. No one else sees it.' },
   locked: { title: 'Locked', line: 'The crew agreed. The doers are on it.' },
-  summary: { title: 'Booked', line: 'Table secured.' },
+  summary: { title: 'Booked', line: 'Table secured. Wrapping up the details.' },
+  complete: { title: 'Plan complete', line: 'Everything is sorted. See you there.' },
   closed: { title: 'Plan closed', line: 'This plan ended without a booking.' },
 };
 
