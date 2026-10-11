@@ -30,6 +30,11 @@ const CUISINES: Array<[RegExp, string]> = [
   [/\b(sandwich|sandwiches|subs?|wraps?)\b/i, 'sandwich'],
 ];
 
+/** The venue cuisine key a text names ("feeling indian" -> 'indian'), or null. */
+export function parseCuisine(text: string): string | null {
+  return CUISINES.find(([re]) => re.test(text))?.[1] ?? null;
+}
+
 export interface ParseIntentOptions {
   now: Date;
   timezone: string;
@@ -76,7 +81,7 @@ export function parseIntent(text: string, options: ParseIntentOptions): PlanInte
   const meal = MEALS.find(([re]) => re.test(text))?.[1] ?? 'dinner';
   const dayOffset = /\b(tomorrow|tmrw|tmr)\b/i.test(text) ? 1 : 0;
   const date = localDate(options.now, options.timezone, dayOffset);
-  const cuisine = CUISINES.find(([re]) => re.test(text))?.[1] ?? null;
+  const cuisine = parseCuisine(text);
   return {
     meal,
     date,

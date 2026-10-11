@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { newId, type BookingSummary } from '@bubbleworks/shared';
 import { FakeMessaging } from '@bubbleworks/shared/fakes';
 import { RuleExtractor } from '../bubbles/extract.js';
-import { NO_SPLIT } from '../bubbles/facts.js';
 import { DbBubbleService } from '../bubbles/service.js';
 import type { LocationFix } from '../bubbles/signals.js';
 import { bookings, bubbleState, ledger } from '../db/schema.js';
@@ -14,7 +13,6 @@ import { buildIcs, signBookingToken, verifyBookingToken } from './ics.js';
 import { Doers, etaMinutes, lateNudge, mapsLink, type LateNotice } from './index.js';
 
 const ALPHA_PIE = 'venue_osm_n13256222785'; // price level 2, Franklin St
-const CHIPOTLE = 'venue_osm_w44343155'; // price level 1 (OSM fast_food)
 const ALPHA = { lat: 35.9151753, lng: -79.0540312 };
 const START = '2026-10-10T23:30:00.000Z'; // 19:30 New York
 
@@ -105,18 +103,6 @@ describe('Doers', () => {
       members: rt.plans.members(plan.id),
     };
   }
-
-  const optOut = (userId: string) =>
-    bubbles.facts.record({
-      userId,
-      type: 'venmo_handle',
-      value: NO_SPLIT,
-      hard: false,
-      confidence: 1,
-      source: 'chat',
-      confirmed: true,
-      expiresAt: null,
-    });
 
   const dmsTo = (userId: string) =>
     messaging.sent.flatMap((s) =>
@@ -216,109 +202,26 @@ describe('Doers', () => {
   });
 
   describe('Splitter', () => {
-    it('rotates the payer by the ledger and sends Venmo links to everyone else', async () => {
-      // Ava paid last time, so Ben (next to join) covers.
-      rt.db
-        .insert(ledger)
-        .values({
-          id: 'prior',
-          groupId: 'group_demo',
-          planId: 'old',
-          userId: 'user_ava',
-          kind: 'paid',
-          amount: 120,
-          note: null,
-          at: '2026-10-01T00:00:00Z',
-        })
-        .run();
+    it('stays silent at booking: no messages, no paid row, waiting for the payer', async () => {
       const s = booking();
       const r = await doers.splitter.send({ ...s, idempotencyKey: 'spl' });
-      expect(r).toEqual({ ok: true, detail: 'Ben covers, 3 payment requests sent' });
-      expect(dmsTo('user_ben')[0]).toMatch(
-        /^You're covering Alpha Pie this time, about \$120 for 4 \(\$30 each\)/,
-      );
-      expect(dmsTo('user_chloe')[0]).toBe(
-        'Ben is covering Alpha Pie. Your share is about $30: ' +
-          'https://venmo.com/?txn=pay&recipients=ben-demo&amount=30&note=Alpha%20Pie%20Oct%2010',
-      );
-      const paidRows = () =>
-        rt.db
-          .select()
-          .from(ledger)
-          .where(eq(ledger.planId, s.planId))
-          .all()
-          .filter((r) => r.kind === 'paid');
-      expect(paidRows()).toMatchObject([{ userId: 'user_ben', kind: 'paid', amount: 120 }]);
-
-      const before = rt.db.select().from(ledger).where(eq(ledger.planId, s.planId)).all().length;
-      await doers.splitter.send({ ...s, idempotencyKey: 'spl' });
-      expect(paidRows()).toHaveLength(1);
-      expect(rt.db.select().from(ledger).where(eq(ledger.planId, s.planId)).all()).toHaveLength(
-        before,
-      );
-    });
-
-    it('sends every method the payer has, the ones the payee shares first', async () => {
-      const s = booking();
-      // Ava covers (nobody has paid yet; first to join). She also takes Cash App and Zelle.
-      // Ben uses Cash App and Venmo too, so those come before Zelle.
-      const add = (userId: string, value: string) =>
-        bubbles.facts.record({
-          userId,
-          type: 'payment_handle',
-          value,
-          hard: false,
-          confidence: 1,
-          source: 'onboarding',
-          confirmed: true,
-          expiresAt: null,
-        });
-      add('user_ava', 'cashapp:$avacash');
-      add('user_ava', 'zelle:+19195550101');
-      add('user_ben', 'cashapp:$bencash');
-      const r = await doers.splitter.send({ ...s, idempotencyKey: 'spl' });
-      expect(r.detail).toBe('Ava covers, 3 payment requests sent');
-      expect(dmsTo('user_ben')[0]!.split('\n')).toEqual([
-        'Ava is covering Alpha Pie. Your share is about $30:',
-        'Cash App: https://cash.app/$avacash/30',
-        'Venmo: https://venmo.com/?txn=pay&recipients=ava-demo&amount=30&note=Alpha%20Pie%20Oct%2010',
-        'Zelle Ava at +19195550101 · $30',
-      ]);
-    });
-
-    it('stays quiet at counter service: no split question, no Venmo, no paid row', async () => {
-      const s = booking();
-      const chipotle = rt.venues().find((v) => v.id === CHIPOTLE)!;
-      expect(chipotle.priceLevel).toBe(1);
-      const r = await doers.splitter.send({ ...s, venue: chipotle, idempotencyKey: 'spl' });
-      expect(r).toEqual({ ok: true, detail: 'Counter service, everyone pays for themselves' });
+      expect(r).toEqual({ ok: true, detail: 'waiting for the payer' });
       expect(messaging.sent).toHaveLength(0);
       const rows = rt.db.select().from(ledger).where(eq(ledger.planId, s.planId)).all();
-      expect(rows.some((x) => x.kind === 'paid')).toBe(false);
+      expect(rows.some((x) => x.kind === 'paid' || x.kind === 'owes')).toBe(false);
     });
 
-    it("leaves anyone who said they don't split off the bill, with no messages", async () => {
+    it('a rerun after a dropout sends nothing either', async () => {
       const s = booking();
-      optOut('user_ben');
-      const r = await doers.splitter.send({ ...s, idempotencyKey: 'spl' });
-      expect(r.detail).toBe('Ava covers, 2 payment requests sent');
-      expect(dmsTo('user_ben')).toHaveLength(0);
-      expect(dmsTo('user_ava')[0]).toMatch(/about \$90 for 3 \(\$30 each\)/);
-    });
-
-    it('no split at all when one person or fewer is left on the bill', async () => {
-      const s = booking();
-      await doers.splitter.send({ ...s, idempotencyKey: 'spl:1' });
-      for (const id of ['user_ben', 'user_chloe', 'user_dev']) optOut(id);
-      const r = await doers.splitter.send({ ...s, idempotencyKey: 'spl:2' });
-      expect(r).toEqual({ ok: true, detail: 'No split, everyone pays for themselves' });
-      const rows = rt.db.select().from(ledger).where(eq(ledger.planId, s.planId)).all();
-      expect(rows.some((x) => x.kind === 'paid')).toBe(false);
+      await doers.splitter.send({ ...s, idempotencyKey: 'spl:4' });
+      rt.plans.upsertMember(s.planId, 'user_chloe', 'out');
+      await doers.splitter.send({ ...s, idempotencyKey: 'spl:3' });
+      expect(messaging.sent).toHaveLength(0);
     });
   });
 
   describe('only people attending count', () => {
-    it('never invites, bills, or ledgers someone who said no, even after the summary was built', async () => {
+    it('never invites or ledgers someone who said no, even after the summary was built', async () => {
       const s = booking(); // Ava, Ben, Chloe in; Dev represented
       rt.plans.upsertMember(s.planId, 'user_eli', 'out'); // said no from the start
       // Chloe says no after the engine built the summary it hands the doers.
@@ -333,12 +236,7 @@ describe('Doers', () => {
       expect(dmsTo('user_eli')).toHaveLength(0);
       expect(dmsTo('user_ava')[0]).toContain('table for 3 under Ava');
 
-      const r = await doers.splitter.send({ ...stale, idempotencyKey: 'spl' });
-      expect(r.detail).toBe('Ava covers, 2 payment requests sent');
-      expect(dmsTo('user_ava').at(-1)).toMatch(/about \$90 for 3 \(\$30 each\)/);
-      expect(dmsTo('user_chloe')).toHaveLength(0);
-      expect(dmsTo('user_eli')).toHaveLength(0);
-
+      doers.ledger.recordPlan(s.planId);
       const kinds = rt.db
         .select()
         .from(ledger)
@@ -346,24 +244,6 @@ describe('Doers', () => {
         .all()
         .map((x) => `${x.kind}:${x.userId}`);
       expect(kinds.some((k) => k.endsWith('user_chloe') || k.endsWith('user_eli'))).toBe(false);
-    });
-
-    it('re-split after a dropout: off-the-bill note, new total, paid row and ledger follow', async () => {
-      const s = booking();
-      await doers.splitter.send({ ...s, idempotencyKey: 'spl:4' });
-      expect(dmsTo('user_chloe').at(-1)).toMatch(/Your share is about \$30/);
-
-      rt.plans.upsertMember(s.planId, 'user_chloe', 'out'); // drops after booking
-      await doers.splitter.send({ ...s, idempotencyKey: 'spl:3' }); // engine re-splits for 3
-      expect(dmsTo('user_chloe').at(-1)).toBe(
-        "Plans changed and you're not on Alpha Pie anymore, so you're off the bill. Ignore the earlier payment link.",
-      );
-      expect(dmsTo('user_ava').at(-1)).toMatch(/about \$90 for 3/);
-      const rows = rt.db.select().from(ledger).where(eq(ledger.planId, s.planId)).all();
-      expect(rows.filter((x) => x.kind === 'paid')).toMatchObject([
-        { userId: 'user_ava', amount: 90 },
-      ]);
-      expect(rows.some((x) => x.userId === 'user_chloe')).toBe(false);
     });
 
     it('the Watcher only watches people attending', async () => {

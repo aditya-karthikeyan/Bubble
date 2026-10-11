@@ -1,10 +1,19 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { User } from '@bubbleworks/shared';
+import { newId, type User } from '@bubbleworks/shared';
 import { FakeMessaging } from '@bubbleworks/shared/fakes';
-import { bubbleInbox, crewInvites, facts, groupMembers, ledger, users } from '../db/schema.js';
+import {
+  bookings,
+  bubbleInbox,
+  crewInvites,
+  facts,
+  groupMembers,
+  ledger,
+  plans,
+  users,
+} from '../db/schema.js';
 import type { Runtime } from '../runtime.js';
-import { testRuntime } from '../test-helpers.js';
+import { INTENT, testRuntime } from '../test-helpers.js';
 import {
   isNoSplit,
   meatLimits,
@@ -511,6 +520,165 @@ describe('DbBubbleService', () => {
       clock = new Date(clock.getTime() + 6 * 60_000);
       await dm(jo, 'yes');
       expect(await rt.crews.userById(jo.id)).not.toBeNull();
+    });
+  });
+
+  describe('splitting the bill after dinner', () => {
+    const ALPHA_PIE = 'venue_osm_n13256222785';
+
+    /** A BOOKED plan at Alpha Pie with everyone in, the table at `startAt` (default 2 h ago). */
+    function bookedDinner(people: User[], startAt = '2026-10-10T18:00:00.000Z'): string {
+      const plan = rt.plans.create({
+        groupId: 'group_demo',
+        chatId: 'crew:group_demo',
+        intent: INTENT,
+        createdByUserId: people[0]!.id,
+      });
+      for (const u of people) rt.plans.upsertMember(plan.id, u.id, 'in');
+      rt.plans.setChoice(plan.id, { chosenVenueId: ALPHA_PIE, backupVenueId: null, startAt });
+      rt.db.update(plans).set({ state: 'BOOKED' }).where(eq(plans.id, plan.id)).run();
+      const bookingId = newId('booking');
+      const madeAt = new Date(Date.parse(startAt) - 3 * 3_600_000).toISOString();
+      rt.db
+        .insert(bookings)
+        .values({
+          id: bookingId,
+          planId: plan.id,
+          venueId: ALPHA_PIE,
+          status: 'booked',
+          partySize: people.length,
+          startAt,
+          reservationName: people[0]!.displayName,
+          idempotencyKey: `k-${bookingId}`,
+          createdAt: madeAt,
+          updatedAt: madeAt,
+        })
+        .run();
+      return plan.id;
+    }
+
+    type Row = { userId: string; kind: string; amount: number };
+    const byKindUser = (rows: Row[]) =>
+      [...rows].sort((a, b) => a.kind.localeCompare(b.kind) || a.userId.localeCompare(b.userId));
+    const ledgerOf = (planId: string) =>
+      byKindUser(
+        rt.db
+          .select()
+          .from(ledger)
+          .where(eq(ledger.planId, planId))
+          .all()
+          .filter((r) => r.kind === 'paid' || r.kind === 'owes')
+          .map((r) => ({ userId: r.userId, kind: r.kind, amount: r.amount })),
+      );
+
+    it('amount in the message: everyone else gets their share and the Venmo link', async () => {
+      const zoe = await newUser('Zoe', '+19195550201');
+      const yan = await newUser('Yan', '+19195550202');
+      const xi = await newUser('Xi', '+19195550203');
+      const wen = await newUser('Wen', '+19195550204');
+      await onboard(zoe, ['none', '25', 'skip', '@zoe-eats']);
+      await onboard(yan, ['vegetarian', '40', 'skip', '@yan-y']);
+      await onboard(xi);
+      await onboard(wen, ['none', '25', 'skip', "I don't want to split"]);
+      const planId = bookedDinner([zoe, yan, xi, wen]);
+
+      expect(bubbles.claimsDm(zoe.id, 'I covered dinner, it was $84.50')).toBe(true);
+      const sentBefore = messaging.sent.length;
+      expect(
+        await dm(zoe, 'hey I covered dinner, it was $84.50. can you let them know to pay me'),
+      ).toEqual({ handled: true });
+
+      // $84.50 over 4 is $21.125: rounded up to $21.13 so Zoe is never short.
+      const share =
+        'Zoe covered Alpha Pie. Your share is $21.13. Pay them on Venmo: ' +
+        'https://venmo.com/?txn=pay&recipients=zoe-eats&amount=21.13&note=Alpha%20Pie';
+      expect(lastTo(yan.id)).toBe(share);
+      expect(lastTo(xi.id)).toBe(share);
+      expect(textsTo(wen.id).some((t) => t.includes('covered'))).toBe(false);
+      expect(lastTo(zoe.id)).toBe(
+        'Told Yan and Xi to send you $21.13 each (Venmo). ' +
+          'Wen turned off split requests, so settle up with them directly ($21.13).',
+      );
+      // One DM to each of Yan and Xi, one reply to Zoe; nothing else, and no one's facts.
+      const fresh = messaging.sent.slice(sentBefore);
+      expect(fresh).toHaveLength(3);
+      for (const f of fresh) {
+        const text = f.kind === 'private_text' ? f.input.text : '';
+        expect(text).not.toMatch(/vegetarian|yan-y|\$40|\$25/);
+      }
+
+      expect(ledgerOf(planId)).toEqual(
+        byKindUser([
+          { userId: xi.id, kind: 'owes', amount: 21.13 },
+          { userId: yan.id, kind: 'owes', amount: 21.13 },
+          { userId: zoe.id, kind: 'paid', amount: 84.5 },
+        ]),
+      );
+    });
+
+    it('amount missing: asks how much, then the next message completes the split', async () => {
+      const zoe = await newUser('Zoe', '+19195550211');
+      const yan = await newUser('Yan', '+19195550212');
+      await onboard(zoe, ['none', '25', 'skip', '@zoe-eats']);
+      await onboard(yan);
+      const planId = bookedDinner([zoe, yan]);
+
+      await dm(zoe, 'I covered this one, can you tell them to pay me');
+      expect(lastTo(zoe.id)).toBe('Fasho 🫧 How much was it all in, tip included?');
+      expect(bubbles.claimsDm(zoe.id, '60')).toBe(true);
+      await dm(zoe, 'hmm let me check');
+      expect(lastTo(zoe.id)).toBe(
+        'How much was it all in? Just the number, like $84. Or say never mind.',
+      );
+      await dm(zoe, '60');
+      expect(lastTo(yan.id)).toBe(
+        'Zoe covered Alpha Pie. Your share is $30. Pay them on Venmo: ' +
+          'https://venmo.com/?txn=pay&recipients=zoe-eats&amount=30&note=Alpha%20Pie',
+      );
+      expect(lastTo(zoe.id)).toBe('Told Yan to send you $30 each (Venmo).');
+      expect(ledgerOf(planId)).toEqual([
+        { userId: yan.id, kind: 'owes', amount: 30 },
+        { userId: zoe.id, kind: 'paid', amount: 60 },
+      ]);
+      expect(bubbles.claimsDm(zoe.id, '60')).toBe(false);
+    });
+
+    it('"never mind" cancels, and a payer with no handle is asked for one first', async () => {
+      const xi = await newUser('Xi', '+19195550221');
+      const yan = await newUser('Yan', '+19195550222');
+      await onboard(xi); // skipped the payment question
+      await onboard(yan);
+      bookedDinner([xi, yan]);
+
+      await dm(xi, 'i paid');
+      await dm(xi, 'never mind');
+      expect(lastTo(xi.id)).toBe('Okay, no split.');
+      expect(textsTo(yan.id).some((t) => t.includes('covered'))).toBe(false);
+
+      await dm(xi, 'i got the bill, 90 bucks');
+      expect(lastTo(xi.id)).toBe('How should they pay you? Venmo/Cash App/Zelle handle');
+      await dm(xi, '$xicash');
+      expect(bubbles.payHandles(xi.id)).toEqual([{ method: 'cashapp', id: '$xicash' }]);
+      expect(lastTo(yan.id)).toBe(
+        'Xi covered Alpha Pie. Your share is $45. Pay them on Cash App: https://cash.app/$xicash/45',
+      );
+      expect(lastTo(xi.id)).toBe('Told Yan to send you $45 each (Cash App).');
+    });
+
+    it('no recent booking: says so and splits nothing', async () => {
+      const zoe = await newUser('Zoe', '+19195550231');
+      const yan = await newUser('Yan', '+19195550232');
+      await onboard(zoe, ['none', '25', 'skip', '@zoe-eats']);
+      await onboard(yan);
+      await dm(zoe, 'I paid, it was $50');
+      expect(lastTo(zoe.id)).toBe("I don't see a recent dinner to split. Which one?");
+
+      // Two days ago is too long ago.
+      const planId = bookedDinner([zoe, yan], '2026-10-08T23:00:00.000Z');
+      await dm(zoe, 'they owe me $50');
+      expect(lastTo(zoe.id)).toBe("I don't see a recent dinner to split. Which one?");
+      expect(textsTo(yan.id).some((t) => t.includes('covered'))).toBe(false);
+      expect(ledgerOf(planId)).toEqual([]);
     });
   });
 

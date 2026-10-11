@@ -53,6 +53,11 @@ export function parseStartMinutes(text: string, meal: MealKind | null): number |
   return h * 60 + minute;
 }
 
+/** "wanna", "let's", "tonight", a question mark: someone proposing rather than reporting. */
+export function isProposal(text: string): boolean {
+  return PROPOSAL.test(text) && !HEDGE.test(text);
+}
+
 export function detectPlan(text: string): Detection {
   const meal = MEALS.find(([re]) => re.test(text))?.[1] ?? null;
   const dayOffset = /\btomorrow\b/i.test(text) ? 1 : 0;

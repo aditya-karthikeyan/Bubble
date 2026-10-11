@@ -44,7 +44,11 @@ export interface Messaging {
   /** Wire inbound messages to the engine. Call once, before start(). */
   attachEngine(
     engine: PlanEngine,
-    options?: { classifier?: Classifier | null; isOnboarded?: (userId: string) => boolean },
+    options?: {
+      classifier?: Classifier | null;
+      isOnboarded?: (userId: string) => boolean;
+      claimsDm?: (userId: string, text: string) => boolean;
+    },
   ): PlanIntake;
   /** One-time registration: Photon user + bubble number + CrewDirectory user. */
   signup(raw: unknown): Promise<SignupResult>;
@@ -177,8 +181,9 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
         bundleMode: config.MESSAGING_BUNDLE_MODE,
         crews: runtime.crews,
         ...(attachOptions.isOnboarded ? { isOnboarded: attachOptions.isOnboarded } : {}),
+        ...(attachOptions.claimsDm ? { claimsDm: attachOptions.claimsDm } : {}),
       });
-      port.setCrewPick((userId, text) => intake!.crewPick(userId, text));
+      port.setPendingAnswer((userId) => intake!.pendingAnswer(userId));
       intake.start();
       return intake;
     },

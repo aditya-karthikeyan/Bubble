@@ -37,6 +37,9 @@ export class PassiveLearner {
   private readonly seen = new Set<string>();
   private running = 0;
   private idleWaiters: Array<() => void> = [];
+  /** Facts found per recent message id, and callers waiting on a message still in the queue. */
+  private readonly found = new Map<string, number>();
+  private readonly foundWaiters = new Map<string, Array<(facts: number) => void>>();
   readonly stats = { enqueued: 0, skipped: 0, processed: 0, dropped: 0, failed: 0, factsFound: 0 };
 
   constructor(private readonly o: LearnerOptions) {}
@@ -48,14 +51,16 @@ export class PassiveLearner {
     if (this.seen.size > 10_000) this.seen.delete(this.seen.values().next().value!);
     if (!mightContainFact(input.text)) {
       this.stats.skipped++;
+      this.settle(input.messageId, 0);
       return;
     }
     this.queue.push(input);
     this.stats.enqueued++;
     const max = this.o.maxQueue ?? 500;
     while (this.queue.length > max) {
-      this.queue.shift();
+      const dropped = this.queue.shift()!;
       this.stats.dropped++;
+      this.settle(dropped.messageId, 0);
     }
     this.pump();
   }
@@ -63,8 +68,31 @@ export class PassiveLearner {
   /** "forget me": drop this person's queued texts. */
   forget(userId: string): void {
     for (let i = this.queue.length - 1; i >= 0; i--) {
-      if (this.queue[i]!.userId === userId) this.queue.splice(i, 1);
+      if (this.queue[i]!.userId === userId) this.settle(this.queue.splice(i, 1)[0]!.messageId, 0);
     }
+  }
+
+  /**
+   * How many facts the learner found in a message, once it has read it (0 when it skipped,
+   * dropped, or failed on it, or never saw it). Lets the bubble answer a DM nothing else did.
+   */
+  whenLearned(messageId: string): Promise<number> {
+    const done = this.found.get(messageId);
+    if (done !== undefined) return Promise.resolve(done);
+    if (!this.seen.has(messageId)) return Promise.resolve(0);
+    return new Promise((resolve) => {
+      const waiting = this.foundWaiters.get(messageId) ?? [];
+      waiting.push(resolve);
+      this.foundWaiters.set(messageId, waiting);
+    });
+  }
+
+  private settle(messageId: string, facts: number): void {
+    this.found.set(messageId, facts);
+    if (this.found.size > 1_000) this.found.delete(this.found.keys().next().value!);
+    const waiting = this.foundWaiters.get(messageId);
+    this.foundWaiters.delete(messageId);
+    for (const resolve of waiting ?? []) resolve(facts);
   }
 
   /** Resolves when the queue is empty and nothing is running. For tests and the demo. */
@@ -93,9 +121,11 @@ export class PassiveLearner {
   private async process(input: LearnInput): Promise<void> {
     const log = this.o.log ?? silentLogger;
     const t0 = performance.now();
+    let found = 0;
     try {
       const facts = await this.o.extractor.extract(input.text, 'chat');
       if (facts.length) await this.o.apply(input, facts);
+      found = facts.length;
       this.stats.processed++;
       this.stats.factsFound += facts.length;
       log.debug(
@@ -113,6 +143,8 @@ export class PassiveLearner {
         { userId: input.userId, messageId: input.messageId, err: (err as Error).message },
         'learning failed',
       );
+    } finally {
+      this.settle(input.messageId, found);
     }
   }
 }
