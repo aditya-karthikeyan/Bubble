@@ -7,7 +7,7 @@
  * Never relaxed: allergy, religious_diet, accessibility (NEVER_RELAX_FACT_TYPES). Diet is not
  * relaxed either; only budget and distance are negotiable, time is a group-level fallback.
  */
-import { CONCESSION_STEPS, type Venue } from '@bubbleworks/shared';
+import { CONCESSION_STEPS, SOLVER, type Venue } from '@bubbleworks/shared';
 import { budgetOf, filterCandidates } from '../solver/filter.js';
 import type { SolverContext, SolverMember } from '../solver/types.js';
 
@@ -47,6 +47,8 @@ const BUDGET_STEPS = [1, 2, 3]
 const DISTANCE_STEPS = [1, 2]
   .map((n) => n * CONCESSION_STEPS.distance_step_min)
   .filter((v) => v <= CONCESSION_STEPS.distance_max_min);
+/** The breaker's largest distance concession, in walking minutes past SOLVER.travel_limit_min. */
+export const MAX_DISTANCE_SLACK_MIN = Math.max(...DISTANCE_STEPS);
 const TIME_DELTAS = [
   CONCESSION_STEPS.time_step_min,
   -CONCESSION_STEPS.time_step_min,
@@ -108,8 +110,8 @@ export function analyzeDeadlock(
             userId: m.userId,
             kind: 'distance',
             factType: 'distance',
-            from: 20,
-            to: 20 + step,
+            from: ctx.travelLimitMin ?? SOLVER.travel_limit_min,
+            to: (ctx.travelLimitMin ?? SOLVER.travel_limit_min) + step,
             steps: i + 1,
             cost: (i + 1) * weight,
             enablesVenueIds: feasible.map((v) => v.id),

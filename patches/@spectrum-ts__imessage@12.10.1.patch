@@ -1,5 +1,5 @@
 diff --git a/dist/index.js b/dist/index.js
-index 683efe97311a37180fc536889909d585f0603513..1434cfd9ea659c42becfb3c1407688e489776a3e 100644
+index 683efe97311a37180fc536889909d585f0603513..1525fef665a6aa307822521684ee88794138867a 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -2183,7 +2183,7 @@ const isVotedPollEvent = (event) => event.delta.type === "voted";
@@ -11,3 +11,39 @@ index 683efe97311a37180fc536889909d585f0603513..1434cfd9ea659c42becfb3c1407688e4
  		options: input.options.map((optionInfo) => ({ title: optionInfo.text }))
  	});
  	const optionsByIdentifier = /* @__PURE__ */ new Map();
+@@ -2496,6 +2496,35 @@ const toMessageItem = async (client, event, phone, cursor, onInbound) => {
+ 			values: await toReadReceiptMessages(client, cache, event, phone)
+ 		};
+ 	}
++	if (event.type === "message.edited") {
++		// Bubbleworks patch: surface an inbound edit as a text message with id "<guid>:edit:<seq>".
++		const id = `${event.messageGuid}:edit:${event.sequence}`;
++		if (isEventFromCurrentAccount(event, phone) || !event.content?.text) return {
++			cursor,
++			id,
++			values: []
++		};
++		const original = await client.messages.get(toMessageGuid(event.messageGuid));
++		if (original.isFromMe) return {
++			cursor,
++			id,
++			values: []
++		};
++		const edited = {
++			...original,
++			guid: id,
++			content: {
++				...event.content,
++				attachments: []
++			}
++		};
++		const base = buildMessageBase(edited, event.chatGuid, event.editedAt ?? event.occurredAt, phone);
++		return {
++			cursor,
++			id,
++			values: [await buildUnwrappedContentMessage(client, base, edited, id)]
++		};
++	}
+ 	streamLog.debug("message event consumed without mapping", {
+ 		"spectrum.imessage.event_type": event.type,
+ 		"spectrum.imessage.sequence": event.sequence

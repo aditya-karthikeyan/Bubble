@@ -326,6 +326,51 @@ describe('inbound', () => {
     ]);
   });
 
+  it('sends an edit straight to the bubble with editOf naming the delivered message', async () => {
+    const { messaging, inbox } = await setup({ debounceMs: 1500 });
+    // Two quick texts are delivered as one message under the last id.
+    for (const [id, text] of [
+      ['g1', 'vegn'],
+      ['g2', 'no nuts'],
+    ]) {
+      await messaging.handleInbound({
+        kind: 'text',
+        providerId: id!,
+        phone: AVA.handle,
+        text: text!,
+        at,
+      });
+    }
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(inbox.private.map((m) => m.messageId)).toEqual(['g2']);
+
+    await messaging.handleInbound({
+      kind: 'edit',
+      providerId: 'g1:edit:7',
+      phone: AVA.handle,
+      editOf: 'g1',
+      text: 'vegan',
+      at,
+    });
+    expect(inbox.private.at(-1)).toEqual({
+      messageId: 'g1:edit:7',
+      editOf: 'g2',
+      userId: AVA.id,
+      text: 'vegan',
+      at,
+    });
+    // The same edit event again is dropped.
+    await messaging.handleInbound({
+      kind: 'edit',
+      providerId: 'g1:edit:7',
+      phone: AVA.handle,
+      editOf: 'g1',
+      text: 'vegan',
+      at,
+    });
+    expect(inbox.private).toHaveLength(2);
+  });
+
   it('routes every DM to the crew while that crew has a plan in flight', async () => {
     const { messaging, inbox } = await setup({ openPlanCrew: async () => DEMO_GROUP.id });
     await messaging.handleInbound({
@@ -442,5 +487,24 @@ describe('inbound', () => {
     await vi.runAllTimersAsync();
     expect(inbox.private).toHaveLength(1);
     expect((await crews.userById(dee.id))?.onboardedAt).not.toBeNull();
+  });
+
+  it('points an unknown phone at signup once, and stays quiet after that', async () => {
+    const { transport, messaging } = await setup({ signupUrl: 'https://bubbleworks.test' });
+    const at = new Date().toISOString();
+    for (const i of [1, 2]) {
+      await messaging.handleInbound({
+        kind: 'text',
+        providerId: `stranger_${i}`,
+        phone: '+19190000000',
+        text: 'forget me',
+        at,
+      });
+    }
+    const sends = transport.sends();
+    expect(sends).toHaveLength(1);
+    expect(sends[0]!.chatId).toBe('any;-;+19190000000');
+    expect(sends[0]!.content).toMatchObject({ kind: 'text' });
+    expect((sends[0]!.content as { text: string }).text).toContain('https://bubbleworks.test');
   });
 });

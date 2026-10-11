@@ -25,6 +25,15 @@ export type RawInbound =
       at: string;
     }
   | {
+      /** The person edited an earlier message; `editOf` is that message's provider id. */
+      kind: 'edit';
+      providerId: string;
+      phone: string;
+      editOf: string;
+      text: string;
+      at: string;
+    }
+  | {
       kind: 'reaction';
       providerId: string;
       phone: string;
@@ -91,8 +100,14 @@ export function normalize(message: unknown): RawInbound | null {
   const c = content.data;
 
   switch (c.type) {
-    case 'text':
-      return c.text.trim() ? { kind: 'text', ...base, text: c.text } : null;
+    case 'text': {
+      if (!c.text.trim()) return null;
+      // Our spectrum patch delivers iMessage edits as "<original guid>:edit:<sequence>".
+      const edit = /^(.+):edit:\d+$/.exec(id);
+      return edit
+        ? { kind: 'edit', ...base, editOf: edit[1]!, text: c.text }
+        : { kind: 'text', ...base, text: c.text };
+    }
     case 'reply':
       return c.content.text?.trim()
         ? { kind: 'text', ...base, text: c.content.text, replyToMessageId: c.target.id }

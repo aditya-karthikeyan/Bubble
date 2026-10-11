@@ -7,8 +7,10 @@
  * since the bundle has no time poll yet, a tie falls back to the default and is logged).
  */
 import {
+  MEAL_TIMES,
   SOLVER,
   type BusyInterval,
+  type MealKind,
   type PollOption,
   type Venue,
   type VenueStyle,
@@ -100,6 +102,26 @@ export function decideCuisineQuestion(
   };
 }
 
+/**
+ * Cuisine poll options for the people who are in, after the style is known: every cuisine with
+ * at least one venue that fits all of them, best supported first, at most four.
+ */
+export function cuisineOptions(
+  feasible: Venue[],
+  members: SolverMember[],
+  ctx: SolverContext,
+): PollOption[] {
+  const scores = scoreAll(feasible, members, ctx);
+  const support = new Map<string, number>();
+  for (const s of scores) support.set(s.venueId, (support.get(s.venueId) ?? 0) + s.score);
+  const ranked = [...feasible].sort(
+    (a, b) => (support.get(b.id) ?? 0) - (support.get(a.id) ?? 0) || a.id.localeCompare(b.id),
+  );
+  return [...new Set(ranked.map((v) => v.cuisine))]
+    .slice(0, 4)
+    .map((key) => ({ key, label: cuisineLabel(key) }));
+}
+
 export const STYLE_OPTIONS: PollOption[] = [
   { key: 'sit_down', label: 'Sit-down' },
   { key: 'fast_food', label: 'Fast food / takeout' },
@@ -139,7 +161,11 @@ export interface TimeDecision {
 
 /** Minimum lead time before a start, so nobody is booked for a time that has passed. */
 export const MIN_LEAD_MIN = 45;
-const LATE_WINDOWS = [20 * 60 + 30, 21 * 60, 21 * 60 + 30, 22 * 60];
+
+/** The usual start for a meal when nobody named a time: 12:30 for lunch, 19:00 for dinner. */
+export function defaultStartFor(meal: MealKind = 'dinner'): number {
+  return MEAL_TIMES[meal].default_start_min;
+}
 
 /** Local minutes since midnight for `now` on `date` in `timezone`, or null when `date` is not today. */
 export function minutesNowIfToday(date: string, timezone: string, now: Date): number | null {
@@ -173,6 +199,7 @@ export function earliestStart(
 /**
  * Pick the window where the most members are free; the requested time wins when given. Nothing
  * earlier than `earliestStart` is ever chosen: a passed request or default is bumped forward.
+ * Windows and the default come from the meal: lunch looks at midday, dinner at the evening.
  */
 export function decideStartTime(
   requested: number | null,
@@ -180,13 +207,16 @@ export function decideStartTime(
   date: string,
   timezone: string,
   now: Date = new Date(),
+  meal: MealKind = 'dinner',
 ): TimeDecision {
+  const times = MEAL_TIMES[meal];
+  const fallback = times.default_start_min;
   const floor = earliestStart(date, timezone, now);
   if (requested !== null) {
     const startMinutes = Math.max(requested, floor);
     return { startMinutes, tie: false, bumped: startMinutes !== requested, freeCounts: {} };
   }
-  const windows = [...SOLVER.time_windows_min, ...LATE_WINDOWS].filter((w) => w >= floor);
+  const windows = [...times.windows, ...times.late].filter((w) => w >= floor);
   if (windows.length === 0) {
     return { startMinutes: floor, tie: false, bumped: true, freeCounts: {} };
   }
@@ -196,18 +226,24 @@ export function decideStartTime(
     const end = start + SOLVER.meal_duration_min * 60_000;
     let free = 0;
     for (const busy of Object.values(busyByMember)) {
-      const clash = busy.some((b) => Date.parse(b.start) < end && Date.parse(b.end) > start);
+      // All-day blocks (a hackathon on the calendar) say nothing about a meal; skip them.
+      const clash = busy.some(
+        (b) =>
+          Date.parse(b.end) - Date.parse(b.start) < 20 * 60 * 60_000 &&
+          Date.parse(b.start) < end &&
+          Date.parse(b.end) > start,
+      );
       if (!clash) free += 1;
     }
     freeCounts[w] = free;
   }
   const best = Math.max(...Object.values(freeCounts));
   const winners = windows.filter((w) => freeCounts[w] === best);
-  const pick = winners.includes(SOLVER.default_start_min) ? SOLVER.default_start_min : winners[0]!;
+  const pick = winners.includes(fallback) ? fallback : winners[0]!;
   return {
     startMinutes: pick,
     tie: winners.length > 1,
-    bumped: floor > SOLVER.default_start_min,
+    bumped: floor > fallback,
     freeCounts,
   };
 }

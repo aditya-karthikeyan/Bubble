@@ -35,7 +35,16 @@ export function rawScore(venue: Venue, member: SolverMember, ctx: SolverContext)
   const minutes = travelMinutes(member, venue, ctx);
   if (minutes !== null) {
     maxPossible += W.distance;
-    score += W.distance * Math.max(0, 1 - minutes / SOLVER.travel_limit_min);
+    const limit = ctx.travelLimitMin ?? SOLVER.travel_limit_min;
+    score += W.distance * Math.max(0, 1 - minutes / limit);
+  }
+
+  // Reviews: 3.5 stars is neutral, 5 is full credit; a handful of reviews counts for less than 50.
+  if (venue.rating !== null && venue.rating !== undefined) {
+    maxPossible += W.rating;
+    const quality = Math.max(0, Math.min(1, (venue.rating - 3.5) / 1.5));
+    const confidence = Math.min(1, (venue.ratingCount ?? 0) / 50);
+    score += W.rating * (0.5 + (quality - 0.5) * confidence);
   }
 
   maxPossible += W.recent_visit;

@@ -140,7 +140,23 @@ export class SpectrumTransport implements Transport {
 
   private toInbound(message: Message): RawInbound[] {
     const normalized = normalize(message);
-    if (!normalized) return [];
+    if (!normalized) {
+      // A content kind we do not read yet (a shared location, a contact card, a sticker). Logged
+      // so the next unknown kind can be added; message text is never logged.
+      const c = message.content as { type?: unknown; name?: unknown; mimeType?: unknown };
+      // Read receipts and typing are expected noise.
+      if (message.direction === 'inbound' && c?.type !== 'read' && c?.type !== 'typing') {
+        this.options.log?.(
+          {
+            type: typeof c?.type === 'string' ? c.type : typeof c,
+            name: typeof c?.name === 'string' ? c.name : null,
+            mimeType: typeof c?.mimeType === 'string' ? c.mimeType : null,
+          },
+          'inbound content not understood',
+        );
+      }
+      return [];
+    }
     if (this.provider !== 'terminal') return [normalized];
     const fallbackPhone = this.options.terminalDefaultPhone;
     const event =

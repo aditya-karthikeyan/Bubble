@@ -3,6 +3,8 @@
  * Deadlines are milliseconds. DEMO_MODE scales every deadline to DEMO_MODE_DEADLINE_MS.
  */
 
+import type { MealKind } from './types.js';
+
 export const DEMO_MODE_DEADLINE_MS = 60_000;
 
 export interface Deadlines {
@@ -26,10 +28,13 @@ export const DEADLINES: Deadlines = {
   page_token_ttl_after_close_ms: 2 * 60 * 60_000,
 };
 
-/** DEMO_MODE values. Asks and the veto window stay shorter than 60 s so a rehearsal fits. */
+/**
+ * DEMO_MODE values. The veto window stays shorter than 60 s so a rehearsal fits. The private ask
+ * gets 120 s: a real person on a phone needs time to notice and read it before the plan moves on.
+ */
 export const DEMO_DEADLINES: Deadlines = {
   poll_ms: DEMO_MODE_DEADLINE_MS,
-  private_ask_ms: 30_000,
+  private_ask_ms: 120_000,
   veto_window_ms: 15_000,
   call_ms: DEMO_MODE_DEADLINE_MS,
   page_token_ttl_after_close_ms: DEADLINES.page_token_ttl_after_close_ms,
@@ -79,7 +84,12 @@ export const SOLVER = {
     distance: 0.15,
     recent_visit: 0.2,
     budget_headroom: 0.1,
+    /** Public rating: 3.5 stars scores 0, 5 stars scores 1, scaled by how many reviews back it. */
+    rating: 0.3,
   },
+  /** Places rated below this, with at least min_rating_reviews reviews, are out. Unknown passes. */
+  min_rating: 3.6,
+  min_rating_reviews: 10,
   /** Fairness: each recent compromise adds this much weight to a member's vote. */
   fairness_step: 0.25,
   fairness_max: 2,
@@ -89,6 +99,51 @@ export const SOLVER = {
   /** How long dinner is assumed to take when checking hours and free/busy. */
   meal_duration_min: 90,
 } as const;
+
+export interface MealTimes {
+  /** Candidate start windows, local minutes since midnight. */
+  windows: readonly number[];
+  /** Extra windows tried after the usual ones, when calendars or the clock push the meal later. */
+  late: readonly number[];
+  /** Start used when nobody named a time and calendars do not decide. */
+  default_start_min: number;
+}
+
+const halfHours = (from: number, to: number): number[] => {
+  const out: number[] = [];
+  for (let m = from; m <= to; m += 30) out.push(m);
+  return out;
+};
+
+/** Start windows and default per meal. Dinner (and drinks) keep SOLVER's windows and default. */
+export const MEAL_TIMES: Record<MealKind, MealTimes> = {
+  breakfast: { windows: halfHours(8 * 60, 10 * 60), late: [], default_start_min: 9 * 60 },
+  brunch: {
+    windows: halfHours(10 * 60, 12 * 60 + 30),
+    late: [],
+    default_start_min: 11 * 60,
+  },
+  lunch: {
+    windows: halfHours(11 * 60 + 30, 13 * 60 + 30),
+    late: [14 * 60, 14 * 60 + 30],
+    default_start_min: 12 * 60 + 30,
+  },
+  coffee: {
+    windows: [9, 10, 11, 12, 13, 14, 15, 16, 17].map((h) => h * 60),
+    late: [],
+    default_start_min: 15 * 60,
+  },
+  dinner: {
+    windows: SOLVER.time_windows_min,
+    late: [20 * 60 + 30, 21 * 60, 21 * 60 + 30, 22 * 60],
+    default_start_min: SOLVER.default_start_min,
+  },
+  drinks: {
+    windows: SOLVER.time_windows_min,
+    late: [20 * 60 + 30, 21 * 60, 21 * 60 + 30, 22 * 60],
+    default_start_min: SOLVER.default_start_min,
+  },
+};
 
 /** Venue search radius from the hackathon address. */
 export const VENUE_RADIUS_M = 1_500;

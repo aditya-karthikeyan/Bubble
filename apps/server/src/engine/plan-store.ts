@@ -3,7 +3,7 @@
  * transition table, persisted in one transaction with an audit row, then published as
  * plan_state_changed. Terminal transitions stamp closedAt and the page token expiry.
  */
-import { and, eq, notInArray } from 'drizzle-orm';
+import { and, asc, eq, notInArray } from 'drizzle-orm';
 import {
   DEADLINES,
   PLAN_MESSAGE_BUDGET,
@@ -28,6 +28,13 @@ import {
   TERMINAL_STATES,
   type TransitionContext,
 } from './state-machine.js';
+
+/** One server-internal audit row for a plan, as the dev inspect route returns it. */
+export interface PlanAuditEntry {
+  kind: string;
+  payload: Record<string, unknown> | null;
+  createdAt: string;
+}
 
 export interface CreatePlanInput {
   groupId: string;
@@ -320,6 +327,16 @@ export class PlanStore {
       .insert(audit)
       .values({ planId, at: this.now().toISOString(), actor: 'engine', action, detail })
       .run();
+  }
+
+  /** The plan's audit rows (solver runs, transitions, deadlock analysis) in insertion order. */
+  auditFor(planId: string): PlanAuditEntry[] {
+    return this.db
+      .select({ kind: audit.action, payload: audit.detail, createdAt: audit.at })
+      .from(audit)
+      .where(eq(audit.planId, planId))
+      .orderBy(asc(audit.id))
+      .all();
   }
 }
 

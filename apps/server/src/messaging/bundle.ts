@@ -33,6 +33,8 @@ export interface QuestionDecision {
   /** Who started the plan, shown in the headcount line. */
   organizerName: string;
   meal: MealKind | null;
+  /** Cuisine named in the message ("feeling chinese"), shown in the headcount line. */
+  cuisine?: string | null;
   /** 0 = today, 1 = tomorrow. */
   dayOffset?: 0 | 1;
   /** Null when the engine's question policy skips the cuisine question. */
@@ -259,6 +261,24 @@ export class BundleStore {
     return result.changes === 1;
   }
 
+  /**
+   * Rewrites a poll that has not gone out yet: new options, or null to drop it from the
+   * sequence. Returns false when the poll is unknown or already sent.
+   */
+  updatePoll(planId: string, pollId: string, options: PollOption[] | null): boolean {
+    const bundle = this.byPlan(planId);
+    const polls = bundle?.pendingPolls ?? [];
+    const index = polls.findIndex((p) => p.pollId === pollId);
+    if (!bundle || index < 0 || index < (bundle.pollIndex ?? 0)) return false;
+    const next = options
+      ? polls.map((p, i) => (i === index ? { ...p, options } : p))
+      : polls.filter((_, i) => i !== index);
+    this.sqlite
+      .prepare('UPDATE p2_bundles SET pending_poll = ? WHERE plan_id = ?')
+      .run(next.length ? JSON.stringify(next) : null, planId);
+    return true;
+  }
+
   registerPoll(pollId: string, planId: string): void {
     this.sqlite
       .prepare('INSERT OR REPLACE INTO p2_bundle_polls (poll_id, plan_id) VALUES (?, ?)')
@@ -286,12 +306,15 @@ export function clockTime(iso: IsoDateTime, timezone: string): string {
 export function headcountText(decision: QuestionDecision): string {
   const when =
     decision.dayOffset === 1 ? 'tomorrow' : decision.meal === 'dinner' ? 'tonight' : 'today';
-  const what = decision.meal ?? 'food';
+  const meal = decision.meal ?? 'food';
+  const what = decision.cuisine
+    ? `${decision.cuisine.charAt(0).toUpperCase()}${decision.cuisine.slice(1)} ${meal}`
+    : meal;
   const closes = clockTime(decision.headcount.closesAt, decision.headcount.timezone);
   if (decision.headcount.mode === 'opt_out') {
-    return `🫧 ${decision.organizerName}'s making a plan for ${what} ${when}. You're counted in, reply "out" if you can't make it. Locking it in at ${closes}.`;
+    return `🫧 ${decision.organizerName}'s on ${what} ${when}. You're counted in, reply "out" if you can't make it. Locking a spot at ${closes}.`;
   }
-  return `${decision.organizerName}'s making a plan for ${what} ${when}. Tap 👍 on this message if you're in.`;
+  return `🫧 ${decision.organizerName}'s on ${what} ${when}. Tap 👍 on this message if you're in. Locking a spot at ${closes}.`;
 }
 
 const key = (planId: string, part: string) => idempotencyKey(planId, 'bundle', part);

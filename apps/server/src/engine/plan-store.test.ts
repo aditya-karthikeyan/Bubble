@@ -55,6 +55,29 @@ describe('PlanStore', () => {
     expect(await rt.bus.replay(plan.id)).toEqual([]);
   });
 
+  it("auditFor returns the plan's rows as kind, payload, createdAt in insertion order", async () => {
+    const plan = create();
+    const other = create();
+    await rt.plans.transition(plan.id, 'DETECTED', { reason: 'intent' });
+    const solverRun = {
+      feasible: 2,
+      infeasible: 1,
+      byReason: { allergen: 1 },
+      byMember: { user_ben: { allergen: 1 } },
+    };
+    rt.plans.audit(plan.id, 'solver_run', solverRun);
+    rt.plans.audit(other.id, 'solver_run', { feasible: 0 });
+    const rows = rt.plans.auditFor(plan.id);
+    expect(rows.map((r) => r.kind)).toEqual(['plan_created', 'transition', 'solver_run']);
+    expect(rows[2]).toEqual({
+      kind: 'solver_run',
+      payload: solverRun,
+      createdAt: expect.any(String),
+    });
+    expect(Object.keys(rows[0] ?? {}).sort()).toEqual(['createdAt', 'kind', 'payload']);
+    expect(rt.plans.auditFor(other.id).map((r) => r.kind)).toEqual(['plan_created', 'solver_run']);
+  });
+
   it('counts members in for the party-size guard', async () => {
     const plan = create();
     await rt.plans.transition(plan.id, 'DETECTED');

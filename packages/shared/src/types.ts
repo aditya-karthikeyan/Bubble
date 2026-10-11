@@ -52,6 +52,8 @@ export const Group = z.object({
   /** pending until every named member has confirmed with their own bubble. */
   status: GroupStatus.default('pending'),
   createdByUserId: z.string().nullable().default(null),
+  /** Short code friends use to join ("boys-4821"); the join link carries it. */
+  joinCode: z.string().nullish(),
   /** Center of the group's area, used for distance filters. */
   center: GeoPoint.nullable().default(null),
   timezone: z.string().default('America/New_York'),
@@ -193,6 +195,9 @@ export const Venue = z.object({
   neighborhood: z.string().nullable().default(null),
   /** The demo venue rings a teammate's phone. */
   isDemo: z.boolean().default(false),
+  /** Public rating out of 5 and how many reviews back it (Google). Null when unknown. */
+  rating: z.number().min(0).max(5).nullish(),
+  ratingCount: z.number().int().nonnegative().nullish(),
 });
 export type Venue = z.infer<typeof Venue>;
 
