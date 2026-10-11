@@ -64,7 +64,13 @@ describe('GET /watch/:secret', () => {
     expect(res.body).toContain(`/watch/${SECRET}/latest`);
     expect(res.body).toContain('<iframe');
     const latest = await app.fastify.inject({ url: `/watch/${SECRET}/latest` });
-    expect(latest.json()).toEqual({ ok: true, planId: null, state: null, pageUrl: null });
+    expect(latest.json()).toEqual({
+      ok: true,
+      planId: null,
+      state: null,
+      createdAt: null,
+      pageUrl: null,
+    });
   });
 
   it('latest points at the newest plan’s live page, and /go redirects there', async () => {

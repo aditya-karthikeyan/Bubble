@@ -43,19 +43,28 @@ function watchPageHtml(secret: string): string {
 <style>html,body{margin:0;height:100%;background:#0b1526;color:#e9f0fb;font:15px system-ui,sans-serif}
 iframe{border:0;width:100%;height:100%;display:block}
 #msg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:2rem}
-#msg.hidden{display:none}</style></head><body>
-<div id="msg">Waiting for a plan. Start one from a bubble; this page follows it.</div>
-<iframe id="live" title="Live plan" allow="autoplay"></iframe>
+#msg.hidden{display:none}
+.hidden{display:none !important}</style></head><body>
+<div id="msg"></div>
+<iframe id="live" title="Live plan" allow="autoplay" class="hidden"></iframe>
 <script>
 (function () {
-  var current = null, frame = document.getElementById('live'), msg = document.getElementById('msg');
+  // Blank until a plan starts after this page was opened (or one is mid-flight right now); an
+  // old booked plan never shows up on the big screen.
+  var openedAt = Date.now() - 60000, current = null;
+  var frame = document.getElementById('live'), msg = document.getElementById('msg');
+  var LIVE = { DETECTED: 1, GATHERING: 1, DELIBERATING: 1, DEADLOCK: 1, LOCKED: 1, BOOKING: 1, PAUSED: 1 };
   function tick() {
     fetch(${JSON.stringify(latest)}, { cache: 'no-store' })
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        if (j && j.pageUrl && j.pageUrl !== current) {
-          current = j.pageUrl; frame.src = current; msg.classList.add('hidden');
-        } else if (j && !j.pageUrl && !current) { msg.classList.remove('hidden'); }
+        if (!j || !j.pageUrl) return;
+        var fresh = j.createdAt && Date.parse(j.createdAt) >= openedAt;
+        var shouldShow = fresh || LIVE[j.state] === 1 || (current && j.pageUrl === current);
+        if (shouldShow && j.pageUrl !== current) {
+          current = j.pageUrl; frame.src = current;
+          frame.classList.remove('hidden'); msg.classList.add('hidden');
+        }
       })
       .catch(function () {});
   }
@@ -97,6 +106,7 @@ export function registerWatchRoute(app: FastifyInstance, options: WatchRouteOpti
       ok: true,
       planId: plan?.id ?? null,
       state: plan?.state ?? null,
+      createdAt: plan?.createdAt ?? null,
       pageUrl: pageUrlFor(plan),
     };
   });
