@@ -268,7 +268,6 @@ export class DbBubbleService implements BubbleService {
     }
   }
 
-  /** Find My first; without a live fix, the last location pin they sent in the last 6 hours. */
   /**
    * The booked dinner this person is going to within the pin's lifetime, by venue name, so a
    * pin sent before heading out gets a reply about holding the table.
@@ -291,6 +290,7 @@ export class DbBubbleService implements BubbleService {
     return next?.venue ?? null;
   }
 
+  /** Find My first; without a live fix, the last location pin they sent in the last 6 hours. */
   async readLocation(userId: string): Promise<CachedRead<LocationFix>> {
     const source = this.deps.locations;
     const user = source ? await this.crews.userById(userId) : null;
@@ -441,7 +441,7 @@ export class DbBubbleService implements BubbleService {
       await reply(
         (dinner
           ? `Got your location 📍 If you're running late to ${dinner}, I'll ask them to hold the table. ` +
-            'Your crew only ever sees "on the way". '
+            'Your crew never sees where you are. '
           : "Got your location 📍 I'll start plans near you for the next few hours. ") +
           'Send a new one anytime.' +
           (open ? `\n\n${question(open.step, open.fast)}` : ''),
@@ -1029,9 +1029,10 @@ export class DbBubbleService implements BubbleService {
     const cal = this.deps.calendarLink?.(user.id) ?? null;
     if (cal) extras.push(`Calendar (I only see busy or free, never what): ${cal}`);
     extras.push(
-      'Location: tap my name at the top of this chat → Share My Location. I start plans near you, ' +
+      'Location: tap my name at the top of this chat → Share My Location, or send a pin ' +
+        '(+ → Location). I start plans near you, ' +
         "and if you're running late I'll ask the restaurant to hold your table. " +
-        'Your crew only ever sees "on the way".',
+        'Your crew never sees where you are.',
     );
     await reply(
       [

@@ -156,7 +156,7 @@ describe('Doers', () => {
       expect(dmsTo('user_chloe')[0]).toContain(`\n${lateNudge('Alpha Pie')}`);
       expect(dmsTo('user_dev')[0]).toContain('Running late?');
       expect(lateNudge('Alpha Pie')).toMatch(/optional/i);
-      expect(lateNudge('Alpha Pie')).toContain('only ever sees "on the way"');
+      expect(lateNudge('Alpha Pie')).toContain('your crew never sees where you are');
     });
 
     it('does not ask for a location when the Watcher will not run (booking already started)', async () => {

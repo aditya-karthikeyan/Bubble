@@ -618,7 +618,6 @@ export interface WatchReport {
   }>;
 }
 
-/** Walk under 1.5 km (80 m/min), otherwise drive (400 m/min) plus 5 minutes to park. */
 /**
  * The one optional ask for a location, tied to what it gets them. A pin only lasts the
  * evening, which is a much smaller ask than sharing for good.
@@ -626,10 +625,11 @@ export interface WatchReport {
 export function lateNudge(venueName: string): string {
   return (
     `Running late? Send me a location pin before you head out and I'll ask ${venueName} to ` +
-    'hold the table. Totally optional; your crew only ever sees "on the way".'
+    'hold the table. Totally optional; your crew never sees where you are.'
   );
 }
 
+/** Walk under 1.5 km (80 m/min), otherwise drive (400 m/min) plus 5 minutes to park. */
 export function etaMinutes(meters: number): number {
   if (meters <= 1500) return Math.max(1, Math.round(meters / 80));
   return Math.round(meters / 400) + 5;
