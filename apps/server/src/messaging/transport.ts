@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   Spectrum,
+  app,
   attachment,
   edit,
   poll,
@@ -50,6 +51,12 @@ export interface SpectrumTransportOptions {
   projectSecret?: string;
   /** Terminal chats not named after a phone (chat-1, chat-2) speak as this phone. */
   terminalDefaultPhone?: string;
+  /**
+   * How links render on iMessage. "app" (default): a generic iMessage app card, the only form
+   * that shows a preview (page title and description) from the Photon shared line. "richlink":
+   * a bare URL bubble (no preview on the shared line, but no app needed to open it).
+   */
+  linkStyle?: 'app' | 'richlink';
   log?: (obj: Record<string, unknown>, msg: string) => void;
 }
 
@@ -198,7 +205,9 @@ export class SpectrumTransport implements Transport {
         if (terminal) {
           return { messageId: this.remember(await space.send(`${content.title}\n${content.url}`)) };
         }
-        return { messageId: this.remember(await space.send(richlink(content.url))) };
+        const link =
+          (this.options.linkStyle ?? 'app') === 'app' ? app(content.url) : richlink(content.url);
+        return { messageId: this.remember(await space.send(link)) };
       }
       case 'image': {
         if (terminal) {

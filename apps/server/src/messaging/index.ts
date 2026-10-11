@@ -59,6 +59,7 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
       projectId: config.SPECTRUM_PROJECT_ID,
       projectSecret: config.SPECTRUM_PROJECT_SECRET,
       terminalDefaultPhone: config.MESSAGING_TERMINAL_PHONE,
+      linkStyle: config.MESSAGING_LINK_STYLE,
       log: (obj, msg) => log.warn(obj, msg),
     });
   const photon =
