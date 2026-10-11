@@ -52,6 +52,7 @@ import { solve } from '../solver/rounds.js';
 import type { SolverContext, SolverMember } from '../solver/types.js';
 import { distanceM, walkMinutes } from '../venues/geo.js';
 import { dayOfWeek } from '../venues/hours.js';
+import { HACKATHON_CENTER } from '../venues/demo-venue.js';
 import type { VenueSource } from '../venues/places.js';
 import { MAX_DISTANCE_SLACK_MIN, analyzeDeadlock, pickAsks } from './deadlock.js';
 import { parseIntent } from './intent.js';
@@ -261,6 +262,7 @@ export class BubbleworksEngine implements PlanEngine {
         startMinutes: time.startMinutes,
         timeTie: time.tie,
         timeBumped: time.bumped,
+        freeCounts: time.freeCounts,
       },
       'question policy',
     );
@@ -1950,8 +1952,9 @@ export class BubbleworksEngine implements PlanEngine {
     return decision.leader ?? plurality;
   }
 
-  private groupCenter(groupId: string) {
-    return groupById(this.rt.db, groupId)?.center ?? null;
+  /** A crew declared over DM has no center yet: plan around the hackathon until pins say otherwise. */
+  private groupCenter(groupId: string): GeoPoint | null {
+    return groupById(this.rt.db, groupId)?.center ?? { ...HACKATHON_CENTER };
   }
 
   private pollSpec(planId: string, payload?: Record<string, unknown>): PlanPolls | null {
