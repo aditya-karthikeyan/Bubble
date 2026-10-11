@@ -146,9 +146,7 @@ async function main(): Promise<void> {
           50,
         ),
     )[0];
-  console.log(
-    `\nslowest step by p50: ${slow}. Real-line numbers come from the timing logs.`,
-  );
+  console.log(`\nslowest step by p50: ${slow}. Real-line numbers come from the timing logs.`);
 }
 
 main().catch((err: unknown) => {
