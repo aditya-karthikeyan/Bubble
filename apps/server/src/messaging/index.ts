@@ -19,6 +19,7 @@ import { BundleStore } from './bundle.js';
 import { ClaudeClassifier, type Classifier } from './classifier.js';
 import type { MessagingConfig } from './config.js';
 import { PlanIntake } from './intake.js';
+import { LiveSurfaces } from './surfaces.js';
 import { PhotonUsers } from './photon-users.js';
 import { signup, type SignupResult } from './signup.js';
 import { MessagingStore } from './store.js';
@@ -43,7 +44,7 @@ export interface Messaging {
 
 export interface CreateMessagingOptions {
   config: MessagingConfig;
-  runtime: Pick<Runtime, 'handle' | 'crews' | 'plans' | 'log'>;
+  runtime: Pick<Runtime, 'handle' | 'crews' | 'plans' | 'log' | 'bus' | 'venues'>;
   /** Test and sim override. */
   transport?: Transport;
 }
@@ -58,6 +59,7 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
       projectId: config.SPECTRUM_PROJECT_ID,
       projectSecret: config.SPECTRUM_PROJECT_SECRET,
       terminalDefaultPhone: config.MESSAGING_TERMINAL_PHONE,
+      linkStyle: config.MESSAGING_LINK_STYLE,
       log: (obj, msg) => log.warn(obj, msg),
     });
   const photon =
@@ -96,6 +98,17 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
     },
   });
 
+  // Live card edits and the booked ticket, driven by plan events on the bus.
+  const surfaces = new LiveSurfaces({
+    port,
+    bundles,
+    bus: runtime.bus,
+    plans: runtime.plans,
+    venues: () => runtime.venues(),
+    crews: runtime.crews,
+    log,
+  });
+
   let intake: PlanIntake | null = null;
   return {
     port,
@@ -114,7 +127,13 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
       return intake;
     },
     signup: (raw) => signup({ crews: runtime.crews, photon }, raw),
-    start: () => port.start(),
-    stop: () => port.stop(),
+    start: async () => {
+      await port.start();
+      surfaces.start();
+    },
+    stop: async () => {
+      surfaces.stop();
+      await port.stop();
+    },
   };
 }
