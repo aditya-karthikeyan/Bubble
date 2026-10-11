@@ -98,18 +98,64 @@ export interface TimeDecision {
   startMinutes: number;
   /** True when two windows tied on availability and the default broke the tie. */
   tie: boolean;
+  /** True when the requested or default time had already passed and was moved later. */
+  bumped: boolean;
   freeCounts: Record<number, number>;
 }
 
-/** Pick the window where the most members are free; the requested time wins when given. */
+/** Minimum lead time before a start, so nobody is booked for a time that has passed. */
+export const MIN_LEAD_MIN = 45;
+const LATE_WINDOWS = [20 * 60 + 30, 21 * 60, 21 * 60 + 30, 22 * 60];
+
+/** Local minutes since midnight for `now` on `date` in `timezone`, or null when `date` is not today. */
+export function minutesNowIfToday(date: string, timezone: string, now: Date): number | null {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(now);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  const today = `${get('year')}-${get('month')}-${get('day')}`;
+  if (today !== date) return null;
+  return Number(get('hour')) * 60 + Number(get('minute'));
+}
+
+/** Earliest acceptable start today: now + lead, rounded up to :00 or :30. */
+export function earliestStart(
+  date: string,
+  timezone: string,
+  now: Date,
+  leadMin = MIN_LEAD_MIN,
+): number {
+  const nowMin = minutesNowIfToday(date, timezone, now);
+  if (nowMin === null) return 0;
+  return Math.ceil((nowMin + leadMin) / 30) * 30;
+}
+
+/**
+ * Pick the window where the most members are free; the requested time wins when given. Nothing
+ * earlier than `earliestStart` is ever chosen: a passed request or default is bumped forward.
+ */
 export function decideStartTime(
   requested: number | null,
   busyByMember: Record<string, BusyInterval[]>,
   date: string,
   timezone: string,
+  now: Date = new Date(),
 ): TimeDecision {
-  if (requested !== null) return { startMinutes: requested, tie: false, freeCounts: {} };
-  const windows = SOLVER.time_windows_min;
+  const floor = earliestStart(date, timezone, now);
+  if (requested !== null) {
+    const startMinutes = Math.max(requested, floor);
+    return { startMinutes, tie: false, bumped: startMinutes !== requested, freeCounts: {} };
+  }
+  const windows = [...SOLVER.time_windows_min, ...LATE_WINDOWS].filter((w) => w >= floor);
+  if (windows.length === 0) {
+    return { startMinutes: floor, tie: false, bumped: true, freeCounts: {} };
+  }
   const freeCounts: Record<number, number> = {};
   for (const w of windows) {
     const start = zonedInstant(date, w, timezone);
@@ -124,7 +170,12 @@ export function decideStartTime(
   const best = Math.max(...Object.values(freeCounts));
   const winners = windows.filter((w) => freeCounts[w] === best);
   const pick = winners.includes(SOLVER.default_start_min) ? SOLVER.default_start_min : winners[0]!;
-  return { startMinutes: pick, tie: winners.length > 1, freeCounts };
+  return {
+    startMinutes: pick,
+    tie: winners.length > 1,
+    bumped: floor > SOLVER.default_start_min,
+    freeCounts,
+  };
 }
 
 /** Epoch ms for a local date and minutes-since-midnight in a timezone. */

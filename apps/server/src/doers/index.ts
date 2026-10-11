@@ -42,6 +42,8 @@ export const COST_BY_PRICE_LEVEL: Record<number, number> = { 1: 15, 2: 30, 3: 55
 export const WATCH_LEAD_MS = 45 * 60_000;
 export const WATCH_EVERY_MS = 60_000;
 export const LATE_AFTER_MIN = 15;
+/** Lateness beyond this is treated as bad data (stale fix, wrong start), never announced. */
+export const MAX_LATE_MIN = 120;
 const HERE_WITHIN_M = 150;
 
 export interface LateNotice {
@@ -239,7 +241,17 @@ export class Doers implements DoerPorts {
 
   private async watchStart(s: BookingSummary): Promise<void> {
     const startMs = Date.parse(s.startAt);
-    const first = Math.max(this.now().getTime(), startMs - WATCH_LEAD_MS);
+    const nowMs = this.now().getTime();
+    // A booking whose start already passed is bad data (e.g. a default 7 PM picked at 9 PM).
+    // Watching it would call everyone hours late, so the Watcher stays off.
+    if (!(startMs > nowMs)) {
+      this.log.warn(
+        { planId: s.planId, startAt: s.startAt },
+        'watcher not armed: booking start is in the past',
+      );
+      return;
+    }
+    const first = Math.max(nowMs, startMs - WATCH_LEAD_MS);
     this.d.timers.schedule({
       planId: s.planId,
       kind: 'custom',
@@ -271,6 +283,15 @@ export class Doers implements DoerPorts {
     if (!row || ['CLOSED', 'CANCELLED', 'FAILED'].includes(row.p.state)) return null;
     const nowMs = this.now().getTime();
     const startMs = Date.parse(row.b.startAt);
+    const bookedAfterStart = Date.parse(row.b.createdAt) >= startMs;
+    if (bookedAfterStart || nowMs > startMs + 30 * 60_000) {
+      this.log.warn(
+        { planId, bookedAfterStart, startAt: row.b.startAt },
+        'watcher stopped: booking start is not ahead of us',
+      );
+      await this.watchStop(planId);
+      return null;
+    }
     const venue = { lat: row.v.lat, lng: row.v.lng };
     const members = this.d.db
       .select({ userId: planMembers.userId, status: planMembers.status })
@@ -286,6 +307,8 @@ export class Doers implements DoerPorts {
       const user = await this.d.crews.userById(m.userId);
       const name = user?.displayName ?? 'Someone';
       const fix = (await this.d.bubbles.readLocation(m.userId)).value;
+      // The crew sees coarse status only. Minutes and distance are location-derived and stay
+      // with the person they describe.
       if (!fix) {
         lines.push(`${name}: no location`);
         report.members.push({ userId: m.userId, etaMin: null, minutesLate: null, here: false });
@@ -295,19 +318,30 @@ export class Doers implements DoerPorts {
       const here = meters <= HERE_WITHIN_M;
       const etaMin = here ? 0 : etaMinutes(meters);
       const minutesLate = Math.round((nowMs + etaMin * 60_000 - startMs) / 60_000);
-      lines.push(here ? `${name}: here` : `${name}: ~${etaMin} min away`);
+      const late = !here && minutesLate > LATE_AFTER_MIN;
+      lines.push(`${name}: ${here ? 'here' : late ? 'running late' : 'on the way'}`);
       report.members.push({ userId: m.userId, etaMin, minutesLate, here });
 
       const reported = this.reportedLate.get(planId) ?? new Set<string>();
-      if (!here && minutesLate > LATE_AFTER_MIN && !reported.has(m.userId)) {
+      if (late && minutesLate > MAX_LATE_MIN) {
+        // Hours late is a stale fix or a far-away phone, not a friend stuck in traffic.
+        this.log.warn({ planId, userId: m.userId, minutesLate }, 'lateness ignored: implausible');
+      } else if (late && !reported.has(m.userId)) {
         reported.add(m.userId);
         this.reportedLate.set(planId, reported);
         this.log.info({ planId, userId: m.userId, minutesLate }, 'member running late');
         await this.d.messaging.sendGroupText({
           chatId: row.p.chatId,
-          text: `${name} is about ${minutesLate} min behind. Asking ${row.v.name} to hold the table.`,
-          idempotencyKey: idempotencyKey(planId, 'watcher_late', m.userId),
+          text: `Someone's running a bit late. I'll ask ${row.v.name} to hold the table.`,
+          idempotencyKey: idempotencyKey(planId, 'watcher_late_group'),
         });
+        if (user) {
+          await this.dm(
+            user,
+            `Looks like you're about ${etaMin} min out. I'm asking ${row.v.name} to hold the table for you.`,
+            idempotencyKey(planId, 'watcher_late_dm', m.userId),
+          );
+        }
         await this.d.onLate?.({
           planId,
           bookingId,

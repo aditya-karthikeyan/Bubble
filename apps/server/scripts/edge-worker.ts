@@ -44,6 +44,7 @@ async function main(): Promise<void> {
   // The call takes longer than the kill window so a BOOKING kill lands mid-call.
   const caller = new FakeCaller((r) => ref.e!.handleCallResult(r), { delayMs: 1_500 });
   const engine = new BubbleworksEngine({
+    now: () => new Date('2026-10-10T21:00:00.000Z'),
     runtime: rt,
     bubbles: new FakeBubbles(),
     messaging,

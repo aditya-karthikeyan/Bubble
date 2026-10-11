@@ -1,8 +1,9 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { idempotencyKey } from '@bubbleworks/shared';
-import { FakeCaller, FakeMessaging } from '@bubbleworks/shared/fakes';
+import { FakeMessaging } from '@bubbleworks/shared/fakes';
 import { createBubbles } from './bubbles/index.js';
+import { createCaller, loadCallerConfig } from './caller/index.js';
 import { seedDemoBubbles } from './bubbles/seed.js';
 import { registerDevRoutes } from './dev/routes.js';
 import { Doers } from './doers/index.js';
@@ -51,11 +52,12 @@ async function main(): Promise<void> {
     app.fastify.log.info({ ...seedDemoBubbles(runtime.db) }, 'demo bubbles seeded');
   }
 
-  // P1 engine. The caller is a fake until P4's ElevenLabs caller merges; doers are P3's.
+  // P1 engine. P4 caller: FakeCaller unless CALLER_MODE=real (ElevenLabs over Twilio). Doers are P3's.
   const engineRef: { engine: BubbleworksEngine | null } = { engine: null };
-  const caller = new FakeCaller((result) => engineRef.engine!.handleCallResult(result), {
-    delayMs: 3000,
-    log: (line) => app.fastify.log.info(line),
+  const caller = createCaller({
+    config: loadCallerConfig(),
+    runtime,
+    onResult: (result) => engineRef.engine!.handleCallResult(result),
   });
   // With the transport off (headless, no line lock) the engine talks to a silent fake so plans
   // started from the dev routes still run end to end for the live page.
@@ -83,7 +85,7 @@ async function main(): Promise<void> {
     onLate: async (n) => {
       const venue = runtime.venues().find((v) => v.id === n.venueId);
       if (!venue) return;
-      await caller.holdTable({
+      await caller.port.holdTable({
         planId: n.planId,
         bookingId: n.bookingId,
         venue,
@@ -100,7 +102,7 @@ async function main(): Promise<void> {
     runtime,
     bubbles: bubbles.service,
     messaging: enginePort,
-    caller,
+    caller: caller.port,
     doers,
     webPublicUrl: config.WEB_PUBLIC_URL ?? null,
     log: app.fastify.log,
@@ -109,6 +111,11 @@ async function main(): Promise<void> {
       : {}),
   });
   engineRef.engine = engine;
+  // POST /webhooks/elevenlabs, only in real mode with ELEVENLABS_WEBHOOK_SECRET set; polling covers the rest.
+  if (await caller.registerWebhook(app.fastify))
+    app.fastify.log.info('elevenlabs webhook at /webhooks/elevenlabs');
+  caller.start();
+  app.fastify.log.info({ mode: caller.mode }, 'caller ready');
   const intake = messaging.attachEngine(engine);
   engine.setIntake(intake);
 
@@ -182,6 +189,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string) => {
     app.fastify.log.info({ signal }, 'shutting down');
+    caller.stop();
     if (startMessaging) await messaging.stop().catch(() => undefined);
     await bubbles.close().catch(() => undefined);
     runtime.close();
