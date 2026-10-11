@@ -91,6 +91,7 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
     crews: runtime.crews,
     store: new MessagingStore(runtime.handle.sqlite),
     log,
+    signupUrl: process.env['WEB_PUBLIC_URL']?.replace(/\/$/, '') ?? null,
     debounceMs: config.MESSAGING_DEBOUNCE_MS,
     announcePollClose: config.MESSAGING_ANNOUNCE_POLL_CLOSE,
     // P1's PlanStore owns the per-member budget. Keys whose prefix is not a plan spend nothing.
