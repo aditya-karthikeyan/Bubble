@@ -136,10 +136,12 @@ describe('BubbleworksEngine', () => {
     expect(h.events.map((e) => e.type)).toContain('booking_confirmed');
     expect(h.doers.calls.map((c) => c.doer)).toEqual(['inviter', 'splitter', 'watcher']);
     expect(h.rt.timers.pending(planId)).toEqual([]);
-    const bookedText = h.messaging.sent.find(
-      (s) => s.kind === 'group_text' && 'input' in s && s.input.text.startsWith('Booked'),
-    );
-    expect(bookedText).toBeDefined();
+    // No separate "Booked" text from the engine: the ticket and the invite carry it.
+    expect(
+      h.messaging.sent.some(
+        (s) => s.kind === 'group_text' && 'input' in s && s.input.text.startsWith('Booked'),
+      ),
+    ).toBe(false);
   });
 
   it('closes the poll deadline with silent members represented or dropped', async () => {

@@ -638,7 +638,7 @@ export class BubbleworksEngine implements PlanEngine {
           partySize,
           reservationName: booking.reservationName,
         });
-        await this.groupText(plan, 'booked', `Booked: ${result.summary}`);
+        // No separate "Booked" text: the ticket and the invite (venue, time, calendar) carry it.
         await this.fireDoers(plan, {
           bookingId: booking.id,
           planId: plan.id,

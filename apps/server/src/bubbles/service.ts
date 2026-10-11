@@ -80,19 +80,17 @@ import {
 export const ONBOARDING_STEPS = [
   'diet_allergy',
   'budget',
-  'neighborhood',
   'favorites',
   'venmo',
 ] as const satisfies readonly ExtractHint[];
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
 const QUESTIONS: Record<OnboardingStep, string> = {
-  diet_allergy: "1/5 Anything you don't eat? Diet, allergies, halal, kosher, or just say none.",
-  budget: '2/5 Usual budget per person for dinner? Like $20 or $30.',
-  neighborhood: '3/5 What area are you usually in? Like Franklin St or Southpoint.',
-  favorites: '4/5 Two favorite spots around here?',
+  diet_allergy: "1/4 Anything you don't eat? Diet, allergies, halal, kosher, or just say none.",
+  budget: '2/4 Usual budget per person for dinner? Like $20 or $30.',
+  favorites: '3/4 Two favorite spots around here?',
   venmo:
-    '5/5 How should friends pay you back? Send your Venmo @, Cash App $, Zelle phone or ' +
+    '4/4 How should friends pay you back? Send your Venmo @, Cash App $, Zelle phone or ' +
     'email, or PayPal. Or say skip.',
 };
 
@@ -104,7 +102,6 @@ const PIN_TTL_MS = 6 * 3_600_000;
 const STEP_FACTS: Record<OnboardingStep, readonly FactType[]> = {
   diet_allergy: ['diet', 'allergy', 'religious_diet', 'accessibility'],
   budget: ['budget_max'],
-  neighborhood: ['neighborhood'],
   favorites: ['favorite_venue', 'other'],
   venmo: ['venmo_handle', 'payment_handle'],
 };
@@ -112,7 +109,6 @@ const STEP_FACTS: Record<OnboardingStep, readonly FactType[]> = {
 const STEP_WORDS: Record<OnboardingStep, RegExp> = {
   diet_allergy: /^(diet|allerg|food|eat)/,
   budget: /^budget/,
-  neighborhood: /^(area|neighbou?rhood)/,
   favorites: /^(favou?rite|spot|place)/,
   venmo: /^(venmo|payment|pay|cash|zelle|paypal)/,
 };
@@ -785,7 +781,7 @@ export class DbBubbleService implements BubbleService {
     // First message to a new person: no links, no media (Apple deliverability rule).
     const intro = fast
       ? `Hey ${user?.displayName ?? 'there'}, I'm your bubble 🫧 Your crew is planning food ` +
-        "right now, so three quick questions and you're in."
+        "right now, so two quick questions and you're in."
       : `Hey ${user?.displayName ?? 'there'}, I'm your bubble 🫧 I plan food with your crew ` +
         "so the group chat doesn't have to. Five quick questions, about a minute.";
     await reply(`${intro}\n\n${question(first, fast)}`);
@@ -1008,7 +1004,7 @@ export class DbBubbleService implements BubbleService {
     userId: string,
     extracted: ExtractedFact[],
     step: ExtractHint,
-    rawText: string,
+    _rawText: string,
   ): Promise<Fact[]> {
     const out: Fact[] = [];
     const source = step === 'chat' ? 'chat' : 'onboarding';
@@ -1034,21 +1030,6 @@ export class DbBubbleService implements BubbleService {
           // Allergies wait for an explicit yes. Other onboarding answers are the person's own words.
           confirmed: type === 'allergy' ? false : source === 'onboarding',
           expiresAt: e.until_phrase ? resolveUntil(e.until_phrase, this.now()) : null,
-        }),
-      );
-    }
-    // A neighborhood answer the extractor could not read is still the person's own words.
-    if (step === 'neighborhood' && !out.length && !isSkip(rawText) && rawText.trim()) {
-      out.push(
-        this.facts.record({
-          userId,
-          type: 'neighborhood',
-          value: rawText.trim().slice(0, 80),
-          hard: false,
-          confidence: 0.6,
-          source,
-          confirmed: true,
-          expiresAt: null,
         }),
       );
     }
@@ -1486,11 +1467,7 @@ export function isNo(text: string): boolean {
 }
 
 /** Late joiners answer only what changes tonight's decision. */
-const FAST_STEPS = [
-  'diet_allergy',
-  'budget',
-  'neighborhood',
-] as const satisfies readonly OnboardingStep[];
+const FAST_STEPS = ['diet_allergy', 'budget'] as const satisfies readonly OnboardingStep[];
 /** Plans a late joiner can still join (not yet locked). */
 const JOINABLE_STATES = ['DETECTED', 'GATHERING', 'DELIBERATING', 'DEADLOCK'] as const;
 
