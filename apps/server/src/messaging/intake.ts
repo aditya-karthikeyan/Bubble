@@ -63,6 +63,11 @@ export interface PlanIntakeOptions {
   bundleMode?: BundleMode;
   /** False while someone is still onboarding: "Chipotle and Cava" answers a question, so no typing. */
   isOnboarded?: (userId: string) => boolean;
+  /**
+   * True when the bubble owns this DM even while a plan is in flight ("I covered dinner", or
+   * the bill total it asked for), so it is handed over instead of read as a plan or a command.
+   */
+  claimsDm?: (userId: string, text: string) => boolean;
 }
 
 interface Marks {
@@ -201,6 +206,15 @@ export class PlanIntake {
     text: string;
     at: string;
   }): Promise<void> {
+    // The bubble's bill flow first: "never mind" there must not cancel the booked plan.
+    if (this.o.claimsDm?.(m.userId, m.text)) {
+      if (this.marks.get(m.userId)?.typingAt) {
+        void this.o.port.setTyping({ chatId: dmChatId(m.userId), typing: false });
+      }
+      await this.handOff(m);
+      return;
+    }
+
     const open = this.o.bundles.openForChat(m.chatId);
 
     // "wait", "resume", "veto", "cancel", "why this place?" always reach the engine.

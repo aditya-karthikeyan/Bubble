@@ -88,7 +88,7 @@ async function main(): Promise<void> {
     : new FakeMessaging({ print: false, log: (line) => app.fastify.log.debug(line) });
   if (!startMessaging) app.fastify.log.info('engine messaging: silent fake (transport off)');
 
-  // P3 doers: Inviter (.ics link), Splitter (Venmo, ledger), Watcher (ETAs, lateness), and the
+  // P3 doers: Inviter (.ics link), Splitter (silent at booking; the bubble splits after), Watcher (ETAs, lateness), and the
   // private summary for represented members. Lateness asks the caller to hold the table.
   const doers = new Doers({
     db: runtime.db,
@@ -149,6 +149,7 @@ async function main(): Promise<void> {
   app.fastify.log.info({ mode: caller.mode }, 'caller ready');
   const intake = messaging.attachEngine(engine, {
     isOnboarded: (userId) => bubbles.service.isOnboarded(userId),
+    claimsDm: (userId, text) => bubbles.service.claimsDm(userId, text),
   });
   engine.setIntake(intake);
 

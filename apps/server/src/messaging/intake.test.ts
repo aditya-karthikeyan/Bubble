@@ -100,6 +100,7 @@ async function setup(
   log: Logger = silentLogger,
   /** Gives the intake a crew directory, so it asks which crew. */
   directory?: FakeCrewDirectory,
+  claimsDm?: (userId: string, text: string) => boolean,
 ) {
   const transport = new FakeTransport('imessage');
   const sqlite = new Database(':memory:');
@@ -125,6 +126,7 @@ async function setup(
     audit,
     ...(isOnboarded ? { isOnboarded } : {}),
     ...(directory ? { crews: directory } : {}),
+    ...(claimsDm ? { claimsDm } : {}),
   });
   engine.intake = intake;
   port.setPendingAnswer((userId) => intake.pendingAnswer(userId));
@@ -497,6 +499,31 @@ describe('PlanIntake plan draft', () => {
     // The draft is gone: a later reply is not taken as its answer.
     await text(AVA.handle, 'the boys, indian', 'in_3');
     expect(engine.intents).toHaveLength(0);
+  });
+
+  it('hands the bubble\'s bill flow over during a plan: "never mind" is not a cancel', async () => {
+    const claims = (userId: string, t: string) =>
+      userId === BEN.id && /covered|never mind|^\$?\d/.test(t);
+    const { engine, text, privates } = await setup(
+      new StubClassifier(),
+      undefined,
+      silentLogger,
+      undefined,
+      claims,
+    );
+    await text(AVA.handle, 'thai dinner today?', 'in_1');
+    const intents = engine.intents.length;
+    await text(BEN.handle, 'I covered dinner, can you tell them to pay me', 'in_2');
+    await text(BEN.handle, 'never mind', 'in_3');
+    expect(privates.map((p) => p.text)).toEqual([
+      'I covered dinner, can you tell them to pay me',
+      'never mind',
+    ]);
+    expect(engine.commands).toHaveLength(0);
+    expect(engine.intents).toHaveLength(intents);
+    // Someone the bubble does not claim still cancels as before.
+    await text(CHLOE.handle, 'never mind', 'in_4');
+    expect(engine.commands.map((c) => [c.userId, c.command])).toEqual([[CHLOE.id, 'cancel']]);
   });
 
   it('lets the draft expire after 10 minutes', async () => {

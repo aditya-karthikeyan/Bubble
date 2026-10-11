@@ -6,6 +6,7 @@
  *   2. the one pending yes/no question (allergy check, crew invite, forget-me confirm)
  *   3. onboarding, five short questions, for anyone who has not finished it
  *   4. crew declarations ("my crew is Ava, Ben, +19195551234")
+ *   5. "I covered this one": the bill total, then everyone's share with the payer's handle
  * Anything else returns handled = false so the engine can treat it as a command.
  *
  * Privacy: a bubble only ever DMs its own person about their own facts. Crew invites and
@@ -32,6 +33,8 @@ import {
 import type { Db } from '../db/client.js';
 import {
   asks,
+  audit,
+  bookings,
   groupMembers,
   bubbleInbox,
   bubbleState,
@@ -56,6 +59,15 @@ import {
   type ExtractHint,
   type FactExtractor,
 } from './extract.js';
+import {
+  isBillCancel,
+  isPaidBillMessage,
+  parseBillAmount,
+  payTarget,
+  preferredHandle,
+  shareOf,
+  usd,
+} from './bill.js';
 import { describeFact, FactStore, NO_SPLIT } from './facts.js';
 import {
   decodeHandle,
@@ -96,6 +108,10 @@ const QUESTIONS: Record<OnboardingStep, string> = {
 };
 
 const FORGET_ME_WINDOW_MS = 5 * 60_000;
+/** "I covered this one" splits a booking that started (or was made) within this window. */
+export const BILL_LOOKBACK_MS = 18 * 3_600_000;
+/** How long the bubble waits for the bill total or the payer's handle. */
+const BILL_PENDING_MS = 30 * 60_000;
 /** A location pin sent in iMessage stands in for Find My this long. */
 const PIN_TTL_MS = 6 * 3_600_000;
 
@@ -494,6 +510,11 @@ export class DbBubbleService implements BubbleService {
       return true;
     }
 
+    if (isPaidBillMessage(text) && !isNoSplit(text)) {
+      await this.startBillSplit(user, text, reply);
+      return true;
+    }
+
     const joinCode = /^join\s+([a-z0-9][a-z0-9-]*)\s*[.!]?$/i.exec(text)?.[1];
     if (joinCode) {
       await this.joinByCode(user, joinCode, reply);
@@ -801,6 +822,38 @@ export class DbBubbleService implements BubbleService {
         return true;
       }
 
+      case 'bill_amount':
+      case 'bill_handle': {
+        if (Date.parse(pending.expiresAt) <= this.now().getTime()) {
+          this.setPending(user.id, null);
+          return false;
+        }
+        if (isBillCancel(text)) {
+          this.setPending(user.id, null);
+          await reply('Okay, no split.');
+          return true;
+        }
+        if (pending.kind === 'bill_amount') {
+          const total = parseBillAmount(text, { loose: true });
+          if (total === null) {
+            await reply('How much was it all in? Just the number, like $84. Or say never mind.');
+            return true;
+          }
+          this.setPending(user.id, null);
+          await this.settleBill(user, pending.planId, total, reply);
+          return true;
+        }
+        const found = parsePaymentHandles(text, { bareContact: true });
+        if (!found.length) {
+          await reply('Send your Venmo @, Cash App $, or Zelle phone or email. Or say never mind.');
+          return true;
+        }
+        this.setPending(user.id, null);
+        this.savePayHandles(user.id, found, 'chat');
+        await this.settleBill(user, pending.planId, pending.total, reply);
+        return true;
+      }
+
       case 'crew_confirm': {
         if (!yes && !no) {
           await reply('Want in on the crew? Just yes or no.');
@@ -812,6 +865,236 @@ export class DbBubbleService implements BubbleService {
         return true;
       }
     }
+  }
+
+  // -- bill split ------------------------------------------------------------
+
+  /**
+   * True when this DM belongs to the bubble's bill flow even while a plan is in flight: a
+   * "I covered this one" message, or the reply to its amount or handle question. The plan intake
+   * hands these over instead of reading "never mind" as cancel or "I covered dinner" as a plan.
+   */
+  claimsDm(userId: string, text: string): boolean {
+    const state = this.state(userId);
+    if (!state.onboardingCompletedAt) return false;
+    const p = state.pending;
+    if (
+      (p?.kind === 'bill_amount' || p?.kind === 'bill_handle') &&
+      Date.parse(p.expiresAt) > this.now().getTime()
+    ) {
+      return true;
+    }
+    return isPaidBillMessage(text) && !isNoSplit(text);
+  }
+
+  /**
+   * The person's most recent booked meal: a plan they were in (or represented on) in BOOKED,
+   * DAY_OF, or CLOSED with a live booking that started, or was made, in the last 18 hours.
+   * Closest start time to now wins.
+   */
+  recentBookedPlan(userId: string): { planId: string; bookingId: string } | null {
+    const nowMs = this.now().getTime();
+    const since = nowMs - BILL_LOOKBACK_MS;
+    const rows = this.db
+      .select({
+        planId: plans.id,
+        bookingId: bookings.id,
+        startAt: bookings.startAt,
+        createdAt: bookings.createdAt,
+      })
+      .from(planMembers)
+      .innerJoin(plans, eq(plans.id, planMembers.planId))
+      .innerJoin(bookings, eq(bookings.planId, plans.id))
+      .where(
+        and(
+          eq(planMembers.userId, userId),
+          inArray(planMembers.status, ['in', 'represented']),
+          inArray(plans.state, ['BOOKED', 'DAY_OF', 'CLOSED']),
+          inArray(bookings.status, ['booked', 'modified']),
+        ),
+      )
+      .all()
+      .filter((r) => {
+        const start = Date.parse(r.startAt);
+        return (
+          start <= nowMs + BILL_LOOKBACK_MS && (start >= since || Date.parse(r.createdAt) >= since)
+        );
+      })
+      .sort(
+        (a, b) => Math.abs(Date.parse(a.startAt) - nowMs) - Math.abs(Date.parse(b.startAt) - nowMs),
+      );
+    const hit = rows[0];
+    return hit ? { planId: hit.planId, bookingId: hit.bookingId } : null;
+  }
+
+  /** "I covered this one": find the meal, then the total (asked for if missing), then split. */
+  private async startBillSplit(user: User, text: string, reply: Reply): Promise<void> {
+    const recent = this.recentBookedPlan(user.id);
+    if (!recent) {
+      await reply("I don't see a recent dinner to split. Which one?");
+      return;
+    }
+    const total = parseBillAmount(text);
+    if (total === null) {
+      this.setPending(user.id, {
+        kind: 'bill_amount',
+        planId: recent.planId,
+        expiresAt: this.billExpiry(),
+      });
+      await reply('Fasho 🫧 How much was it all in, tip included?');
+      return;
+    }
+    await this.settleBill(user, recent.planId, total, reply);
+  }
+
+  /**
+   * Splits `total` evenly over everyone in or represented on the plan (the payer included),
+   * each share rounded up to the cent. Everyone else gets their share and the payer's handle;
+   * anyone who opted out of splits gets nothing and the payer is told. Ledger: the payer paid
+   * the total, each person asked owes their share.
+   */
+  private async settleBill(
+    payer: User,
+    planId: string,
+    total: number,
+    reply: Reply,
+  ): Promise<void> {
+    const row = this.db
+      .select({
+        groupId: plans.groupId,
+        bookingId: bookings.id,
+        venue: venues.name,
+      })
+      .from(plans)
+      .innerJoin(bookings, eq(bookings.planId, plans.id))
+      .innerJoin(venues, eq(venues.id, bookings.venueId))
+      .where(and(eq(plans.id, planId), inArray(bookings.status, ['booked', 'modified'])))
+      .orderBy(desc(bookings.createdAt))
+      .get();
+    if (!row) {
+      await reply("I don't see a recent dinner to split. Which one?");
+      return;
+    }
+
+    const handle = preferredHandle(this.payHandles(payer.id));
+    if (!handle) {
+      this.setPending(payer.id, {
+        kind: 'bill_handle',
+        planId,
+        total,
+        expiresAt: this.billExpiry(),
+      });
+      await reply('How should they pay you? Venmo/Cash App/Zelle handle');
+      return;
+    }
+
+    const memberIds = this.db
+      .select({ userId: planMembers.userId })
+      .from(planMembers)
+      .where(
+        and(eq(planMembers.planId, planId), inArray(planMembers.status, ['in', 'represented'])),
+      )
+      .orderBy(planMembers.joinedAt, sql`rowid`) // join order
+      .all()
+      .map((m) => m.userId);
+    const people = new Set([payer.id, ...memberIds]);
+    const share = shareOf(total, people.size);
+    const others: User[] = [];
+    for (const id of people) {
+      if (id === payer.id) continue;
+      const u = await this.crews.userById(id);
+      if (u) others.push(u);
+    }
+    if (!others.length) {
+      await reply(`Looks like it was just you at ${row.venue}, so there's nothing to split.`);
+      return;
+    }
+    const skipped = others.filter((u) => this.optedOutOfSplits(u.id));
+    const asked = others.filter((u) => !this.optedOutOfSplits(u.id));
+
+    const { method, target } = payTarget(handle, share, row.venue);
+    const cents = Math.round(total * 100);
+    for (const u of asked) {
+      await this.deps.messaging.sendPrivateText({
+        userId: u.id,
+        text:
+          `${payer.displayName} covered ${row.venue}. Your share is ${usd(share)}. ` +
+          `Pay them on ${method}: ${target}`,
+        idempotencyKey: idempotencyKey(planId, 'bill_share', u.id, cents),
+      });
+    }
+
+    const at = this.now().toISOString();
+    this.db.transaction((tx) => {
+      tx.delete(ledger)
+        .where(and(eq(ledger.planId, planId), eq(ledger.kind, 'owes')))
+        .run();
+      tx.insert(ledger)
+        .values({
+          id: `ledger_paid_${row.bookingId}`,
+          groupId: row.groupId,
+          planId,
+          userId: payer.id,
+          kind: 'paid',
+          amount: total,
+          note: row.venue,
+          at,
+        })
+        .onConflictDoUpdate({ target: ledger.id, set: { userId: payer.id, amount: total, at } })
+        .run();
+      for (const u of asked) {
+        tx.insert(ledger)
+          .values({
+            id: `ledger_owes_${row.bookingId}_${u.id}`,
+            groupId: row.groupId,
+            planId,
+            userId: u.id,
+            kind: 'owes',
+            amount: share,
+            note: row.venue,
+            at,
+          })
+          .run();
+      }
+      tx.insert(audit)
+        .values({
+          planId,
+          at,
+          actor: 'bubble_bill',
+          action: 'bill_split',
+          detail: {
+            bookingId: row.bookingId,
+            payerId: payer.id,
+            total,
+            share,
+            method: handle.method,
+            askedUserIds: asked.map((u) => u.id),
+            skippedUserIds: skipped.map((u) => u.id),
+          },
+        })
+        .run();
+    });
+
+    const lines: string[] = [];
+    if (asked.length) {
+      lines.push(
+        `Told ${joinNames(asked.map((u) => u.displayName))} to send you ${usd(share)} each (${method}).`,
+      );
+    }
+    if (skipped.length) {
+      const names = joinNames(skipped.map((u) => u.displayName));
+      const each = skipped.length === 1 ? usd(share) : `${usd(share)} each`;
+      lines.push(`${names} turned off split requests, so settle up with them directly (${each}).`);
+    }
+    await reply(lines.join(' '));
+    this.log.info(
+      { planId, payerId: payer.id, asked: asked.length, skipped: skipped.length },
+      'bill split sent',
+    );
+  }
+
+  private billExpiry(): string {
+    return new Date(this.now().getTime() + BILL_PENDING_MS).toISOString();
   }
 
   // -- onboarding ------------------------------------------------------------
