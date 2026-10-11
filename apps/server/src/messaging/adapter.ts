@@ -95,7 +95,17 @@ type Handlers = {
   vote: Array<(v: PollVote) => Promise<void>>;
   reaction: Array<(r: Reaction) => Promise<void>>;
   member: Array<(c: MemberChange) => Promise<void>>;
+  location: Array<(l: InboundLocation) => Promise<void>>;
 };
+
+/** A one-time location pin someone sent their bubble (+ -> Location -> Share). */
+export interface InboundLocation {
+  userId: string;
+  messageId: string;
+  lat: number;
+  lng: number;
+  at: string;
+}
 
 interface FanOptions {
   chatId: string;
@@ -112,6 +122,7 @@ export class SpectrumMessaging implements MessagingPort {
     vote: [],
     reaction: [],
     member: [],
+    location: [],
   };
   private gate:
     | ((m: { userId: string; messageId: string; text: string; at: string }) => Promise<boolean>)
@@ -322,6 +333,11 @@ export class SpectrumMessaging implements MessagingPort {
     return add(this.rawText, handler);
   }
 
+  /** Location pins people send their bubble. Not part of MessagingPort (P3 stores them). */
+  onLocation(handler: (l: InboundLocation) => Promise<void>): Unsubscribe {
+    return add(this.handlers.location, handler);
+  }
+
   /** Crew membership changes come from P3's declaration flow, so this never fires. */
   onMemberChange(handler: (c: MemberChange) => Promise<void>): Unsubscribe {
     return add(this.handlers.member, handler);
@@ -344,6 +360,18 @@ export class SpectrumMessaging implements MessagingPort {
     }
 
     switch (event.kind) {
+      case 'location':
+        if (!this.handlers.location.length) {
+          this.o.log.warn({ userId: user.id }, 'location pin received but nobody handles it');
+        }
+        await this.emit(this.handlers.location, {
+          userId: user.id,
+          messageId: event.providerId,
+          lat: event.lat,
+          lng: event.lng,
+          at: event.at,
+        });
+        return;
       case 'text': {
         let flushNow = false;
         for (const handler of this.rawText) {

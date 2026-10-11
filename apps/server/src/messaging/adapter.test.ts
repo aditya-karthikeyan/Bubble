@@ -407,6 +407,21 @@ describe('inbound', () => {
     ]);
   });
 
+  it('hands location pins to onLocation with the member id', async () => {
+    const { messaging } = await setup();
+    const pins: Array<{ userId: string; lat: number; lng: number }> = [];
+    messaging.onLocation(async (l) => void pins.push({ userId: l.userId, lat: l.lat, lng: l.lng }));
+    await messaging.handleInbound({
+      kind: 'location',
+      providerId: 'loc1',
+      phone: AVA.handle,
+      lat: 35.9097,
+      lng: -79.0475,
+      at,
+    });
+    expect(pins).toEqual([{ userId: AVA.id, lat: 35.9097, lng: -79.0475 }]);
+  });
+
   it('drops duplicates and unregistered phones, and marks first-time senders onboarded', async () => {
     const { crews, messaging, inbox } = await setup();
     const dee = await crews.createUser({ displayName: 'Dee', handle: '+15550000009' });
