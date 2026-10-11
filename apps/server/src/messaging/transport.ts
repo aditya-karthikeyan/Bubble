@@ -143,8 +143,9 @@ export class SpectrumTransport implements Transport {
     if (!normalized) {
       // A content kind we do not read yet (a shared location, a contact card, a sticker). Logged
       // so the next unknown kind can be added; message text is never logged.
-      if (message.direction === 'inbound') {
-        const c = message.content as { type?: unknown; name?: unknown; mimeType?: unknown };
+      const c = message.content as { type?: unknown; name?: unknown; mimeType?: unknown };
+      // Read receipts and typing are expected noise.
+      if (message.direction === 'inbound' && c?.type !== 'read' && c?.type !== 'typing') {
         this.options.log?.(
           {
             type: typeof c?.type === 'string' ? c.type : typeof c,

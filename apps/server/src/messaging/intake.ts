@@ -222,11 +222,12 @@ export class PlanIntake {
 
     // A reply to "which crew?" carries the plan message that was waiting on it.
     const picked = this.pendingPicks.get(m.userId);
-    const text = picked && picked.chatId === m.chatId ? picked.text : m.text;
-    if (picked && picked.chatId === m.chatId) this.pendingPicks.delete(m.userId);
+    const resolvedPick = picked !== undefined && picked.chatId === m.chatId;
+    const text = resolvedPick ? picked.text : m.text;
+    if (resolvedPick) this.pendingPicks.delete(m.userId);
 
     const marks = this.marks.get(m.userId);
-    const isPlan = picked?.chatId === m.chatId ? true : await this.isPlanIntent(text);
+    const isPlan = resolvedPick ? true : await this.isPlanIntent(text);
     if (!isPlan) {
       if (marks?.typingAt)
         void this.o.port.setTyping({ chatId: dmChatId(m.userId), typing: false });
@@ -244,7 +245,8 @@ export class PlanIntake {
         'timing',
       );
     }
-    const chatId = await this.pickCrew(m, text);
+    // An answered "which crew?" already names the crew: never ask twice.
+    const chatId = resolvedPick ? m.chatId : await this.pickCrew(m, text);
     if (!chatId) return;
     this.inflight = marks ?? null;
     const result = await this.o.engine
