@@ -36,6 +36,8 @@
     "p1:edge": "pnpm --filter @bubbleworks/server edge",
     "p1:speed": "pnpm --filter @bubbleworks/server speed",
     "p3:phase4": "pnpm --filter @bubbleworks/server p3:phase4",
+    "demo:reset": "pnpm --filter @bubbleworks/server demo:reset",
+    "p3:smoke": "pnpm --filter @bubbleworks/server p3:smoke",
     "p4:agent": "pnpm --filter @bubbleworks/server p4:agent",
     "p4:number": "pnpm --filter @bubbleworks/server p4:number",
     "p4:testcall": "pnpm --filter @bubbleworks/server p4:testcall",
