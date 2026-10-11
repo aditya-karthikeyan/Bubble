@@ -10,7 +10,7 @@
  * The Splitter writes `paid` for the payer. getProfile().recentCompromiseCount counts
  * `compromised` rows from the last 30 days, which raises that member's concession cost next time.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import type { EventBus, LedgerKind, PlanEvent } from '@bubbleworks/shared';
 import type { Db } from '../db/client.js';
 import { asks, ledger, planMembers, plans, venues, votes } from '../db/schema.js';
@@ -35,7 +35,7 @@ export class LedgerWriter {
     });
   }
 
-  /** Writes the plan's outcome rows. Safe to call more than once. Returns what it wrote. */
+  /** Rewrites the plan's outcome rows from current attendance. Safe to call again. Returns them. */
   recordPlan(planId: string): LedgerRow[] {
     const plan = this.db.select().from(plans).where(eq(plans.id, planId)).get();
     if (!plan?.chosenVenueId) return [];
@@ -84,22 +84,27 @@ export class LedgerWriter {
     }
 
     const at = (this.options.now ?? (() => new Date()))().toISOString();
-    for (const r of rows) {
-      this.db
-        .insert(ledger)
-        .values({
-          id: `ledger_${r.kind}_${planId}_${r.userId}`,
-          groupId: plan.groupId,
-          planId,
-          userId: r.userId,
-          kind: r.kind,
-          amount: r.amount,
-          note: r.note,
-          at,
-        })
-        .onConflictDoNothing()
+    // Rewrite this plan's outcome rows from current attendance: someone who said no after the
+    // booking loses their rows, and nothing is counted twice. `paid` belongs to the Splitter.
+    this.db.transaction((tx) => {
+      tx.delete(ledger)
+        .where(and(eq(ledger.planId, planId), ne(ledger.kind, 'paid')))
         .run();
-    }
+      for (const r of rows) {
+        tx.insert(ledger)
+          .values({
+            id: `ledger_${r.kind}_${planId}_${r.userId}`,
+            groupId: plan.groupId,
+            planId,
+            userId: r.userId,
+            kind: r.kind,
+            amount: r.amount,
+            note: r.note,
+            at,
+          })
+          .run();
+      }
+    });
     (this.options.log ?? silentLogger).info(
       {
         planId,
