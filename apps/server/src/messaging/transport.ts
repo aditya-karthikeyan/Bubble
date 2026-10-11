@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   Spectrum,
+  attachment,
   edit,
   poll,
   reaction,
@@ -27,7 +28,8 @@ import { normalize, type RawInbound } from './normalize.js';
 export type OutContent =
   | { kind: 'text'; text: string; replyToMessageId?: string }
   | { kind: 'poll'; question: string; options: string[] }
-  | { kind: 'link'; url: string; title: string };
+  | { kind: 'link'; url: string; title: string }
+  | { kind: 'image'; data: Buffer; name: string; mimeType: string };
 
 export interface Transport {
   readonly provider: 'imessage' | 'terminal';
@@ -197,6 +199,18 @@ export class SpectrumTransport implements Transport {
           return { messageId: this.remember(await space.send(`${content.title}\n${content.url}`)) };
         }
         return { messageId: this.remember(await space.send(richlink(content.url))) };
+      }
+      case 'image': {
+        if (terminal) {
+          return { messageId: this.remember(await space.send(`[image: ${content.name}]`)) };
+        }
+        return {
+          messageId: this.remember(
+            await space.send(
+              attachment(content.data, { name: content.name, mimeType: content.mimeType }),
+            ),
+          ),
+        };
       }
     }
   }

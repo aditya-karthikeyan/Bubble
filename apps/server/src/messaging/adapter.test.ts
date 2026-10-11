@@ -145,6 +145,18 @@ describe('outbound', () => {
     expect(store.outbox('p:f')?.status).toBe('failed');
   });
 
+  it('keeps fanning out when one member send fails', async () => {
+    const { transport, messaging } = await setup({ retry: { attempts: 1, baseDelayMs: 0 } });
+    transport.failNextSends = 1;
+    const result = await messaging.sendGroupText({
+      chatId: CREW,
+      text: 'still reaches the rest',
+      idempotencyKey: 'plan_1:partial',
+    });
+    expect(result.messageId).toBe('grp:plan_1:partial');
+    expect(transport.sends()).toHaveLength(PERSONAS.length - 1);
+  });
+
   it('closes a poll by announcing the leading option once', async () => {
     const { transport, messaging } = await setup();
     await messaging.sendPoll({

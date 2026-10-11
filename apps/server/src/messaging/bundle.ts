@@ -30,7 +30,15 @@ export interface QuestionDecision {
   dayOffset?: 0 | 1;
   /** Null when the engine's question policy skips the cuisine question. */
   cuisinePoll: { pollId: string; question?: string; options: PollOption[] } | null;
-  headcount: { closesAt: IsoDateTime; timezone: string };
+  headcount: {
+    closesAt: IsoDateTime;
+    timezone: string;
+    /**
+     * opt_in (default): "Tap 👍 if you're in." opt_out: everyone counts as in unless they say
+     * "out", so nobody has to tap anything. The engine decides which one it counts.
+     */
+    mode?: 'opt_in' | 'opt_out';
+  };
   /** Live page, https://.../p/<token>. Null skips the link. */
   pageUrl: string | null;
 }
@@ -53,6 +61,8 @@ export interface BundleRecord {
   organizerName: string;
   meal: MealKind | null;
   closesAt: IsoDateTime;
+  /** When the headcount line went out; iMessage only allows edits for 15 minutes. */
+  createdAt?: IsoDateTime;
 }
 
 export class BundleStore {
@@ -105,7 +115,13 @@ export class BundleStore {
       organizerName: row['organizer_name']!,
       meal: (row['meal'] as MealKind | null) ?? null,
       closesAt: row['closes_at']!,
+      createdAt: row['created_at']!,
     };
+  }
+
+  /** The plan's bundle even after it stopped collecting answers (for the live card). */
+  byPlan(planId: string): BundleRecord | null {
+    return this.one('plan_id = ?', planId);
   }
 
   byHeadcountMessage(messageId: string): BundleRecord | null {
@@ -142,6 +158,9 @@ export function headcountText(decision: QuestionDecision): string {
     decision.dayOffset === 1 ? 'tomorrow' : decision.meal === 'dinner' ? 'tonight' : 'today';
   const what = decision.meal ?? 'something';
   const closes = clockTime(decision.headcount.closesAt, decision.headcount.timezone);
+  if (decision.headcount.mode === 'opt_out') {
+    return `🫧 ${decision.organizerName} is planning ${what} ${when}. You're counted in, reply "out" if you can't make it. Locking it in at ${closes}.`;
+  }
   return `🫧 ${decision.organizerName} is planning ${what} ${when}. Tap 👍 on this message if you're in. Voting closes ${closes}.`;
 }
 
