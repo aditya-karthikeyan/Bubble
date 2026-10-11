@@ -9,11 +9,19 @@ const Env = z.object({
   WEB_PUBLIC_URL: z.url().optional(),
   DATABASE_PATH: z.string().default('./data/bubbleworks.db'),
   DEMO_MODE: z.stringbool().default(false),
+  /**
+   * polls: headcount by tap, then sit-down/fast-food and cuisine polls. agent_first: one message
+   * to a bubble starts it, nobody taps anything (opt-out headcount), no polls, sit-down places
+   * within a drive, the bubbles deliberate, and the person hears back when it is booked.
+   */
+  FLOW: z.enum(['polls', 'agent_first']).default('polls'),
   /** With DEMO_MODE, plan start times as if it were this local time (HH:MM), e.g. 18:00. */
   DEMO_PLAN_CLOCK: z
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM, e.g. 18:00')
     .optional(),
+  /** Google Places API (New) key: live restaurants are searched when a plan starts. */
+  GOOGLE_PLACES_KEY: z.string().min(10).optional(),
   /** Upsert personas, the demo group, and venues at boot. Idempotent. */
   SEED_ON_BOOT: z.stringbool().default(true),
   /**

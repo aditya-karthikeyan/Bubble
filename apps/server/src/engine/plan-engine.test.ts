@@ -11,12 +11,15 @@ import { loadConfig } from '../config.js';
 import { ledger } from '../db/schema.js';
 import { createRuntime, type Runtime } from '../runtime.js';
 import { VENUES_FIXTURE } from '../test-helpers.js';
+import type { VenueSource } from '../venues/places.js';
 import { BubbleworksEngine } from './plan-engine.js';
 
 const CHAT = 'crew:group_demo';
 const DEADLINES = { poll_ms: 10_000, private_ask_ms: 5_000, veto_window_ms: 3_000, call_ms: 8_000 };
 
-function harness(opts: { bubbles?: FakeBubbles } = {}) {
+function harness(
+  opts: { bubbles?: FakeBubbles; flow?: 'polls' | 'agent_first'; venueSource?: VenueSource } = {},
+) {
   let clock = Date.parse('2026-10-10T21:00:00.000Z'); // 17:00 New York, a Saturday
   const now = () => new Date(clock);
   const rt: Runtime = createRuntime(loadConfig({ NODE_ENV: 'test', SEED_ON_BOOT: 'true' }), {
@@ -41,6 +44,8 @@ function harness(opts: { bubbles?: FakeBubbles } = {}) {
     doers,
     webPublicUrl: 'https://page.test',
     now,
+    ...(opts.flow ? { flow: opts.flow } : {}),
+    ...(opts.venueSource ? { venueSource: opts.venueSource } : {}),
   });
   ref.engine = engine;
   const advance = async (ms: number) => {
@@ -150,11 +155,12 @@ describe('BubbleworksEngine', () => {
     await h.engine.handleHeadcount({ planId: planId!, userId: 'user_ben', in: true, at: h.at() });
     await h.engine.handleHeadcount({ planId: planId!, userId: 'user_chloe', in: true, at: h.at() });
     await h.advance(DEADLINES.poll_ms + 1);
-    // Both pizza places are over a budget at the table, so Ava (who named pizza) is asked first.
+    // Both pizza places are $2 over Chloe's budget: a small stretch keeps the pizza, so Chloe is
+    // asked first (privately), before anyone is asked to change the cuisine.
     expect(h.rt.plans.get(planId!)?.state).toBe('DEADLOCK');
     await h.engine.handleAskAnswer({
-      askId: h.engine.pendingAskFor('user_ava')!.askId,
-      userId: 'user_ava',
+      askId: h.engine.pendingAskFor('user_chloe')!.askId,
+      userId: 'user_chloe',
       answer: 'yes',
       rawText: 'yes',
       at: h.at(),
@@ -777,6 +783,111 @@ describe('BubbleworksEngine', () => {
       expect(asks).toHaveLength(1);
       expect('input' in asks[0]! ? asks[0]!.input.userId : '').toBe('user_chloe');
       expect(h.rt.timers.pending(planId!).map((t) => t.kind)).toEqual(['ask_timeout']);
+    });
+  });
+
+  describe('agent-first flow', () => {
+    const start = (text: string, extra: Parameters<typeof harness>[0] = {}) => {
+      h.caller.dispose();
+      h.rt.close();
+      h = harness({ flow: 'agent_first', ...extra });
+      return () =>
+        h.engine.handleIntent({
+          chatId: CHAT,
+          userId: 'user_ava',
+          messageId: 'm1',
+          text,
+          at: h.at(),
+        });
+    };
+    const statuses = (planId: string) =>
+      Object.fromEntries(h.rt.plans.members(planId).map((m) => [m.userId, m.status]));
+    const privateTexts = () => h.messaging.sent.filter((s) => s.kind === 'private_text');
+
+    it('books a live place from one message: no polls, nobody taps, nobody is asked', async () => {
+      const live: VenueSource = {
+        search: async (q) => [
+          {
+            id: 'venue_gp_live1',
+            name: 'Lantern',
+            cuisine: q.cuisine ?? 'other',
+            style: 'sit_down',
+            dietTags: ['vegetarian', 'halal'],
+            accessibilityTags: [],
+            priceLevel: 2,
+            typicalCostUsd: 18,
+            hours: Array.from({ length: 7 }, () => [{ open: 660, close: 1320 }]),
+            phone: '+19195550199',
+            location: { lat: 35.9132, lng: -79.0558 },
+            address: null,
+            neighborhood: null,
+            isDemo: false,
+          },
+        ],
+      };
+      const intent = start('hey i want to do a dinner w my group and we r feeling italian', {
+        venueSource: live,
+      });
+      h.bubbles.setPresence('user_eli', 'sleep');
+      const { planId } = await intent();
+      expect(h.messaging.sent.filter((s) => s.kind === 'poll')).toHaveLength(0);
+      const head = h.messaging.sent.find((s) => s.kind === 'group_text');
+      const text = head && 'input' in head ? head.input.text : '';
+      expect(text).toContain('Italian dinner');
+      expect(text).toContain('counted in');
+      expect(h.rt.venues().some((v) => v.id === 'venue_gp_live1')).toBe(true);
+
+      // Nobody answers. At the deadline the awake members count as in; Eli is asleep.
+      await h.advance(DEADLINES.poll_ms + 1);
+      const plan = h.rt.plans.get(planId!)!;
+      expect(plan.state).toBe('LOCKED');
+      expect(plan.chosenVenueId).toBe('venue_gp_live1');
+      expect(privateTexts()).toHaveLength(0);
+      const st = statuses(planId!);
+      expect(st['user_ben']).toBe('in');
+      expect(st['user_chloe']).toBe('in');
+      expect(['represented', 'dropped']).toContain(st['user_eli']);
+
+      await h.advance(DEADLINES.veto_window_ms + 1);
+      await h.settle();
+      expect(h.rt.plans.get(planId!)?.state).toBe('BOOKED');
+    });
+
+    it('asks the one person to stretch before changing the cuisine', async () => {
+      // The only stored Indian place is $22 and Chloe's budget is $20.
+      const intent = start('dinner with the group tonight, feeling indian');
+      const { planId } = await intent();
+      await h.advance(DEADLINES.poll_ms + 1);
+      expect(h.rt.plans.get(planId!)?.state).toBe('DEADLOCK');
+      const asks = privateTexts();
+      expect(asks).toHaveLength(1);
+      expect('input' in asks[0]! ? asks[0]!.input.userId : '').toBe('user_chloe');
+      expect('input' in asks[0]! ? asks[0]!.input.text : '').not.toContain('won the vote');
+      await h.engine.handleAskAnswer({
+        askId: h.engine.pendingAskFor('user_chloe')!.askId,
+        userId: 'user_chloe',
+        answer: 'yes',
+        rawText: 'yes',
+        at: h.at(),
+      });
+      const plan = h.rt.plans.get(planId!)!;
+      expect(plan.state).toBe('LOCKED');
+      expect(h.rt.venues().find((v) => v.id === plan.chosenVenueId)?.cuisine).toBe('indian');
+    });
+
+    it('still honors "out"', async () => {
+      const intent = start('dinner with the group tonight, feeling indian');
+      const { planId } = await intent();
+      for (const u of ['user_ben', 'user_chloe'])
+        await h.engine.handleHeadcount({ planId: planId!, userId: u, in: false, at: h.at() });
+      await h.advance(DEADLINES.poll_ms + 1);
+      // Ava, Dev, and Eli all fit the Indian place, so no one is asked anything.
+      expect(h.rt.plans.get(planId!)?.state).toBe('LOCKED');
+      expect(privateTexts()).toHaveLength(0);
+      const st = statuses(planId!);
+      expect(st['user_ben']).toBe('out');
+      expect(st['user_chloe']).toBe('out');
+      expect(st['user_dev']).toBe('in');
     });
   });
 });

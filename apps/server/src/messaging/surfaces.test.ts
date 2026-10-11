@@ -188,7 +188,7 @@ describe('opt-out headcount', () => {
         pageUrl: null,
       }),
     ).toBe(
-      `🫧 Pranav's making a plan for dinner tonight. You're counted in, reply "out" if you can't make it. Locking it in at 7:05.`,
+      `🫧 Pranav's on dinner tonight. You're counted in, reply "out" if you can't make it. Locking a spot at 7:05.`,
     );
   });
 });

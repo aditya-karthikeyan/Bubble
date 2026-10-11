@@ -46,11 +46,13 @@ import { asks, bookings, events, ledger, votes } from '../db/schema.js';
 import { groupById } from '../db/seed.js';
 import { silentLogger, type Logger } from '../events/bus.js';
 import type { Runtime } from '../runtime.js';
+import { headcountText } from '../messaging/bundle.js';
 import { filterCandidates } from '../solver/filter.js';
 import { solve } from '../solver/rounds.js';
 import type { SolverContext, SolverMember } from '../solver/types.js';
 import { distanceM, walkMinutes } from '../venues/geo.js';
 import { dayOfWeek } from '../venues/hours.js';
+import type { VenueSource } from '../venues/places.js';
 import { MAX_DISTANCE_SLACK_MIN, analyzeDeadlock, pickAsks } from './deadlock.js';
 import { parseIntent } from './intent.js';
 import {
@@ -75,6 +77,9 @@ import { IllegalTransitionError, isTerminal } from './state-machine.js';
 import type { FiredTimer } from '../timers/service.js';
 
 /** Structurally identical to P2's QuestionDecision so PlanIntake.renderBundle accepts it. */
+/** Agent-first reach, in walking minutes (about 5 km): dinner is a drive, not a stroll. */
+const AGENT_FIRST_REACH_MIN = 60;
+
 export interface BundleRequest {
   planId: string;
   chatId: string;
@@ -84,7 +89,9 @@ export interface BundleRequest {
   /** Asked first when the feasible venues span sit-down and fast food. P2 sends polls in order. */
   stylePoll: { pollId: string; question?: string; options: PollOption[] } | null;
   cuisinePoll: { pollId: string; question?: string; options: PollOption[] } | null;
-  headcount: { closesAt: string; timezone: string };
+  headcount: { closesAt: string; timezone: string; mode?: 'opt_in' | 'opt_out' };
+  /** Cuisine named in the message, for the headcount line. */
+  cuisine?: string | null;
   pageUrl: string | null;
 }
 
@@ -114,6 +121,12 @@ export interface EngineDeps {
    * as if it were early evening. Deadlines, timers, and events keep the real clock.
    */
   planningNow?: () => Date;
+  /** See config FLOW. agent_first: no polls, opt-out headcount, sit-down within a drive. */
+  flow?: 'polls' | 'agent_first';
+  /** Live restaurants, searched when a plan starts. Absent: the stored venues. */
+  venueSource?: VenueSource | null;
+  /** Demo rehearsals: every booking call rings this number instead of the venue. */
+  callRedirectPhone?: string | null;
 }
 
 interface PollSpec {
@@ -223,6 +236,7 @@ export class BubbleworksEngine implements PlanEngine {
       },
     });
 
+    await this.refreshVenues(plan);
     // Preview with everyone in the crew so the question policy sees the whole table.
     const members = await this.solverMembers(
       plan,
@@ -258,12 +272,13 @@ export class BubbleworksEngine implements PlanEngine {
       });
     }
 
+    const agentFirst = this.agentFirst();
     const polls: PlanPolls = {
-      style: style.ask ? { pollId: newId('poll'), options: style.options } : null,
+      style: style.ask && !agentFirst ? { pollId: newId('poll'), options: style.options } : null,
       // With a style question, cuisine always follows it (unless named); its options are
       // provisional and get rebuilt for the people who are in once the style is decided.
       cuisine:
-        cuisine.ask || (style.ask && !intent.cuisine)
+        !agentFirst && (cuisine.ask || (style.ask && !intent.cuisine))
           ? {
               pollId: newId('poll'),
               options: cuisine.ask
@@ -287,7 +302,12 @@ export class BubbleworksEngine implements PlanEngine {
       cuisinePoll: polls.cuisine
         ? { pollId: polls.cuisine.pollId, options: polls.cuisine.options }
         : null,
-      headcount: { closesAt, timezone: this.tz },
+      headcount: {
+        closesAt,
+        timezone: this.tz,
+        ...(agentFirst ? { mode: 'opt_out' as const } : {}),
+      },
+      cuisine: intent.cuisine ?? null,
       pageUrl: this.pageUrl(plan),
     };
     if (this.deps.intake) await this.deps.intake.renderBundle(request);
@@ -1087,9 +1107,22 @@ export class BubbleworksEngine implements PlanEngine {
     for (const m of this.rt.plans.members(plan.id)) {
       if (m.status !== 'invited') continue;
       const presence = await this.deps.bubbles.getPresence(m.userId);
+      const user = await this.rt.crews.userById(m.userId);
+      // Opt-out headcount: silence is a yes unless the person is clearly unavailable.
+      if (this.agentFirst() && !['sleep', 'driving'].includes(presence)) {
+        this.rt.plans.upsertMember(plan.id, m.userId, 'in');
+        await this.publish(plan.id, {
+          type: 'bubble_joined',
+          bubble: {
+            userId: m.userId,
+            displayName: user?.displayName ?? m.userId,
+            status: 'fits',
+          },
+        });
+        continue;
+      }
       const hard = (await this.deps.bubbles.getHardLimits(m.userId)).filter((f) => f.confirmed);
       const canRepresent = ['focus', 'sleep', 'driving'].includes(presence) && hard.length > 0;
-      const user = await this.rt.crews.userById(m.userId);
       if (canRepresent) {
         this.rt.plans.upsertMember(plan.id, m.userId, 'represented', true);
         await this.publish(plan.id, {
@@ -1143,7 +1176,6 @@ export class BubbleworksEngine implements PlanEngine {
       ? this.minutesOf(plan.startAt)
       : (plan.intent.startMinutes ?? SOLVER.default_start_min);
     const ctx = this.ctx(plan, startMinutes);
-    if (await this.askCuisineSwitch(plan, members, ctx)) return;
     const result = solve({
       venues: this.rt.venues(),
       members,
@@ -1197,9 +1229,16 @@ export class BubbleworksEngine implements PlanEngine {
     }
 
     if (!result.winner) {
+      // 1. A small concession that keeps the cuisine beats changing the cuisine: ask that person.
+      if (ctx.cuisine && this.hasConcession(planId, plan, members, ctx)) {
+        await this.rt.plans.transition(planId, 'DEADLOCK', { reason: 'no venue fits everyone' });
+        await this.breakDeadlock(planId, members, ctx);
+        return;
+      }
+      // 2. Nothing of that cuisine can work: ask the people who chose it about the best other pick.
+      if (await this.askCuisineSwitch(plan, members, ctx)) return;
+      // 3. Concessions without the cuisine, then a time shift, then options.
       await this.rt.plans.transition(planId, 'DEADLOCK', { reason: 'no venue fits everyone' });
-      // The voted cuisine was already handled above (voters asked, or nobody to ask). Budget and
-      // distance concessions cannot buy a cuisine back, so the breaker looks past it.
       await this.breakDeadlock(planId, members, { ...ctx, cuisine: null });
       return;
     }
@@ -1281,11 +1320,13 @@ export class BubbleworksEngine implements PlanEngine {
       state: 'started',
       detail: `Calling ${venue.name}`,
     });
+    const dial = (v: Venue) =>
+      this.deps.callRedirectPhone ? { ...v, phone: this.deps.callRedirectPhone } : v;
     const handle = await this.deps.caller.book({
       planId,
       bookingId,
-      venue,
-      backupVenue: backup,
+      venue: dial(venue),
+      backupVenue: backup ? dial(backup) : backup,
       partySize: party.length,
       startAt: plan.startAt,
       reservationName,
@@ -1658,7 +1699,7 @@ export class BubbleworksEngine implements PlanEngine {
     const venues = this.rt.venues();
     if (venues.length === 0) return location;
     const nearest = Math.min(...venues.map((v) => walkMinutes(distanceM(location, v.location))));
-    if (nearest <= SOLVER.travel_limit_min + MAX_DISTANCE_SLACK_MIN) return location;
+    if (nearest <= this.travelLimit() + MAX_DISTANCE_SLACK_MIN) return location;
     this.log.info(
       { planId, userId, nearestWalkMin: nearest },
       'location out of reach of every venue, planning from the group area',
@@ -1672,9 +1713,71 @@ export class BubbleworksEngine implements PlanEngine {
       startMinutes,
       groupCenter: this.groupCenter(plan.groupId),
       meal: plan.intent.meal,
-      style: this.decidedStyle(plan),
+      // Agent-first plans are for places you book: sit-down unless the message says otherwise.
+      style:
+        this.decidedStyle(plan) ??
+        (this.agentFirst() && plan.intent.meal !== 'coffee' ? 'sit_down' : null),
       cuisine: this.decidedCuisine(plan),
+      travelLimitMin: this.travelLimit(),
     };
+  }
+
+  /** Could a budget or distance concession by one person make something feasible as is? */
+  private hasConcession(
+    planId: string,
+    plan: Plan,
+    members: SolverMember[],
+    ctx: SolverContext,
+  ): boolean {
+    const vetoed = this.vetoed.get(planId) ?? new Set<string>();
+    const analysis = analyzeDeadlock(
+      this.rt.venues().filter((v) => !vetoed.has(v.id)),
+      members,
+      ctx,
+      { minStartMinutes: earliestStart(plan.intent.date, this.tz, this.planNow()) },
+    );
+    return pickAsks(analysis).length > 0;
+  }
+
+  /** Live restaurants for this plan: the crew's area, within reach, the named cuisine if any. */
+  private async refreshVenues(plan: Plan): Promise<void> {
+    const source = this.deps.venueSource;
+    const center = this.groupCenter(plan.groupId);
+    if (!source || !center) return;
+    const t0 = Date.now();
+    const cuisine = plan.intent.cuisine ?? null;
+    try {
+      const found = await source.search({
+        center,
+        radiusM: this.travelLimit() * 80,
+        cuisine,
+        meal: plan.intent.meal,
+      });
+      const added = this.rt.addVenues(found);
+      this.log.info(
+        { planId: plan.id, cuisine, found: found.length, added, ms: Date.now() - t0 },
+        'live venues',
+      );
+      this.rt.plans.audit(plan.id, 'live_venues', {
+        cuisine,
+        found: found.length,
+        ms: Date.now() - t0,
+      });
+    } catch (err) {
+      this.log.warn(
+        { planId: plan.id, cuisine, err: (err as Error).message, ms: Date.now() - t0 },
+        'live venue search failed, using stored venues',
+      );
+    }
+  }
+
+  private agentFirst(): boolean {
+    return this.deps.flow === 'agent_first';
+  }
+
+  /** Walking minutes a member may be from a venue: a short walk, or a drive when agent-first. */
+  private travelLimit(): number {
+    return this.agentFirst() ? AGENT_FIRST_REACH_MIN : SOLVER.travel_limit_min;
   }
 
   /** Cuisine from the message, else the cuisine poll's leader, else no constraint. */
@@ -1745,12 +1848,15 @@ export class BubbleworksEngine implements PlanEngine {
       return false;
     }
 
-    await this.rt.plans.transition(plan.id, 'DEADLOCK', { reason: `no ${cuisine} in range` });
+    if (plan.state !== 'DEADLOCK') {
+      await this.rt.plans.transition(plan.id, 'DEADLOCK', { reason: `no ${cuisine} in range` });
+    }
     const at = this.now().toISOString();
     const expiresAt = new Date(
       this.now().getTime() + this.rt.timers.deadlines.private_ask_ms,
     ).toISOString();
-    const text = cuisineSwitchAsk(label, fallback.name);
+    const named = !!plan.intent.cuisine;
+    const text = cuisineSwitchAsk(label, fallback.name, named);
     for (const m of askable) {
       const askId = newId('ask');
       const key = idempotencyKey(plan.id, 'ask', askId);
@@ -1772,7 +1878,7 @@ export class BubbleworksEngine implements PlanEngine {
       await this.publish(plan.id, { type: 'private_ask_sent', askId });
       await this.deps.messaging.sendPrivateText({ userId: m.userId, text, idempotencyKey: key });
     }
-    const notice = cuisineSwitchNotice(label, fallback.name);
+    const notice = cuisineSwitchNotice(label, fallback.name, named);
     for (const m of members) {
       if (askable.some((a) => a.userId === m.userId)) continue;
       await this.deps.messaging.sendPrivateText({
@@ -2027,7 +2133,7 @@ export class BubbleworksEngine implements PlanEngine {
   private async renderPlainBundle(r: BundleRequest): Promise<void> {
     await this.deps.messaging.sendGroupText({
       chatId: r.chatId,
-      text: `${r.organizerName} wants ${r.meal ?? 'food'} ${r.dayOffset === 1 ? 'tomorrow' : 'today'}. 👍 if you're in.`,
+      text: headcountText(r),
       idempotencyKey: idempotencyKey(r.planId, 'headcount'),
     });
     if (r.stylePoll) {

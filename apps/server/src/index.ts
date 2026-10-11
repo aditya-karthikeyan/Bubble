@@ -4,6 +4,7 @@ import { idempotencyKey } from '@bubbleworks/shared';
 import { FakeMessaging } from '@bubbleworks/shared/fakes';
 import { createBubbles } from './bubbles/index.js';
 import { createCaller, loadCallerConfig } from './caller/index.js';
+import { GooglePlacesSource } from './venues/places.js';
 import { seedDemoBubbles } from './bubbles/seed.js';
 import { registerDevRoutes } from './dev/routes.js';
 import { Doers } from './doers/index.js';
@@ -112,6 +113,17 @@ async function main(): Promise<void> {
     caller: caller.port,
     doers,
     webPublicUrl: config.WEB_PUBLIC_URL ?? null,
+    flow: config.FLOW,
+    ...(config.GOOGLE_PLACES_KEY
+      ? {
+          venueSource: new GooglePlacesSource({
+            apiKey: config.GOOGLE_PLACES_KEY,
+            log: app.fastify.log,
+          }),
+        }
+      : {}),
+    // Rehearsals never ring a real restaurant: the demo phone plays every venue.
+    callRedirectPhone: config.DEMO_MODE ? (config.DEMO_VENUE_PHONE ?? null) : null,
     log: app.fastify.log,
     ...(config.DEMO_MODE && config.DEMO_PLAN_CLOCK
       ? { planningNow: demoPlanningClock(config.DEMO_PLAN_CLOCK) }
