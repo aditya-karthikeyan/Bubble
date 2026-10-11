@@ -5,6 +5,11 @@
  */
 :root {
   color-scheme: light;
+  /* Windows 7 style cursors (our own drawings), SVG first, PNG for browsers without SVG cursors. */
+  --cursor-arrow: url('/cursors/arrow.svg') 1 1, url('/cursors/arrow.png') 1 1, default;
+  --cursor-hand: url('/cursors/hand.svg') 11 2, url('/cursors/hand.png') 11 2, pointer;
+  --cursor-text: url('/cursors/ibeam.svg') 9 12, url('/cursors/ibeam.png') 9 12, text;
+  --cursor-busy: url('/cursors/busy.svg') 16 16, url('/cursors/busy.png') 16 16, wait;
   --font: 'Segoe UI', 'Open Sans', 'Frutiger', 'Myriad Pro', system-ui, sans-serif;
   --ink: #1e2b33;
   --ink-soft: #4a5a66;
@@ -52,6 +57,19 @@ a,
 button,
 input {
   -webkit-tap-highlight-color: transparent;
+}
+html {
+  cursor: var(--cursor-arrow);
+}
+a[href],
+button:not(:disabled),
+[role='button'],
+summary {
+  cursor: var(--cursor-hand);
+}
+input,
+textarea {
+  cursor: var(--cursor-text);
 }
 :focus-visible {
   outline: 2px solid #3d9be0;
@@ -426,7 +444,7 @@ h2 {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-  cursor: default;
+  cursor: var(--cursor-arrow);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -468,7 +486,7 @@ h2 {
     rgba(196, 224, 246, 0.75)
   );
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
-  cursor: default;
+  cursor: var(--cursor-arrow);
 }
 .cap:first-child {
   border-left: 1px solid rgba(16, 34, 58, 0.68);
@@ -485,7 +503,7 @@ h2 {
   opacity: 0.45;
 }
 button.cap {
-  cursor: pointer;
+  cursor: var(--cursor-hand);
 }
 button.cap:hover {
   background: linear-gradient(#fff, #e2f3ff 45%, #a9d8fb 50%, #cdeeff);
@@ -559,14 +577,14 @@ button.cap-close:hover {
   background: none;
   color: inherit;
   font: inherit;
-  cursor: pointer;
+  cursor: var(--cursor-hand);
 }
 .crumbs button:hover:not(:disabled) {
   border-color: #a8cbe8;
   background: linear-gradient(#f3f9fe, #dceefc);
 }
 .crumbs button:disabled {
-  cursor: default;
+  cursor: var(--cursor-arrow);
 }
 .crumbs .shown button {
   border-color: #8bb8df;
@@ -603,7 +621,7 @@ button.cap-close:hover {
   box-shadow:
     inset 0 -2px 4px rgba(140, 210, 255, 0.7),
     0 1px 3px rgba(0, 20, 50, 0.35);
-  cursor: pointer;
+  cursor: var(--cursor-hand);
 }
 .nav-buttons button::after {
   content: '';
@@ -636,7 +654,7 @@ button.cap-close:hover {
       transparent 66%
     ),
     radial-gradient(circle at 50% 88%, #e4ecf2, #a9b8c4 55%, #7e8e9b);
-  cursor: default;
+  cursor: var(--cursor-arrow);
 }
 .link-button {
   margin-top: 6px;
@@ -645,7 +663,7 @@ button.cap-close:hover {
   background: none;
   color: #0a62b8;
   font-size: 12.5px;
-  cursor: pointer;
+  cursor: var(--cursor-hand);
 }
 .link-button:hover {
   text-decoration: underline;
@@ -720,7 +738,7 @@ button.cap-close:hover {
   color: #fff;
   text-decoration: none;
   text-shadow: 0 1px 2px #00508f;
-  cursor: pointer;
+  cursor: var(--cursor-hand);
   background: linear-gradient(#7fe3f2 0%, #2fbbe0 46%, #0096c8 50%, #0084be 84%, #19addb 100%);
   box-shadow:
     inset 0 1px 1px #fff,
@@ -739,7 +757,7 @@ button.cap-close:hover {
 }
 .button:disabled {
   opacity: 0.6;
-  cursor: wait;
+  cursor: var(--cursor-busy);
 }
 .button > span {
   font-size: 18px;
@@ -854,7 +872,7 @@ input:focus {
   text-shadow:
     0 0 6px rgba(0, 0, 0, 0.7),
     0 1px 1px rgba(0, 0, 0, 0.6);
-  cursor: pointer;
+  cursor: var(--cursor-hand);
   background: linear-gradient(
     rgba(255, 255, 255, 0.26),
     rgba(255, 255, 255, 0.08) 48%,
@@ -935,7 +953,7 @@ input:focus {
   font: inherit;
   line-height: 1.25;
   text-shadow: inherit;
-  cursor: pointer;
+  cursor: var(--cursor-hand);
 }
 .clock:hover,
 .clock.open {
