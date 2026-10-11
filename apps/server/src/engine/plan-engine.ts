@@ -37,6 +37,7 @@ import {
   type PlanMember,
   type PollOption,
   type Venue,
+  type VenueStyle,
   type VoteInput,
 } from '@bubbleworks/shared';
 import { and, eq } from 'drizzle-orm';
@@ -54,6 +55,7 @@ import {
   cuisineLabel,
   decideCuisineQuestion,
   decideStartTime,
+  decideStyleQuestion,
   earliestStart,
   zonedInstant,
 } from './question-policy.js';
@@ -67,6 +69,8 @@ export interface BundleRequest {
   organizerName: string;
   meal: MealKind | null;
   dayOffset?: 0 | 1;
+  /** Asked first when the feasible venues span sit-down and fast food. P2 sends polls in order. */
+  stylePoll: { pollId: string; question?: string; options: PollOption[] } | null;
   cuisinePoll: { pollId: string; question?: string; options: PollOption[] } | null;
   headcount: { closesAt: string; timezone: string };
   pageUrl: string | null;
@@ -103,12 +107,18 @@ interface PollSpec {
   options: PollOption[];
 }
 
+/** The polls a plan asked: style first, then cuisine. Persisted in the poll_deadline payload. */
+interface PlanPolls {
+  style: PollSpec | null;
+  cuisine: PollSpec | null;
+}
+
 export class BubbleworksEngine implements PlanEngine {
   private readonly rt: Runtime;
   private readonly log: Logger;
   private readonly now: () => Date;
   private readonly tz: string;
-  private readonly polls = new Map<string, PollSpec>();
+  private readonly polls = new Map<string, PlanPolls>();
   private readonly closedPolls = new Set<string>();
   private readonly vetoed = new Map<string, Set<string>>();
   private readonly t0 = new Map<string, number>();
@@ -206,11 +216,14 @@ export class BubbleworksEngine implements PlanEngine {
     const time = decideStartTime(intent.startMinutes, busy, intent.date, this.tz, this.planNow());
     const ctx = this.ctx(plan, time.startMinutes);
     const preview = solve({ venues: this.rt.venues(), members, ctx });
+    const style = decideStyleQuestion(preview.feasible, intent.style ?? null);
     const cuisine = decideCuisineQuestion(preview.feasible, members, ctx, intent.cuisine);
     this.log.info(
       {
         planId: plan.id,
         feasible: preview.feasible.length,
+        askStyle: style.ask,
+        styleReason: style.reason,
         askCuisine: cuisine.ask,
         reason: cuisine.reason,
         startMinutes: time.startMinutes,
@@ -227,10 +240,11 @@ export class BubbleworksEngine implements PlanEngine {
       });
     }
 
-    const poll: PollSpec | null = cuisine.ask
-      ? { pollId: newId('poll'), options: cuisine.options }
-      : null;
-    if (poll) this.polls.set(plan.id, poll);
+    const polls: PlanPolls = {
+      style: style.ask ? { pollId: newId('poll'), options: style.options } : null,
+      cuisine: cuisine.ask ? { pollId: newId('poll'), options: cuisine.options } : null,
+    };
+    this.polls.set(plan.id, polls);
     const closesAt = new Date(
       this.now().getTime() + this.rt.timers.deadlines.poll_ms,
     ).toISOString();
@@ -241,7 +255,10 @@ export class BubbleworksEngine implements PlanEngine {
       meal: intent.meal,
       dayOffset:
         intent.date === parseIntent('', { now: this.now(), timezone: this.tz }).date ? 0 : 1,
-      cuisinePoll: poll ? { pollId: poll.pollId, options: poll.options } : null,
+      stylePoll: polls.style ? { pollId: polls.style.pollId, options: polls.style.options } : null,
+      cuisinePoll: polls.cuisine
+        ? { pollId: polls.cuisine.pollId, options: polls.cuisine.options }
+        : null,
       headcount: { closesAt, timezone: this.tz },
       pageUrl: this.pageUrl(plan),
     };
@@ -253,7 +270,12 @@ export class BubbleworksEngine implements PlanEngine {
     this.rt.timers.schedule({
       planId: plan.id,
       kind: 'poll_deadline',
-      payload: poll ? { pollId: poll.pollId, options: poll.options } : {},
+      payload: {
+        ...(polls.cuisine ? { pollId: polls.cuisine.pollId, options: polls.cuisine.options } : {}),
+        ...(polls.style
+          ? { stylePollId: polls.style.pollId, styleOptions: polls.style.options }
+          : {}),
+      },
     });
     return { planId: plan.id, created: true };
   }
@@ -321,8 +343,15 @@ export class BubbleworksEngine implements PlanEngine {
   async handleVote(input: VoteInput): Promise<void> {
     const plan = this.rt.plans.get(input.planId);
     if (!plan || plan.state !== 'GATHERING') return;
-    const spec = this.pollSpec(plan.id);
-    if (!spec || spec.pollId !== input.pollId) return;
+    const polls = this.pollSpec(plan.id);
+    const kind: 'style' | 'cuisine' | null =
+      polls?.style?.pollId === input.pollId
+        ? 'style'
+        : polls?.cuisine?.pollId === input.pollId
+          ? 'cuisine'
+          : null;
+    const spec = kind === 'style' ? polls?.style : kind === 'cuisine' ? polls?.cuisine : null;
+    if (!kind || !spec) return;
     const at = input.at;
     // Voting on where to eat is saying you are coming: an undecided member who votes is in.
     const member = this.rt.plans.members(plan.id).find((m) => m.userId === input.userId);
@@ -341,7 +370,7 @@ export class BubbleworksEngine implements PlanEngine {
             id: newId('vote'),
             planId: plan.id,
             pollId: input.pollId,
-            kind: 'cuisine',
+            kind,
             userId: input.userId,
             choice,
             at,
@@ -909,8 +938,9 @@ export class BubbleworksEngine implements PlanEngine {
   private async onPollDeadline(t: FiredTimer): Promise<void> {
     const plan = this.rt.plans.get(t.planId);
     if (!plan || plan.state !== 'GATHERING') return;
-    const spec = this.pollSpec(plan.id, t.payload);
-    if (spec && !this.closedPolls.has(spec.pollId)) {
+    const polls = this.pollSpec(plan.id, t.payload);
+    for (const spec of [polls?.style, polls?.cuisine]) {
+      if (!spec || this.closedPolls.has(spec.pollId)) continue;
       const { decision } = this.tally(plan.id, spec);
       await this.closePoll(plan, spec, decision.leader);
     }
@@ -1003,8 +1033,9 @@ export class BubbleworksEngine implements PlanEngine {
       await this.deliberate(planId);
       return;
     }
-    const spec = this.pollSpec(planId);
-    if (spec && !this.closedPolls.has(spec.pollId)) {
+    const polls = this.pollSpec(planId);
+    for (const spec of [polls?.style, polls?.cuisine]) {
+      if (!spec || this.closedPolls.has(spec.pollId)) continue;
       const { decision, remaining } = this.tally(planId, spec);
       if (!decision.decided && remaining > 0) return;
       await this.closePoll(plan, spec, decision.leader);
@@ -1517,7 +1548,7 @@ export class BubbleworksEngine implements PlanEngine {
     userIds: string[],
     represented: Set<string>,
   ): Promise<Array<SolverMember & { busy: Awaited<ReturnType<BubbleService['getFreeBusy']>> }>> {
-    const spec = this.pollSpec(plan.id);
+    const spec = this.pollSpec(plan.id)?.cuisine ?? null;
     const choices = new Map<string, string[]>();
     if (spec) {
       for (const row of this.rt.db
@@ -1560,27 +1591,48 @@ export class BubbleworksEngine implements PlanEngine {
       startMinutes,
       groupCenter: this.groupCenter(plan.groupId),
       meal: plan.intent.meal,
+      style: this.decidedStyle(plan),
     };
+  }
+
+  /** Style from the message, else the style poll's leader, else no constraint. */
+  private decidedStyle(plan: Plan): VenueStyle | null {
+    if (plan.intent.style) return plan.intent.style;
+    const spec = this.pollSpec(plan.id)?.style;
+    if (!spec) return null;
+    const { decision, counts } = this.tally(plan.id, spec);
+    const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    // Plurality with at least one vote and no tie; otherwise no style constraint.
+    const top = ranked[0];
+    const plurality = top && top[1] > 0 && (ranked[1]?.[1] ?? 0) < top[1] ? top[0] : null;
+    const leader = decision.leader ?? plurality;
+    return leader === 'sit_down' || leader === 'fast_food' ? leader : null;
   }
 
   private groupCenter(groupId: string) {
     return groupById(this.rt.db, groupId)?.center ?? null;
   }
 
-  private pollSpec(planId: string, payload?: Record<string, unknown>): PollSpec | null {
+  private pollSpec(planId: string, payload?: Record<string, unknown>): PlanPolls | null {
     const cached = this.polls.get(planId);
     if (cached) return cached;
-    const fromPayload =
-      payload && typeof payload['pollId'] === 'string' ? (payload as unknown as PollSpec) : null;
-    const fromTimer =
-      fromPayload ??
-      (this.rt.timers.pending(planId).find((t) => t.kind === 'poll_deadline')
-        ?.payload as unknown as PollSpec | undefined);
-    if (fromTimer && fromTimer.pollId) {
-      this.polls.set(planId, fromTimer);
-      return fromTimer;
-    }
-    return null;
+    const raw =
+      payload ??
+      (this.rt.timers.pending(planId).find((t) => t.kind === 'poll_deadline')?.payload as
+        Record<string, unknown> | undefined);
+    if (!raw) return null;
+    const cuisine =
+      typeof raw['pollId'] === 'string'
+        ? { pollId: raw['pollId'], options: (raw['options'] as PollOption[]) ?? [] }
+        : null;
+    const style =
+      typeof raw['stylePollId'] === 'string'
+        ? { pollId: raw['stylePollId'], options: (raw['styleOptions'] as PollOption[]) ?? [] }
+        : null;
+    if (!cuisine && !style) return null;
+    const polls = { style, cuisine };
+    this.polls.set(planId, polls);
+    return polls;
   }
 
   private tally(planId: string, spec: PollSpec) {
@@ -1667,6 +1719,16 @@ export class BubbleworksEngine implements PlanEngine {
       text: `${r.organizerName} wants ${r.meal ?? 'food'} ${r.dayOffset === 1 ? 'tomorrow' : 'today'}. 👍 if you're in.`,
       idempotencyKey: idempotencyKey(r.planId, 'headcount'),
     });
+    if (r.stylePoll) {
+      await this.deps.messaging.sendPoll({
+        chatId: r.chatId,
+        planId: r.planId,
+        pollId: r.stylePoll.pollId,
+        question: 'Sit-down or fast food?',
+        options: r.stylePoll.options,
+        idempotencyKey: idempotencyKey(r.planId, 'poll', r.stylePoll.pollId),
+      });
+    }
     if (r.cuisinePoll) {
       await this.deps.messaging.sendPoll({
         chatId: r.chatId,

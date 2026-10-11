@@ -20,6 +20,13 @@ import { createRuntime } from '../src/runtime.js';
 const scenario = process.argv.slice(2).find((a) => a !== '--') ?? 'basic';
 const CHAT = 'crew:group_demo';
 const DEADLINES = { poll_ms: 1_500, private_ask_ms: 800, veto_window_ms: 800, call_ms: 3_000 };
+function inUsersFor(scn: string): string[] {
+  return scn === 'absent'
+    ? ['user_ben', 'user_chloe']
+    : scn.startsWith('deadlock')
+      ? ['user_chloe']
+      : ['user_ben', 'user_chloe', 'user_dev'];
+}
 const t0 = Date.now();
 const stamp = () => `+${String(Date.now() - t0).padStart(5, ' ')}ms`;
 const say = (line: string) => console.log(`${stamp()}  ${line}`);
@@ -108,8 +115,25 @@ async function main(): Promise<void> {
     at: now(),
   });
   const planId = r.planId!;
-  const poll = messaging.sent.find((s) => s.kind === 'poll');
-  const pollInput = poll && 'input' in poll ? poll.input : null;
+  const sentPolls = messaging.sent.filter((s) => s.kind === 'poll');
+  const cuisinePollSent = sentPolls.find(
+    (s) => 'input' in s && !s.input.options.some((o) => o.key === 'sit_down'),
+  );
+  const stylePollSent = sentPolls.find(
+    (s) => 'input' in s && s.input.options.some((o) => o.key === 'sit_down'),
+  );
+  const pollInput = cuisinePollSent && 'input' in cuisinePollSent ? cuisinePollSent.input : null;
+  if (stylePollSent && 'input' in stylePollSent && scenario !== 'absent') {
+    for (const u of ['user_ava', ...inUsersFor(scenario)]) {
+      await engine.handleVote({
+        planId,
+        pollId: stylePollSent.input.pollId,
+        userId: u,
+        choices: ['sit_down'],
+        at: now(),
+      });
+    }
+  }
 
   const inUsers =
     scenario === 'absent'

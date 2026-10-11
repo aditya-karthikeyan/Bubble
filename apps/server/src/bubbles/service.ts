@@ -87,6 +87,8 @@ const QUESTIONS: Record<OnboardingStep, string> = {
 };
 
 const FORGET_ME_WINDOW_MS = 5 * 60_000;
+/** A location pin sent in iMessage stands in for Find My this long. */
+const PIN_TTL_MS = 6 * 3_600_000;
 
 export interface BubbleServiceDeps {
   db: Db;
@@ -232,12 +234,25 @@ export class DbBubbleService implements BubbleService {
     }
   }
 
+  /** Find My first; without a live fix, the last location pin they sent in the last 6 hours. */
   async readLocation(userId: string): Promise<CachedRead<LocationFix>> {
     const source = this.deps.locations;
-    if (!source) return { value: null, from: 'none', ageMs: null, ms: 0 };
-    const user = await this.crews.userById(userId);
-    if (!user) return { value: null, from: 'none', ageMs: null, ms: 0 };
-    return this.locationCache.read(userId, () => source.get(user.handle));
+    const user = source ? await this.crews.userById(userId) : null;
+    if (source && user) {
+      const live = await this.locationCache.read(userId, () => source.get(user.handle));
+      if (live.value) return live;
+    }
+    const st = this.state(userId);
+    const ageMs = st.pinAt ? this.now().getTime() - Date.parse(st.pinAt) : null;
+    if (st.pinLat !== null && st.pinLng !== null && ageMs !== null && ageMs <= PIN_TTL_MS) {
+      return {
+        value: { lat: st.pinLat, lng: st.pinLng, capturedAt: st.pinAt },
+        from: 'cache',
+        ageMs,
+        ms: 0,
+      };
+    }
+    return { value: null, from: 'none', ageMs: null, ms: 0 };
   }
 
   async readBusy(
@@ -355,6 +370,24 @@ export class DbBubbleService implements BubbleService {
     if (!user) return false;
     const text = m.text.trim();
     const reply = this.replier(user.id, m.messageId);
+
+    if (m.location) {
+      this.upsertState(user.id, {
+        pinLat: m.location.lat,
+        pinLng: m.location.lng,
+        pinAt: m.at,
+      });
+      this.log.info({ userId: user.id }, 'location pin saved');
+      // Mid-onboarding, repeat the open question so the pin doesn't stall it.
+      const raw = this.state(user.id).onboardingStep;
+      const open = raw && !isDone(raw) ? decodeStep(raw) : null;
+      await reply(
+        "Got your location 📍 I'll start plans near you for the next few hours. " +
+          'Send a new one anytime.' +
+          (open ? `\n\n${question(open.step, open.fast)}` : ''),
+      );
+      if (!text) return true;
+    }
 
     if (/^forget me\b/i.test(text)) {
       this.setPending(user.id, {
@@ -756,11 +789,7 @@ export class DbBubbleService implements BubbleService {
     const extras: string[] = [];
     const cal = this.deps.calendarLink?.(user.id) ?? null;
     if (cal) extras.push(`Calendar (I only see busy or free, never what): ${cal}`);
-    extras.push(
-      user.bubbleNumber
-        ? `Find My: People, then +, Share My Location, send to ${user.bubbleNumber}, Share Indefinitely.`
-        : 'Find My: share your location with this number from the Find My app.',
-    );
+    extras.push('Location: send me your location right here (+ → Location → Share).');
     await reply(
       [
         `All set ✨ ${summary}`.trim(),
@@ -1106,6 +1135,9 @@ export class DbBubbleService implements BubbleService {
         pending: null,
         presence: null,
         presenceUntil: null,
+        pinLat: null,
+        pinLng: null,
+        pinAt: null,
         updatedAt: this.now().toISOString(),
       }
     );

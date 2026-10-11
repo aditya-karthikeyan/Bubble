@@ -56,14 +56,25 @@ async function one(): Promise<Record<string, number>> {
     await engine.handleHeadcount({ planId: planId!, userId: u, in: true, at: now() });
   await engine.handleHeadcount({ planId: planId!, userId: 'user_eli', in: false, at: now() });
   const poll = rt.timers.pending(planId!).find((t) => t.kind === 'poll_deadline');
-  const spec = poll?.payload as { pollId?: string; options?: Array<{ key: string }> } | undefined;
-  if (spec?.pollId && spec.options?.length) {
+  const spec = poll?.payload as
+    | {
+        pollId?: string;
+        options?: Array<{ key: string }>;
+        stylePollId?: string;
+        styleOptions?: Array<{ key: string }>;
+      }
+    | undefined;
+  for (const [id, opts] of [
+    [spec?.stylePollId, spec?.styleOptions],
+    [spec?.pollId, spec?.options],
+  ] as const) {
+    if (!id || !opts?.length) continue;
     for (const u of ['user_ava', 'user_ben', 'user_chloe', 'user_dev'])
       await engine.handleVote({
         planId: planId!,
-        pollId: spec.pollId,
+        pollId: id,
         userId: u,
-        choices: [spec.options[0]!.key],
+        choices: [opts[0]!.key],
         at: now(),
       });
   }
