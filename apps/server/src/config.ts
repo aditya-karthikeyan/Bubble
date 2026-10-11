@@ -20,6 +20,11 @@ const Env = z.object({
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM, e.g. 18:00')
     .optional(),
+  /**
+   * Website base for the booked ticket the Mini App card opens (its /t/<token> page). Unset:
+   * the server's own ticket page. Set only once the website has deployed that page.
+   */
+  TICKET_PAGE_URL: z.url().optional(),
   /** Google Places API (New) key: live restaurants are searched when a plan starts. */
   GOOGLE_PLACES_KEY: z.string().min(10).optional(),
   /** Upsert personas, the demo group, and venues at boot. Idempotent. */

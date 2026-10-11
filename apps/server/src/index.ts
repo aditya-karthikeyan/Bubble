@@ -61,7 +61,7 @@ async function main(): Promise<void> {
     config: messagingConfig,
     runtime,
     // The booked card opens the ticket on the website when there is one (WEB_PUBLIC_URL).
-    links: { publicBaseUrl: publicBase, linkSecret, pageBaseUrl: config.WEB_PUBLIC_URL ?? null },
+    links: { publicBaseUrl: publicBase, linkSecret, pageBaseUrl: config.TICKET_PAGE_URL ?? null },
   });
   const startMessaging = messagingConfig.SPECTRUM_PROVIDER === 'imessage' || process.stdin.isTTY;
 
