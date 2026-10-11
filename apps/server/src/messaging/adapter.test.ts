@@ -92,6 +92,20 @@ describe('outbound', () => {
     expect(transport.sends()).toHaveLength(PERSONAS.length);
   });
 
+  it('lets the bubble text first to someone who signed up but never texted, in their DM only', async () => {
+    const { transport, crews, messaging } = await setup();
+    const dee = await crews.createUser({
+      displayName: 'Dee',
+      handle: '+15550000009',
+      bubbleNumber: '+16285550000',
+    });
+    await crews.addMember(DEMO_GROUP.id, dee.id);
+    await messaging.sendPrivateText({ userId: dee.id, text: 'hi', idempotencyKey: 'greet:dee' });
+    expect(transport.sends().map((s) => s.chatId)).toEqual(['any;-;+15550000009']);
+    await messaging.sendGroupText({ chatId: CREW, text: 'x', idempotencyKey: 'plan_1:x' });
+    expect(transport.sends().filter((s) => s.chatId === 'any;-;+15550000009')).toHaveLength(1);
+  });
+
   it('treats a repeated idempotency key as a no-op', async () => {
     const { transport, messaging } = await setup();
     await messaging.sendGroupText({ chatId: CREW, text: 'x', idempotencyKey: 'plan_1:x' });

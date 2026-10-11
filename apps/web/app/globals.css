@@ -1595,6 +1595,21 @@ input:focus {
   font-size: 14px;
   text-decoration: none;
 }
+.win-button.wide {
+  width: 100%;
+  margin-top: 10px;
+}
+/* How it works, in three lines above the signup fields. */
+.signup-form .steps {
+  margin: 0 0 6px;
+  padding: 10px 12px 10px 30px;
+  border: 1px solid #c8d8e6;
+  border-radius: 3px;
+  background: linear-gradient(#fbfdff, #eef5fb);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
 .win-button:hover {
   border-color: #3c7fb1;
   background: linear-gradient(#eaf6fd, #d9f0fc 50%, #bee6fd 50%, #a7d9f5);

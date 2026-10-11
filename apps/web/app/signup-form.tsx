@@ -13,14 +13,68 @@ interface SignupResponse {
   error?: string;
 }
 
+interface JoinResponse {
+  ok: boolean;
+  known?: boolean;
+  crewName?: string;
+  error?: string;
+}
+
 type State =
   | { kind: 'idle' }
   | { kind: 'sending' }
   | { kind: 'error'; message: string }
-  | { kind: 'done'; bubbleNumber: string | null; smsLink: string | null; crewName: string | null };
+  | { kind: 'done'; bubbleNumber: string | null; smsLink: string | null; crewName: string | null }
+  | { kind: 'joined'; crewName: string };
 
+/**
+ * The signup form. With a crew code (the join page) it also offers "Already have a bubble? Just
+ * your number": a known phone goes straight into the crew, an unknown one comes back here to the
+ * full form with the number filled in.
+ */
 export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName?: string } = {}) {
   const [state, setState] = useState<State>({ kind: 'idle' });
+  const [quick, setQuick] = useState(false);
+  const [phoneHint, setPhoneHint] = useState<string | null>(null);
+
+  async function quickJoin(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!crewCode) return;
+    const raw = String(new FormData(e.currentTarget).get('phone') ?? '');
+    const phone = toE164(raw);
+    if (!phone)
+      return setState({
+        kind: 'error',
+        message: 'That phone number looks off. Try 10 digits, like 704 555 1234.',
+      });
+    setState({ kind: 'sending' });
+    try {
+      const res = await fetch(`${SERVER_URL}/api/crews/${encodeURIComponent(crewCode)}/join`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      const body = (await res.json()) as JoinResponse;
+      if (!res.ok || !body.ok) {
+        return setState({ kind: 'error', message: 'That link or number did not work. Try again.' });
+      }
+      if (body.known) {
+        return setState({ kind: 'joined', crewName: body.crewName ?? crewName ?? 'the crew' });
+      }
+      // New number: the full form, with the phone they typed already in it.
+      setPhoneHint(raw);
+      setQuick(false);
+      setState({
+        kind: 'error',
+        message: "We don't have that number yet. Add your name and email to get your bubble.",
+      });
+    } catch {
+      setState({
+        kind: 'error',
+        message: "Couldn't reach Bubbleworks. Check your connection and try again.",
+      });
+    }
+  }
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -62,6 +116,18 @@ export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName
     }
   }
 
+  if (state.kind === 'joined') {
+    return (
+      <div className="signup-success" aria-live="polite">
+        <h2 className="instruction">You&apos;re in {state.crewName}</h2>
+        <p className="lede">
+          Your bubble is texting you now. Anyone in the crew can text it &ldquo;dinner
+          tonight?&rdquo; to start a plan.
+        </p>
+      </div>
+    );
+  }
+
   if (state.kind === 'done') {
     return (
       <div className="signup-success" aria-live="polite">
@@ -71,12 +137,16 @@ export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName
         {state.bubbleNumber ? (
           <>
             <p className="lede">
-              Text it to say hi. It will ask a few quick questions to get to know you.
+              Your bubble is texting you now. Answer its four quick questions so it can plan around
+              you.
             </p>
             <p className="number">{prettyPhone(state.bubbleNumber)}</p>
             {state.smsLink && (
               <>
-                <a className="button" href={state.smsLink}>
+                <p className="fine" style={{ textAlign: 'center' }}>
+                  If nothing arrives in a minute, text your bubble.
+                </p>
+                <a className="win-button wide" href={state.smsLink}>
                   Text your bubble
                 </a>
                 <p className="fine" style={{ textAlign: 'center' }}>
@@ -101,8 +171,51 @@ export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName
     );
   }
 
+  const error =
+    state.kind === 'error' ? (
+      <p className="error" role="alert">
+        {state.message}
+      </p>
+    ) : null;
+
+  if (crewCode && quick) {
+    return (
+      <form className="signup-form" onSubmit={quickJoin} noValidate>
+        <label htmlFor="quick-phone">Your iPhone number</label>
+        <input
+          id="quick-phone"
+          name="phone"
+          type="tel"
+          autoComplete="tel"
+          inputMode="tel"
+          placeholder="(704) 555-1234"
+          required
+        />
+        {error}
+        <button className="button" type="submit" disabled={state.kind === 'sending'}>
+          {state.kind === 'sending' ? 'Joining...' : `Join ${crewName ?? 'the crew'}`}
+        </button>
+        <button
+          className="win-button wide"
+          type="button"
+          onClick={() => {
+            setQuick(false);
+            setState({ kind: 'idle' });
+          }}
+        >
+          New here? Get your bubble
+        </button>
+      </form>
+    );
+  }
+
   return (
-    <form className="signup-form" onSubmit={submit}>
+    <form className="signup-form" onSubmit={submit} noValidate>
+      <ol className="steps">
+        <li>Sign up and get your own bubble number.</li>
+        <li>Your bubble texts you. It learns what you eat, spend, and like.</li>
+        <li>Tell it who your crew is. Then just text &ldquo;dinner tonight?&rdquo;</li>
+      </ol>
       <label htmlFor="name">Your name</label>
       <input
         id="name"
@@ -129,22 +242,32 @@ export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName
         autoComplete="tel"
         inputMode="tel"
         placeholder="(704) 555-1234"
+        defaultValue={phoneHint ?? undefined}
         required
       />
-      {state.kind === 'error' && (
-        <p className="error" role="alert">
-          {state.message}
-        </p>
-      )}
+      {error}
       <button className="button" type="submit" disabled={state.kind === 'sending'}>
         {state.kind === 'sending' ? 'Making your bubble...' : 'Bring my bubble to life'}{' '}
         <span aria-hidden="true">↗</span>
       </button>
+      {crewCode && (
+        <button
+          className="win-button wide"
+          type="button"
+          onClick={() => {
+            setQuick(true);
+            setState({ kind: 'idle' });
+          }}
+        >
+          Already have a bubble? Just your number
+        </button>
+      )}
       <div className="privacy-note">
         <span aria-hidden="true">♧</span>
         <p>
-          Your world stays yours. Your crew never sees your budget, diet, or location. Text
-          &ldquo;forget me&rdquo; to delete your details.
+          Bubbleworks works over iMessage. Your details stay with your bubble: nobody in your crew
+          sees your budget, diet, or location. Text &ldquo;forget me&rdquo; any time to delete
+          everything.
         </p>
       </div>
     </form>

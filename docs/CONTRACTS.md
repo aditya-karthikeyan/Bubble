@@ -59,7 +59,9 @@ port shapes:
    DMs go to `onPrivateMessage`. Votes arrive as per-voter state in `PollVote.choices`.
 4. The message budget (`PLAN_MESSAGE_BUDGET`, 8) is per member per plan
    (`PlanMember.messagesUsed`); `PlanStore.spendMessage(planId, userId)` enforces it.
-5. The adapter may only text people who have texted their bubble first (`User.onboardedAt`).
+5. Crew sends only reach people who have texted their bubble (`User.onboardedAt`). A private DM
+   also reaches someone who signed up on the website (`User.bubbleNumber`), so the bubble can
+   text first after signup (`DbBubbleService.greet`).
 
 ### CrewDirectory (P1)
 

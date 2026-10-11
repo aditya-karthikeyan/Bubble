@@ -46,7 +46,7 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
             </h1>
             <p>
               {name
-                ? `Get your bubble and you're in ${name}. Then anyone in the crew can text "dinner tonight?" and the bubbles plan it.`
+                ? `Get your bubble and you're in ${name}. Already have one? Your number is enough. Then anyone in the crew can text "dinner tonight?" and the bubbles plan it.`
                 : "That link doesn't match a crew anymore. Ask whoever made it for a fresh one, or get your own bubble below."}
             </p>
           </div>
