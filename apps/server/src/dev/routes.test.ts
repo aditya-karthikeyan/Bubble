@@ -78,6 +78,13 @@ describe('dev routes', () => {
       url: `/api/dev/plans/${body.planId}`,
       headers: h,
     });
+    const reset = await app.fastify.inject({ method: 'POST', url: '/api/dev/reset', headers: h });
+    expect(reset.statusCode).toBe(200);
+    expect(reset.json()).toMatchObject({ ok: true, plans: 1, ledgerRestored: 5 });
+    expect(rt.plans.get(body.planId)).toBeNull();
+    expect(await rt.bus.replayForToken(body.token)).toBeNull();
+    expect((await rt.crews.membersOf('group_demo')).length).toBe(5);
+    expect(rt.venues().length).toBeGreaterThan(20);
     const d = detail.json() as { events: Array<{ type: string }> };
     const types = new Set(d.events.map((e) => e.type));
     for (const t of [
