@@ -915,15 +915,113 @@ input:focus {
   align-items: center;
   gap: 6px;
 }
+.clock-wrap {
+  display: flex;
+  height: 100%;
+  align-items: center;
+}
 .clock {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   min-width: 56px;
+  height: 34px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font: inherit;
   line-height: 1.25;
+  text-shadow: inherit;
+  cursor: pointer;
+}
+.clock:hover,
+.clock.open {
+  border-color: rgba(0, 0, 0, 0.4);
+  background: linear-gradient(rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.08));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
 }
 .clock-date {
   font-size: 11px;
+}
+/* The Windows 7 clock and calendar flyout, holding the credits. */
+.clock-flyout {
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 8px);
+  width: min(300px, calc(100vw - 16px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  border-radius: 6px;
+  background: linear-gradient(#ffffff, #eef4fb 70%, #dde9f6);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.9),
+    0 8px 28px rgba(0, 20, 40, 0.45);
+  color: var(--ink);
+  text-shadow: none;
+  text-align: center;
+  animation: flyout-in 0.18s ease-out;
+}
+.flyout-date {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid #d6e1ec;
+  color: #0a62b8;
+  font-size: 13.5px;
+}
+.flyout-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18px 16px 16px;
+  min-height: 210px;
+}
+.flyout-orb {
+  width: 46px;
+  height: 46px;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(4, 60, 100, 0.6);
+  background: var(--orb);
+  box-shadow:
+    inset 0 -2px 4px rgba(170, 250, 255, 0.7),
+    0 2px 5px rgba(0, 40, 70, 0.35);
+}
+.flyout-label {
+  font-size: 12px;
+  color: #5b6b78;
+}
+.flyout-team {
+  margin: 6px 0 10px;
+  padding: 0;
+  list-style: none;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--instruction);
+}
+.flyout-event {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.flyout-event strong {
+  color: var(--ink);
+}
+.flyout-foot {
+  padding: 8px 14px;
+  border-top: 1px solid #d6e1ec;
+  background: linear-gradient(#f4f7fb, #e3eaf3);
+  border-radius: 0 0 5px 5px;
+  font-size: 12px;
+  font-weight: 300;
+  color: #4a5a66;
+}
+@keyframes flyout-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 .balloon {
   position: fixed;
@@ -1881,6 +1979,9 @@ input:focus {
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+  .clock-flyout {
+    animation: none;
   }
   *,
   *::before,
