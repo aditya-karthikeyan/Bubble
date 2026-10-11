@@ -197,26 +197,20 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size, seed = 0)
 
   const doers: Layout['doers'] = {};
   if (settled) {
-    // Independent destinations across the usable arena, never a surrounding ring.
+    // A recognizable, loose helper group around the plan; positions do not randomize.
+    const reach = booked ? s.venue * 1.7 + s.doer * 1.65 : consensusR + s.doer * 1.3;
+    const tilt = [-0.22, 0.15, -0.1, 0.18];
+    const spread = [1, 1.08, 0.96, 1.04];
     DOER_KINDS.forEach((kind, i) => {
-      const random = seededRandom(hashSeed(`doer:${kind}`, seed));
-      const bounds = {
-        left: s.doer + 12,
-        right: size.w - s.doer - 12,
-        top: area.top + s.doer,
-        bottom: Math.max(area.top + s.doer, area.bottom - s.doer),
+      const angle = -Math.PI / 3 + (i * Math.PI) / 2 + tilt[i]!;
+      const at = {
+        x: centre.x + Math.cos(angle) * reach * spread[i]!,
+        y: centre.y + Math.sin(angle) * reach * spread[i]! * 0.85,
       };
-      let at = randomPoint(bounds, random);
-      for (
-        let attempt = 0;
-        attempt < 20 && Math.hypot(at.x - centre.x, at.y - centre.y) < s.venue * 2.2;
-        attempt++
-      )
-        at = randomPoint(bounds, random);
       doers[kind] = {
         ...at,
         r: s.doer,
-        wander: complete ? 0 : s.doer * 1.6,
+        wander: complete ? 0 : s.doer * 0.12,
         opacity: 1,
         ...(complete && leaderId ? { absorb: { venueId: leaderId, order: i } } : {}),
       };

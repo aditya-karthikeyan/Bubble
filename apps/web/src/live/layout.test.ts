@@ -11,13 +11,13 @@ const PHONE: Size = { w: 390, h: 844 };
 const LAPTOP: Size = { w: 1440, h: 900 };
 
 describe('arena layout', () => {
-  it('randomizes every kind of bubble across runs and keeps targets stable within a run', () => {
+  it('randomizes people while keeping helper agents grouped consistently', () => {
     const vm = reduceAll(upTo('plan_locked'));
     const first = computeLayout(vm, 'locked', LAPTOP, 123);
     expect(computeLayout(vm, 'locked', LAPTOP, 123)).toEqual(first);
     const second = computeLayout(vm, 'locked', LAPTOP, 456);
     expect(second.bubbles).not.toEqual(first.bubbles);
-    expect(second.doers).not.toEqual(first.doers);
+    expect(second.doers).toEqual(first.doers);
     const candidates = reduceAll(upTo('round_complete'));
     expect(computeLayout(candidates, 'convergence', LAPTOP, 123).venues).not.toEqual(
       computeLayout(candidates, 'convergence', LAPTOP, 456).venues,
@@ -154,11 +154,12 @@ describe('arena layout', () => {
     );
   });
 
-  it('lets the doers float freely while booked, not in a fixed shape', () => {
+  it('keeps the doers in a compact group with only gentle drift', () => {
     const vm = reduceAll(BASIC);
     const l = computeLayout(vm, 'summary', PHONE);
     const ds = Object.values(l.doers);
-    expect(ds.every((d) => d.wander > d.r * 0.5)).toBe(true);
+    expect(ds.every((d) => d.wander > 0 && d.wander < d.r * 0.2)).toBe(true);
+    expect(Math.max(...ds.map((d) => d.x)) - Math.min(...ds.map((d) => d.x))).toBeLessThan(300);
     const dist = ds.map((d) =>
       Math.round(Math.hypot(d.x - l.venues['venue_demo']!.x, d.y - l.venues['venue_demo']!.y)),
     );

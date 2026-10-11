@@ -27,6 +27,7 @@ import {
   finaleFrame,
   randomPoint,
   seededRandom,
+  softenVelocity,
   type Drift,
   type Random,
 } from './motion';
@@ -311,8 +312,8 @@ function syncNode(
   n.wander = t.wander;
   n.rt = t.r;
   n.opt = t.opacity;
-  n.tx = t.x;
-  n.ty = t.y;
+  n.tx ??= spawn.x;
+  n.ty ??= spawn.y;
   if (t.absorb) {
     const into = `v:${t.absorb.venueId}`;
     if (n.absorbInto !== into) {
@@ -343,9 +344,9 @@ function collideRadius(n: Node): number {
  */
 function seek(): Force<Node, undefined> {
   let nodes: Node[] = [];
-  const force = (alpha: number) => {
-    const k = 0.0035 + 0.04 * alpha;
+  const force = () => {
     for (const n of nodes) {
+      const k = n.absorbInto ? 0.005 : 0.002;
       n.vx = (n.vx ?? 0) + (n.tx - n.x!) * k;
       n.vy = (n.vy ?? 0) + (n.ty - n.y!) * k;
     }
@@ -377,15 +378,23 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
 
   // One simulation for the page's lifetime; it idles warm so things keep floating.
   useEffect(() => {
-    const collide = forceCollide<Node>(collideRadius).strength(0.7).iterations(2);
+    const collide = forceCollide<Node>(collideRadius).strength(0.25).iterations(2);
+    let moving: Node[] = [];
+    const soften: Force<Node, undefined> = () => {
+      for (const node of moving) softenVelocity(node, !!node.absorbInto);
+    };
+    soften.initialize = (ns) => {
+      moving = ns;
+    };
     let previousTick = performance.now();
     let completeSince: number | null = null;
     const s = forceSimulation<Node>([])
       .alphaDecay(0.01)
       .alphaTarget(0.12)
-      .velocityDecay(0.3)
+      .velocityDecay(0.25)
       .force('collide', collide)
       .force('seek', seek())
+      .force('soften', soften)
       .on('tick', () => {
         const now = performance.now();
 
@@ -540,19 +549,16 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
     layoutRef.current = layout;
     scene.current = { phase, size, reduced };
     const next = new Map<string, Node>();
-    const spawn = () =>
-      randomPoint(
-        { left: 35, right: size.w - 35, top: 225, bottom: Math.max(225, size.h - 120) },
-        random.current,
-      );
+    const spawn = (t: Target) =>
+      randomPoint({ left: t.x - 8, right: t.x + 8, top: t.y - 8, bottom: t.y + 8 }, random.current);
     for (const [id, t] of Object.entries(layout.venues)) {
-      next.set(`v:${id}`, syncNode(nodes.current, `v:${id}`, 'venue', t, spawn(), random.current));
+      next.set(`v:${id}`, syncNode(nodes.current, `v:${id}`, 'venue', t, spawn(t), random.current));
     }
     for (const [id, t] of Object.entries(layout.bubbles)) {
-      next.set(id, syncNode(nodes.current, id, 'bubble', t, spawn(), random.current));
+      next.set(id, syncNode(nodes.current, id, 'bubble', t, spawn(t), random.current));
     }
     for (const [kind, t] of Object.entries(layout.doers)) {
-      const origin = layout.doerOrigin ?? { x: t.x, y: t.y };
+      const origin = spawn(t);
       next.set(
         `d:${kind}`,
         syncNode(nodes.current, `d:${kind}`, 'doer', t, origin, random.current),
@@ -581,7 +587,7 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
       s.on('tick')?.call(s);
     } else {
       s.nodes(list);
-      s.alpha(Math.max(s.alpha(), 0.5)).restart();
+      s.alpha(Math.max(s.alpha(), 0.15)).restart();
     }
   }, [layout, size, reduced, phase]);
 
