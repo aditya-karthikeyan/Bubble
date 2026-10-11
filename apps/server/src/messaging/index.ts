@@ -133,7 +133,7 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
       publicBaseUrl: process.env['SERVER_PUBLIC_URL'] || 'http://localhost:3001',
       linkSecret:
         process.env['GOOGLE_CLIENT_SECRET'] || process.env['SPECTRUM_PROJECT_SECRET'] || 'dev-only',
-      pageBaseUrl: process.env['WEB_PUBLIC_URL'] || null,
+      pageBaseUrl: process.env['TICKET_PAGE_URL'] || null,
     },
     log,
   });
