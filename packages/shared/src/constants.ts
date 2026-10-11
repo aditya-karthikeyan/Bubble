@@ -3,6 +3,8 @@
  * Deadlines are milliseconds. DEMO_MODE scales every deadline to DEMO_MODE_DEADLINE_MS.
  */
 
+import type { MealKind } from './types.js';
+
 export const DEMO_MODE_DEADLINE_MS = 60_000;
 
 export interface Deadlines {
@@ -97,6 +99,51 @@ export const SOLVER = {
   /** How long dinner is assumed to take when checking hours and free/busy. */
   meal_duration_min: 90,
 } as const;
+
+export interface MealTimes {
+  /** Candidate start windows, local minutes since midnight. */
+  windows: readonly number[];
+  /** Extra windows tried after the usual ones, when calendars or the clock push the meal later. */
+  late: readonly number[];
+  /** Start used when nobody named a time and calendars do not decide. */
+  default_start_min: number;
+}
+
+const halfHours = (from: number, to: number): number[] => {
+  const out: number[] = [];
+  for (let m = from; m <= to; m += 30) out.push(m);
+  return out;
+};
+
+/** Start windows and default per meal. Dinner (and drinks) keep SOLVER's windows and default. */
+export const MEAL_TIMES: Record<MealKind, MealTimes> = {
+  breakfast: { windows: halfHours(8 * 60, 10 * 60), late: [], default_start_min: 9 * 60 },
+  brunch: {
+    windows: halfHours(10 * 60, 12 * 60 + 30),
+    late: [],
+    default_start_min: 11 * 60,
+  },
+  lunch: {
+    windows: halfHours(11 * 60 + 30, 13 * 60 + 30),
+    late: [14 * 60, 14 * 60 + 30],
+    default_start_min: 12 * 60 + 30,
+  },
+  coffee: {
+    windows: [9, 10, 11, 12, 13, 14, 15, 16, 17].map((h) => h * 60),
+    late: [],
+    default_start_min: 15 * 60,
+  },
+  dinner: {
+    windows: SOLVER.time_windows_min,
+    late: [20 * 60 + 30, 21 * 60, 21 * 60 + 30, 22 * 60],
+    default_start_min: SOLVER.default_start_min,
+  },
+  drinks: {
+    windows: SOLVER.time_windows_min,
+    late: [20 * 60 + 30, 21 * 60, 21 * 60 + 30, 22 * 60],
+    default_start_min: SOLVER.default_start_min,
+  },
+};
 
 /** Venue search radius from the hackathon address. */
 export const VENUE_RADIUS_M = 1_500;

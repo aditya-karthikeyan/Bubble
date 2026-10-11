@@ -925,5 +925,16 @@ describe('BubbleworksEngine', () => {
       });
       expect(h.rt.plans.get(planId!)?.startAt).toBe('2026-10-10T23:00:00.000Z');
     });
+    it('plans lunch tomorrow at 12:30, not at the dinner hour', async () => {
+      const { planId } = await h.engine.handleIntent({
+        chatId: CHAT,
+        userId: 'user_ava',
+        messageId: 'm1',
+        text: 'lunch tomorrow?',
+        at: h.at(),
+      });
+      // 12:30 EDT on 2026-10-11.
+      expect(h.rt.plans.get(planId!)?.startAt).toBe('2026-10-11T16:30:00.000Z');
+    });
   });
 });

@@ -86,6 +86,55 @@ describe('start time', () => {
     const d = decideStartTime(null, { a: [], b: [] }, '2026-10-10', 'America/New_York', afternoon);
     expect(d).toMatchObject({ startMinutes: 19 * 60, tie: true });
   });
+  it('picks 12:30 for lunch when nobody is busy', () => {
+    const d = decideStartTime(
+      null,
+      { a: [], b: [] },
+      '2026-10-11',
+      'America/New_York',
+      afternoon,
+      'lunch',
+    );
+    expect(d).toMatchObject({ startMinutes: 12 * 60 + 30, bumped: false });
+    expect(Object.keys(d.freeCounts).map(Number)).toEqual([690, 720, 750, 780, 810, 840, 870]);
+  });
+  it('picks 9:00 for breakfast when nobody is busy', () => {
+    const d = decideStartTime(
+      null,
+      { a: [] },
+      '2026-10-11',
+      'America/New_York',
+      afternoon,
+      'breakfast',
+    );
+    expect(d).toMatchObject({ startMinutes: 9 * 60, bumped: false });
+  });
+  it('keeps dinner at 7 PM whether the meal is passed or not', () => {
+    const tz = 'America/New_York';
+    expect(decideStartTime(null, { a: [] }, '2026-10-11', tz, afternoon, 'dinner')).toMatchObject({
+      startMinutes: 19 * 60,
+    });
+    expect(decideStartTime(null, { a: [] }, '2026-10-11', tz, afternoon).startMinutes).toBe(
+      19 * 60,
+    );
+  });
+  it('moves lunch off a busy 12:30 to another midday window', () => {
+    const busy = {
+      start: new Date(zonedInstant('2026-10-11', 12 * 60, 'America/New_York')).toISOString(),
+      end: new Date(zonedInstant('2026-10-11', 13 * 60 + 30, 'America/New_York')).toISOString(),
+    };
+    const d = decideStartTime(
+      null,
+      { a: [busy] },
+      '2026-10-11',
+      'America/New_York',
+      afternoon,
+      'lunch',
+    );
+    expect(d.startMinutes).toBeGreaterThanOrEqual(11 * 60 + 30);
+    expect(d.startMinutes).toBeLessThanOrEqual(14 * 60 + 30);
+    expect(d.startMinutes).not.toBe(12 * 60 + 30);
+  });
   it('zonedInstant converts local minutes to the right instant', () => {
     // 19:00 EDT on 2026-10-10 is 23:00Z.
     expect(new Date(zonedInstant('2026-10-10', 19 * 60, 'America/New_York')).toISOString()).toBe(
