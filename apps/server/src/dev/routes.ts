@@ -8,6 +8,7 @@ import { timingSafeEqual } from 'node:crypto';
 import type { Runtime } from '../runtime.js';
 import { createDemoPlan, HAPPY_PATH, stepDemoPlan } from './demo-plan.js';
 import { demoReset } from './demo-reset.js';
+import { registerDevUserRoutes } from './users-route.js';
 
 export interface DevRouteOptions {
   secret: string;
@@ -100,4 +101,6 @@ export function registerDevRoutes(app: FastifyInstance, options: DevRouteOptions
       .map((p) => ({ id: p.id, state: p.state, token: p.pageToken })),
     pendingTimers: runtime.timers.pending().length,
   }));
+
+  registerDevUserRoutes(app, runtime);
 }
