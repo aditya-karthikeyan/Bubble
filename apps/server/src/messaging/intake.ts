@@ -15,7 +15,9 @@ import { type PlanEngine } from '@bubbleworks/shared';
 import type { Logger } from '../events/bus.js';
 import { dmChatId, type SpectrumMessaging } from './adapter.js';
 import {
+  maybeSendPoll,
   renderBundle,
+  type BundleMode,
   type BundleResult,
   type BundleStore,
   type QuestionDecision,
@@ -43,6 +45,8 @@ export interface PlanIntakeOptions {
   minConfidence?: number;
   /** Records pauses, resumes, cancels, and vetoes. */
   audit?: AuditLog;
+  /** staged (default): headcount first, poll once enough are in, link at deliberation. */
+  bundleMode?: BundleMode;
 }
 
 interface Marks {
@@ -78,7 +82,14 @@ export class PlanIntake {
   async renderBundle(decision: QuestionDecision): Promise<BundleResult> {
     const marks = this.planMarks.get(decision.planId) ?? this.inflight;
     const bundleStart = Date.now();
-    const result = await renderBundle(this.o.port, this.o.bundles, decision);
+    const result = await renderBundle(this.o.port, this.o.bundles, decision, {
+      mode: this.o.bundleMode ?? 'staged',
+      organizerUserId: marks?.userId ?? null,
+    });
+    // Opt-out headcount: everyone already counts as in, so the poll can go out right away.
+    if (decision.headcount.mode === 'opt_out') {
+      await maybeSendPoll(this.o.port, this.o.bundles, decision.planId, { force: true });
+    }
     if (marks) {
       this.planMarks.set(decision.planId, marks);
       void this.o.port.setTyping({ chatId: dmChatId(marks.userId), typing: false });
@@ -86,7 +97,7 @@ export class PlanIntake {
       this.o.log.info(
         {
           planId: decision.planId,
-          mark: 't_poll_posted',
+          mark: result.pollMs !== null ? 't_poll_posted' : 't_headcount_posted',
           ms: sinceReceipt(result.pollMs ?? result.ms),
           bundleDoneMs: sinceReceipt(result.ms),
           lagMs: marks.lagMs,
@@ -95,6 +106,16 @@ export class PlanIntake {
       );
     }
     return result;
+  }
+
+  /** A yes or no landed: count it, and send the poll once enough people are in. */
+  private async recordHeadcount(planId: string, userId: string, isIn: boolean): Promise<void> {
+    const count = this.o.bundles.markIn(planId, userId, isIn);
+    if (!isIn) return;
+    const pollMessageId = await maybeSendPoll(this.o.port, this.o.bundles, planId);
+    if (pollMessageId) {
+      this.o.log.info({ planId, mark: 't_poll_posted', inCount: count }, 'timing');
+    }
   }
 
   /** Engine signals the plan stopped collecting answers (decided, closed, cancelled). */
@@ -165,6 +186,7 @@ export class PlanIntake {
           in: stance === 'in',
           at: m.at,
         });
+        await this.recordHeadcount(open.planId, m.userId, stance === 'in');
         this.o.log.info(
           { planId: open.planId, userId: m.userId, stance, via: 'reply' },
           'headcount',
@@ -228,6 +250,7 @@ export class PlanIntake {
       in: stance === 'in',
       at: r.at,
     });
+    await this.recordHeadcount(bundle.planId, r.userId, stance === 'in');
     this.o.log.info(
       { planId: bundle.planId, userId: r.userId, stance, via: 'tapback' },
       'headcount',

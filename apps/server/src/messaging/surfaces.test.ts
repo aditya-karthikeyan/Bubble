@@ -40,11 +40,16 @@ function setup(options: { createdAgoMs?: number } = {}) {
   const edits: Array<{ chatId: string; messageId: string; text: string }> = [];
   const images: Array<{ chatId: string; name: string; idempotencyKey: string }> = [];
   const rendered: unknown[] = [];
+  const links: string[] = [];
   let handler: ((e: PlanEvent) => void | Promise<void>) | null = null;
   const savedAt = Date.now();
   const surfaces = new LiveSurfaces({
     port: {
       editMessage: async (input) => void edits.push(input),
+      sendRichLink: async (input) => {
+        links.push(input.url);
+        return { messageId: 'grp:link', deduplicated: false };
+      },
       sendImage: async (input) => {
         images.push({
           chatId: input.chatId,
@@ -72,7 +77,7 @@ function setup(options: { createdAgoMs?: number } = {}) {
   surfaces.start();
   const emit = async (event: Record<string, unknown>) =>
     handler?.({ planId: PLAN, at, ...event } as unknown as PlanEvent);
-  return { edits, images, rendered, emit };
+  return { edits, images, rendered, links, emit, bundles };
 }
 
 describe('LiveSurfaces', () => {
@@ -145,6 +150,15 @@ describe('LiveSurfaces', () => {
     expect(images).toHaveLength(1);
   });
 
+  it('sends the live page link once, when deliberation starts', async () => {
+    const { links, emit, bundles } = setup();
+    const b = bundles.byPlan(PLAN)!;
+    bundles.save({ ...b, pageUrl: 'https://bubbleworks.example/p/token' });
+    await emit({ type: 'plan_state_changed', from: 'GATHERING', to: 'DELIBERATING' });
+    await emit({ type: 'plan_state_changed', from: 'DEADLOCK', to: 'DELIBERATING' });
+    expect(links).toEqual(['https://bubbleworks.example/p/token']);
+  });
+
   it('ignores plans it never sent a bundle for', async () => {
     const { edits, emit } = setup();
     await emit({
@@ -174,7 +188,7 @@ describe('opt-out headcount', () => {
         pageUrl: null,
       }),
     ).toBe(
-      `🫧 Pranav is planning dinner tonight. You're counted in, reply "out" if you can't make it. Locking it in at 7:05.`,
+      `🫧 Pranav's making a plan for dinner tonight. You're counted in, reply "out" if you can't make it. Locking it in at 7:05.`,
     );
   });
 });
