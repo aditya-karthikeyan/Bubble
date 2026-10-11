@@ -109,7 +109,11 @@ describe('DbBubbleService', () => {
       const done = lastTo(zoe.id);
       expect(done).toMatch(/^All set/);
       expect(done).toContain('https://example.test/oauth/google/start?u=');
-      expect(done).toContain('send me your location right here (+ → Location → Share)');
+      expect(done).toContain(
+        'tap my name at the top of this chat → Share My Location, or send a pin (+ → Location)',
+      );
+      expect(done).toContain('Your crew never sees where you are.');
+      expect(done).toContain("if you're running late I'll ask the restaurant to hold your table");
       expect(done).toMatch(/new crew/);
 
       const profile = await bubbles.getProfile(zoe.id);

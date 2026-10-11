@@ -111,12 +111,19 @@ export class Doers implements DoerPorts {
     const people = await this.attending(s);
     const place = s.venue.address ?? s.venue.name;
     const maps = mapsLink(s.venue);
-    for (const u of people) {
+    // The Watcher can only hold the table for people it can find. Anyone it can't locate gets
+    // one optional line in this same invite (no extra message); nobody is ever asked again.
+    const watched = Date.parse(s.startAt) > this.now().getTime();
+    const located = watched
+      ? await Promise.all(people.map((u) => this.locatable(u.id)))
+      : people.map(() => true);
+    for (const [i, u] of people.entries()) {
       await this.dm(
         u,
         `✅ Booked: ${s.venue.name}, ${when}, table for ${people.length} under ${s.reservationName}.\n` +
           `📍 ${place} · ${maps}\n` +
-          `Add it to your calendar: ${url}`,
+          `Add it to your calendar: ${url}` +
+          (located[i] ? '' : `\n${lateNudge(s.venue.name)}`),
         `${s.idempotencyKey}:${u.id}`,
       );
     }
@@ -397,6 +404,15 @@ export class Doers implements DoerPorts {
     return at.getTime();
   }
 
+  /** Whether the Watcher could find this person right now (Find My or a recent pin). */
+  private async locatable(userId: string): Promise<boolean> {
+    try {
+      return (await this.d.bubbles.readLocation(userId)).value !== null;
+    } catch {
+      return false;
+    }
+  }
+
   private async attending(s: BookingSummary): Promise<User[]> {
     // The database is the source of truth: someone who said no after the summary was built
     // must not get an invite or a bill. Order follows the summary (join order).
@@ -429,6 +445,17 @@ export interface WatchReport {
     minutesLate: number | null;
     here: boolean;
   }>;
+}
+
+/**
+ * The one optional ask for a location, tied to what it gets them. A pin only lasts the
+ * evening, which is a much smaller ask than sharing for good.
+ */
+export function lateNudge(venueName: string): string {
+  return (
+    `Running late? Send me a location pin before you head out and I'll ask ${venueName} to ` +
+    'hold the table. Totally optional; your crew never sees where you are.'
+  );
 }
 
 /** Walk under 1.5 km (80 m/min), otherwise drive (400 m/min) plus 5 minutes to park. */

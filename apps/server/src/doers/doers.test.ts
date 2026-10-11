@@ -10,7 +10,7 @@ import { bookings, bubbleState, ledger } from '../db/schema.js';
 import type { Runtime } from '../runtime.js';
 import { INTENT, testRuntime } from '../test-helpers.js';
 import { buildIcs, signBookingToken, verifyBookingToken } from './ics.js';
-import { Doers, etaMinutes, mapsLink, type LateNotice } from './index.js';
+import { Doers, etaMinutes, lateNudge, mapsLink, type LateNotice } from './index.js';
 
 const ALPHA_PIE = 'venue_osm_n13256222785'; // price level 2, Franklin St
 const ALPHA = { lat: 35.9151753, lng: -79.0540312 };
@@ -130,6 +130,49 @@ describe('Doers', () => {
       expect(res.body).toContain('Confirmation BW42');
       expect((await app.inject({ method: 'GET', url: '/ics/x.y.ics' })).statusCode).toBe(404);
       await app.close();
+    });
+
+    it('asks only the people it cannot find for a pin, inside the invite, never in a new message', async () => {
+      fixes.set('user_ava', { ...ALPHA, capturedAt: null });
+      fixes.set('user_ben', { ...ALPHA, capturedAt: null });
+      await doers.inviter.send({ ...booking(), idempotencyKey: 'inv' });
+      for (const id of ['user_ava', 'user_ben', 'user_chloe', 'user_dev'])
+        expect(dmsTo(id)).toHaveLength(1);
+      expect(dmsTo('user_ava')[0]).not.toContain('Running late?');
+      expect(dmsTo('user_chloe')[0]).toContain(`\n${lateNudge('Alpha Pie')}`);
+      expect(dmsTo('user_dev')[0]).toContain('Running late?');
+      expect(lateNudge('Alpha Pie')).toMatch(/optional/i);
+      expect(lateNudge('Alpha Pie')).toContain('your crew never sees where you are');
+    });
+
+    it('does not ask for a location when the Watcher will not run (booking already started)', async () => {
+      nowMs = Date.parse(START) + 60_000;
+      await doers.inviter.send({ ...booking(), idempotencyKey: 'inv' });
+      expect(dmsTo('user_chloe')[0]).not.toContain('Running late?');
+    });
+
+    it('a pin sent before dinner gets a reply about holding the table there', async () => {
+      booking();
+      await bubbles.onPrivateMessage({
+        messageId: 'pin-before-dinner',
+        userId: 'user_chloe',
+        text: '',
+        at: new Date(nowMs).toISOString(),
+        location: { lat: ALPHA.lat + 0.01, lng: ALPHA.lng },
+      });
+      expect(dmsTo('user_chloe').at(-1)).toMatch(
+        /^Got your location 📍 If you're running late to Alpha Pie, I'll ask them to hold the table\./,
+      );
+      // Without a dinner coming up, the usual reply.
+      nowMs = Date.parse(START) + 7 * 3_600_000;
+      await bubbles.onPrivateMessage({
+        messageId: 'pin-later',
+        userId: 'user_chloe',
+        text: '',
+        at: new Date(nowMs).toISOString(),
+        location: { lat: ALPHA.lat, lng: ALPHA.lng },
+      });
+      expect(dmsTo('user_chloe').at(-1)).toMatch(/I'll start plans near you/);
     });
 
     it('links the map by address, else by coordinates', () => {
