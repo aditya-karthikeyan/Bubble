@@ -1,7 +1,7 @@
 /**
  * Calendar invite (.ics) for a booking. Served by the server at /ics/<signed token>.ics so the
  * Inviter can send a short link that iMessage previews and iOS opens as "Add to Calendar"
- * (MessagingPort has no attachment send; see docs/team-log/P3.md).
+ * (MessagingPort has no attachment send).
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
 

@@ -239,7 +239,7 @@ export class DbBubbleService implements BubbleService {
   /**
    * Presence, in order: a command the person sent ("busy", "sleeping", "driving") until it
    * expires; a calendar busy block covering now (focus); quiet hours 23:00 to 07:00 (sleep);
-   * otherwise available. Focus is not readable on Photon Pro (docs/spikes/context.md).
+   * otherwise available. Focus is not readable on Photon Pro.
    */
   async getPresence(userId: string): Promise<Presence> {
     const nowMs = this.now().getTime();
