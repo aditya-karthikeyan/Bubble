@@ -115,6 +115,9 @@ describe('parsePlanCommand', () => {
     ['why this place?', 'why'],
     ['Why there?', 'why'],
     ['call it off', 'cancel'],
+    ['what are we eating', 'why'],
+    ['where are we going?', 'why'],
+    ["what's the plan", 'why'],
     ['wait what time is it', null],
     ['dinner tonight?', null],
   ])('%s -> %s', (text, command) => {

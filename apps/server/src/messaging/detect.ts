@@ -70,9 +70,15 @@ const IN =
   /^(?:i'?m |im |i am )?(?:in|down|game|there)\b|\b(count me in|i'?ll be there|i'?ll come|i'?m coming|yes|yep|yeah|yea|ya|sure|bet|let'?s go|for sure|absolutely|definitely|sounds good|i'?m down|im down)\b|👍|🙌/i;
 
 /** Rules first: negations win, then clear yeses, else unclear (Haiku decides). */
+/** "what are we eating?", "where is it" are questions, never an RSVP. */
+export function isQuestion(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  return t.endsWith('?') || /^(what|where|when|who|whose|how|which|why)\s/.test(t);
+}
+
 export function parseRsvp(text: string): RsvpStance {
   const t = text.trim();
-  if (!t) return 'unclear';
+  if (!t || isQuestion(t)) return 'unclear';
   if (OUT.test(t)) return 'out';
   if (IN.test(t)) return 'in';
   return 'unclear';
@@ -109,6 +115,14 @@ export function parsePlanCommand(text: string): PlanCommandName | null {
   }
   if (
     /^(why|why there|why that|why here|explain|how come|why this place|why that place|why this one|why did you pick (this|that)( place)?)\??$/.test(
+      t,
+    )
+  ) {
+    return 'why';
+  }
+  // Status questions: the engine's "why" reply explains where the plan stands right now.
+  if (
+    /^(what are we (eating|doing|getting)|where are we (going|eating)|what'?s the plan|what'?s happening|what time|when are we (going|eating|meeting)|any update|status|so what'?s the move|what did we pick|where did we land)\??$/.test(
       t,
     )
   ) {

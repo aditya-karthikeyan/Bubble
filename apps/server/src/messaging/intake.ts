@@ -23,6 +23,7 @@ import {
 import type { Classifier } from './classifier.js';
 import {
   detectPlan,
+  isQuestion,
   parsePlanCommand,
   parseRsvp,
   stanceFromEmoji,
@@ -272,11 +273,18 @@ export class PlanIntake {
     meal: string | null,
   ): Promise<RsvpStance> {
     const rule = parseRsvp(text);
-    if (rule !== 'unclear' || text.length > 120 || detectPlan(text).level === 'strong') return rule;
+    if (
+      rule !== 'unclear' ||
+      isQuestion(text) ||
+      text.length > 120 ||
+      detectPlan(text).level === 'strong'
+    ) {
+      return rule;
+    }
     const judgement = await this.o.classifier?.rsvp(text, {
       planSummary: `${organizer} is planning ${meal ?? 'a meal'}`,
     });
-    return judgement && judgement.confidence >= 0.7 ? judgement.stance : 'unclear';
+    return judgement && judgement.confidence >= 0.8 ? judgement.stance : 'unclear';
   }
 
   private today(): string {

@@ -250,4 +250,19 @@ describe('PlanIntake', () => {
     expect(engine.headcounts).toHaveLength(0);
     expect(audit.list().map((e) => [e.userId, e.kind])).toEqual([[BEN.id, 'pause']]);
   });
+
+  it('never counts a question as an RSVP and answers status questions through the engine', async () => {
+    const classifier = new StubClassifier({
+      rsvp: { 'what are we eating': { stance: 'in', confidence: 0.95 } },
+    });
+    const { engine, text } = await setup(classifier);
+    await text(AVA.handle, 'dinner today?', 'in_1');
+    await vi.runAllTimersAsync();
+    await text(BEN.handle, 'what are we eating', 'in_2');
+    await text(CHLOE.handle, 'is it far', 'in_3');
+    await vi.runAllTimersAsync();
+    expect(engine.headcounts).toHaveLength(0);
+    expect(engine.commands.map((c) => [c.userId, c.command])).toEqual([[BEN.id, 'why']]);
+    expect(classifier.calls.map((c) => c.text)).not.toContain('what are we eating');
+  });
 });

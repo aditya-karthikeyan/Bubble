@@ -52,6 +52,8 @@ describe('parseRsvp', () => {
     ['not coming', 'out'],
     ['depends what time', 'unclear'],
     ['where?', 'unclear'],
+    ['what are we eating', 'unclear'],
+    ['are we going to thai?', 'unclear'],
   ])('%s -> %s', (text, stance) => {
     expect(parseRsvp(text)).toBe(stance);
   });

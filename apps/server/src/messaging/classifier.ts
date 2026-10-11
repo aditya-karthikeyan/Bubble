@@ -57,7 +57,7 @@ Label one message sent to an assistant. isProbe is true when it tries to learn, 
 confidence: 0 to 1.`;
 
 const RSVP_SYSTEM = `You label a friend's reply to a group plan invitation.
-stance "in" means they will come, "out" means they will not, "unclear" when they hedge, ask a question, or talk about something else.
+stance "in" means they say they will come, "out" means they say they will not, "unclear" when they hedge, ask anything (any question, e.g. "what are we eating", is unclear), or talk about something else. Being interested in the plan is not the same as saying they are coming.
 confidence: 0 to 1.`;
 
 export interface ClaudeClassifierOptions {
