@@ -5,7 +5,14 @@ import { FakeMessaging } from '@bubbleworks/shared/fakes';
 import { bubbleInbox, crewInvites, facts, groupMembers, ledger, users } from '../db/schema.js';
 import type { Runtime } from '../runtime.js';
 import { testRuntime } from '../test-helpers.js';
-import { RuleExtractor, resolveUntil, type ExtractedFact, type FactExtractor } from './extract.js';
+import {
+  isNoSplit,
+  RuleExtractor,
+  resolveUntil,
+  type ExtractedFact,
+  type FactExtractor,
+} from './extract.js';
+import { NO_SPLIT } from './facts.js';
 import { DbBubbleService, isNo, isYes, parseCrewDeclaration, toE164 } from './service.js';
 
 /** Rule extraction plus a few canned answers, so tests never call the network. */
@@ -228,6 +235,36 @@ describe('DbBubbleService', () => {
       for (const secret of ['vegan', 'sesame', '$18', 'Carrboro', '@ana-v']) {
         expect(toFay).not.toContain(secret);
       }
+    });
+  });
+
+  describe('opting out of splits', () => {
+    it('"I don\'t want to split" at the Venmo question opts out (P2 real-phone run)', async () => {
+      const pia = await newUser('Pia', '+19195550141');
+      await onboard(pia, ['none', '25', 'Franklin St', 'skip', "I don't want to split"]);
+      expect(bubbles.facts.current(pia.id, 'venmo_handle')?.value).toBe(NO_SPLIT);
+      expect(textsTo(pia.id).join('\n')).toContain('you pay for yourself, no bill splits');
+    });
+
+    it('works anytime after onboarding, and replaces a handle', async () => {
+      const quinn = await newUser('Quinn', '+19195550142');
+      await onboard(quinn, ['none', '25', 'Franklin St', 'skip', '@quinn-q']);
+      expect(await dm(quinn, "I'll pay for myself, no venmo")).toEqual({ handled: true });
+      expect(lastTo(quinn.id)).toMatch(/^Got it, you'll pay for yourself\./);
+      expect(bubbles.facts.current(quinn.id, 'venmo_handle')?.value).toBe(NO_SPLIT);
+    });
+
+    it('reads opt-outs without catching handles or skips', () => {
+      for (const t of [
+        "I don't want to split",
+        'dont split me',
+        'no venmo',
+        'not splitting',
+        'I’d rather not split',
+      ])
+        expect(isNoSplit(t), t).toBe(true);
+      for (const t of ['@pia-p', 'skip', 'split it evenly', 'venmo is @x'])
+        expect(isNoSplit(t), t).toBe(false);
     });
   });
 

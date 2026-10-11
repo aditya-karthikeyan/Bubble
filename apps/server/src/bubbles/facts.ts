@@ -196,6 +196,12 @@ export class FactStore {
 }
 
 /** Short, human description of a fact for the person's own DM. Never sent to anyone else. */
+/**
+ * venmo_handle value for someone who said they don't split ("I don't want to split"). They are
+ * left off every bill and get no split messages. A real handle later replaces it (single-valued).
+ */
+export const NO_SPLIT = 'none';
+
 export function describeFact(f: Pick<Fact, 'type' | 'value'>): string {
   const v = f.value.replace(/_/g, ' ');
   switch (f.type) {
@@ -218,7 +224,9 @@ export function describeFact(f: Pick<Fact, 'type' | 'value'>): string {
     case 'favorite_venue':
       return `one of your spots is ${f.value}`;
     case 'venmo_handle':
-      return `your Venmo is ${f.value}`;
+      return f.value === NO_SPLIT
+        ? 'you pay for yourself, no bill splits'
+        : `your Venmo is ${f.value}`;
     case 'other':
       return f.value;
   }
