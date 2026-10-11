@@ -307,7 +307,6 @@ export class BubbleworksEngine implements PlanEngine {
       headcount: {
         closesAt,
         timezone: this.tz,
-        ...(agentFirst ? { mode: 'opt_out' as const } : {}),
       },
       cuisine: intent.cuisine ?? null,
       pageUrl: this.pageUrl(plan),
@@ -1110,19 +1109,6 @@ export class BubbleworksEngine implements PlanEngine {
       if (m.status !== 'invited') continue;
       const presence = await this.deps.bubbles.getPresence(m.userId);
       const user = await this.rt.crews.userById(m.userId);
-      // Opt-out headcount: silence is a yes unless the person is clearly unavailable.
-      if (this.agentFirst() && !['sleep', 'driving'].includes(presence)) {
-        this.rt.plans.upsertMember(plan.id, m.userId, 'in');
-        await this.publish(plan.id, {
-          type: 'bubble_joined',
-          bubble: {
-            userId: m.userId,
-            displayName: user?.displayName ?? m.userId,
-            status: 'fits',
-          },
-        });
-        continue;
-      }
       const hard = (await this.deps.bubbles.getHardLimits(m.userId)).filter((f) => f.confirmed);
       const canRepresent = ['focus', 'sleep', 'driving'].includes(presence) && hard.length > 0;
       if (canRepresent) {

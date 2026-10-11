@@ -806,7 +806,7 @@ describe('BubbleworksEngine', () => {
       Object.fromEntries(h.rt.plans.members(planId).map((m) => [m.userId, m.status]));
     const privateTexts = () => h.messaging.sent.filter((s) => s.kind === 'private_text');
 
-    it('books a live place from one message: no polls, nobody taps, nobody is asked', async () => {
+    it('books a live place from one message: no polls, a tap to join, nobody is asked', async () => {
       const live: VenueSource = {
         search: async (q) => [
           {
@@ -836,10 +836,12 @@ describe('BubbleworksEngine', () => {
       const head = h.messaging.sent.find((s) => s.kind === 'group_text');
       const text = head && 'input' in head ? head.input.text : '';
       expect(text).toContain('Italian dinner');
-      expect(text).toContain('counted in');
+      expect(text).toContain('Tap 👍');
       expect(h.rt.venues().some((v) => v.id === 'venue_gp_live1')).toBe(true);
 
-      // Nobody answers. At the deadline the awake members count as in; Eli is asleep.
+      // Three tap 👍; Eli is asleep and never answers, so his bubble stands in for him.
+      for (const u of ['user_ben', 'user_chloe', 'user_dev'])
+        await h.engine.handleHeadcount({ planId: planId!, userId: u, in: true, at: h.at() });
       await h.advance(DEADLINES.poll_ms + 1);
       const plan = h.rt.plans.get(planId!)!;
       expect(plan.state).toBe('LOCKED');
@@ -859,6 +861,8 @@ describe('BubbleworksEngine', () => {
       // The only stored Indian place is $22 and Chloe's budget is $20.
       const intent = start('dinner with the group tonight, feeling indian');
       const { planId } = await intent();
+      for (const u of ['user_ben', 'user_chloe', 'user_dev'])
+        await h.engine.handleHeadcount({ planId: planId!, userId: u, in: true, at: h.at() });
       await h.advance(DEADLINES.poll_ms + 1);
       expect(h.rt.plans.get(planId!)?.state).toBe('DEADLOCK');
       const asks = privateTexts();
@@ -882,6 +886,7 @@ describe('BubbleworksEngine', () => {
       const { planId } = await intent();
       for (const u of ['user_ben', 'user_chloe'])
         await h.engine.handleHeadcount({ planId: planId!, userId: u, in: false, at: h.at() });
+      await h.engine.handleHeadcount({ planId: planId!, userId: 'user_dev', in: true, at: h.at() });
       await h.advance(DEADLINES.poll_ms + 1);
       // Ava, Dev, and Eli all fit the Indian place, so no one is asked anything.
       expect(h.rt.plans.get(planId!)?.state).toBe('LOCKED');
