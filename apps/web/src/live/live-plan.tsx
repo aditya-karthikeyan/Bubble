@@ -28,13 +28,23 @@ export function PhaseBanner({
   status: FeedStatus;
 }) {
   return (
-    <header className="phase-banner">
-      <div>
+    <header className="hud-top">
+      <div className="hud-title">
         <h1>{title}</h1>
         <p>{line}</p>
       </div>
       <span className={`chip chip-${status}`}>{STATUS_CHIP[status]}</span>
     </header>
+  );
+}
+
+function Bokeh() {
+  return (
+    <div className="bokeh" aria-hidden>
+      {Array.from({ length: 9 }, (_, i) => (
+        <span key={i} />
+      ))}
+    </div>
   );
 }
 
@@ -62,39 +72,37 @@ export function LivePlan({ token, replay }: { token: string; replay: string | nu
   const phase = phaseOf(vm);
   const copy = PHASE_COPY[phase];
   return (
-    <main className="sky live">
-      <div className="wrap">
-        <PhaseBanner title={copy.title} line={copy.line} status={status} />
-        {status === 'offline' && (
-          <p className="error">Can&apos;t reach Bubbleworks right now. Retrying…</p>
-        )}
-        <div className="arena-wrap glass">
-          <Arena vm={vm} phase={phase} />
-        </div>
-        {vm.booking && (
-          <section className="glass summary" aria-live="polite">
-            <h2>Booked</h2>
-            <p className="lede">
-              {vm.booking.venue.name} at {time(vm.booking.startAt)}, table for{' '}
-              {vm.booking.partySize} under {vm.booking.reservationName}.
-            </p>
-          </section>
-        )}
-        {!vm.booking && vm.locked && (
-          <section className="glass summary">
-            <p className="lede">
+    <main className="stage">
+      <Bokeh />
+      <Arena vm={vm} phase={phase} />
+      <PhaseBanner title={copy.title} line={copy.line} status={status} />
+      {status === 'offline' && (
+        <p className="hud-alert">Can&apos;t reach Bubbleworks right now. Retrying…</p>
+      )}
+      {(vm.booking || vm.locked || status === 'replay_done') && (
+        <section className="hud-sheet glass" aria-live="polite">
+          {vm.booking ? (
+            <>
+              <h2>Booked</h2>
+              <p>
+                {vm.booking.venue.name} at {time(vm.booking.startAt)}, table for{' '}
+                {vm.booking.partySize} under {vm.booking.reservationName}.
+              </p>
+            </>
+          ) : vm.locked ? (
+            <p>
               Going with {vm.locked.venue.name} at {time(vm.locked.startAt)} for{' '}
               {vm.locked.partySize}
               {vm.locked.backup ? `, backup ${vm.locked.backup.name}` : ''}.
             </p>
-          </section>
-        )}
-        {status === 'replay_done' && (
-          <button className="button" type="button" onClick={restart}>
-            Replay
-          </button>
-        )}
-      </div>
+          ) : null}
+          {status === 'replay_done' && (
+            <button className="button" type="button" onClick={restart}>
+              Replay
+            </button>
+          )}
+        </section>
+      )}
     </main>
   );
 }
