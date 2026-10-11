@@ -187,6 +187,27 @@ export class SpectrumMessaging implements MessagingPort {
     });
   }
 
+  /** Image to every member of a crew (or one dm: chat). Not part of MessagingPort. */
+  sendImage(input: {
+    chatId: string;
+    data: Buffer;
+    name: string;
+    mimeType: string;
+    idempotencyKey: string;
+  }): Promise<SendResult> {
+    return this.fan({
+      chatId: input.chatId,
+      key: input.idempotencyKey,
+      planId: planIdFromKey(input.idempotencyKey),
+      content: () => ({
+        kind: 'image',
+        data: input.data,
+        name: input.name,
+        mimeType: input.mimeType,
+      }),
+    });
+  }
+
   sendRichLink(input: RichLinkInput): Promise<SendResult> {
     return this.fan({
       chatId: input.chatId,
@@ -466,7 +487,15 @@ export class SpectrumMessaging implements MessagingPort {
           this.o.log.warn({ planId: options.planId, userId: user.id }, 'message budget spent');
           return null;
         }
-        const sent = await this.deliver(key, user, options.content(user.id));
+        let sent: SendResult;
+        try {
+          sent = await this.deliver(key, user, options.content(user.id));
+        } catch (err) {
+          // One member's failure (e.g. Photon's allowlist) must not cost everyone else the message.
+          if (!crew) throw err;
+          this.o.log.error({ key, userId: user.id, err: String(err) }, 'crew member send failed');
+          return null;
+        }
         this.o.store.recordCopy({
           providerMessageId: sent.messageId,
           logicalId: logicalId ?? sent.messageId,

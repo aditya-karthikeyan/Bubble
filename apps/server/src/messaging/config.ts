@@ -15,6 +15,8 @@ const Env = z
       .string()
       .regex(/^\+[1-9]\d{7,14}$/)
       .optional(),
+    /** app: iMessage app card with a page preview (default). richlink: bare URL bubble. */
+    MESSAGING_LINK_STYLE: z.enum(['app', 'richlink']).default('app'),
   })
   .refine(
     (env) =>
