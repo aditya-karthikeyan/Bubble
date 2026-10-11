@@ -55,6 +55,8 @@ export interface SpectrumMessagingOptions {
   spendMessage?: (planId: string, userId: string) => boolean;
   /** The crew whose plan is in flight for this member, so their DMs route to that plan. */
   openPlanCrew?: (userId: string) => Promise<string | null>;
+  /** Send "Voting closed: X" when a poll closes. Default true; the server turns it off. */
+  announcePollClose?: boolean;
   retry?: { attempts: number; baseDelayMs: number };
 }
 
@@ -185,6 +187,8 @@ export class SpectrumMessaging implements MessagingPort {
   async closePoll(input: { chatId: string; pollId: string }): Promise<void> {
     const poll = this.o.store.poll(input.pollId);
     if (!poll || !this.o.store.closePoll(input.pollId)) return;
+    // The live card already moves on ("finding the spot"); skipping this saves a ping each.
+    if (this.o.announcePollClose === false) return;
     const tally = this.o.store.tally(input.pollId);
     const leader = [...tally.entries()].sort((a, b) => b[1] - a[1])[0];
     const label = leader && poll.options.find((o) => o.key === leader[0])?.label;

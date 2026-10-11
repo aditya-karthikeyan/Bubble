@@ -66,6 +66,7 @@ export function analyzeDeadlock(
   venues: Venue[],
   members: SolverMember[],
   ctx: SolverContext,
+  options: { minStartMinutes?: number } = {},
 ): DeadlockAnalysis {
   const concessions: Concession[] = [];
   for (const m of members) {
@@ -124,6 +125,7 @@ export function analyzeDeadlock(
   for (const delta of TIME_DELTAS) {
     const start = ctx.startMinutes + delta;
     if (start < 11 * 60 || start > 22 * 60) continue;
+    if (start < (options.minStartMinutes ?? 0)) continue;
     const { feasible } = filterCandidates(venues, members, { ...ctx, startMinutes: start });
     if (feasible.length) {
       timeShift = {

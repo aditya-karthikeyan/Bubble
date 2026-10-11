@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node", "react", "react-dom"],
+    "jsx": "preserve",
+    "allowJs": false,
+    "incremental": true,
+    "plugins": [{ "name": "next" }]
+  },
+  "include": ["app", "next.config.ts"],
+  "exclude": ["node_modules", ".next"]
+}

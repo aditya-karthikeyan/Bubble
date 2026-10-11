@@ -188,34 +188,29 @@ export async function renderBundle(
     closesAt: decision.headcount.closesAt,
   });
 
-  // Poll and link go out together: the rich link takes ~2.6 s on Photon (preview fetch), so
-  // waiting on it would push the bundle past 5 s. The poll still lands first in practice.
-  let pollMs: number | null = null;
-  const [poll, link] = await Promise.all([
-    decision.cuisinePoll
-      ? port
-          .sendPoll({
-            chatId: decision.chatId,
-            planId: decision.planId,
-            pollId: decision.cuisinePoll.pollId,
-            question: decision.cuisinePoll.question ?? 'What are we eating?',
-            options: decision.cuisinePoll.options,
-            idempotencyKey: key('poll'),
-          })
-          .then((r) => {
-            pollMs = Math.round(performance.now() - started);
-            return r;
-          })
-      : null,
-    decision.pageUrl
-      ? port.sendRichLink({
-          chatId: decision.chatId,
-          url: decision.pageUrl,
-          title: 'Watch the bubbles decide',
-          idempotencyKey: key('link'),
-        })
-      : null,
-  ]);
+  // Waves: everyone's poll goes out before anyone's link card. Photon's shared gateway appears
+  // to work through sends one at a time, so a slow link card (~2.6 s) queued ahead of a poll
+  // delayed the poll for the whole crew (3-phone run: poll at 7.7 s).
+  const poll = decision.cuisinePoll
+    ? await port.sendPoll({
+        chatId: decision.chatId,
+        planId: decision.planId,
+        pollId: decision.cuisinePoll.pollId,
+        question: decision.cuisinePoll.question ?? 'What are we eating?',
+        options: decision.cuisinePoll.options,
+        idempotencyKey: key('poll'),
+      })
+    : null;
+  const pollMs = poll ? Math.round(performance.now() - started) : null;
+
+  const link = decision.pageUrl
+    ? await port.sendRichLink({
+        chatId: decision.chatId,
+        url: decision.pageUrl,
+        title: 'Watch the bubbles decide',
+        idempotencyKey: key('link'),
+      })
+    : null;
 
   return {
     headcountMessageId: headcount.messageId,
