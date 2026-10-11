@@ -6,7 +6,7 @@
  *   SPECTRUM_PROVIDER=imessage   the real Photon line: post a LINE LOCK first
  *
  * Server wiring (P1):
- *   const messaging = createMessaging({ config: loadMessagingConfig(), runtime });
+ *   const messaging = createMessaging({ config: loadMessagingConfig(), runtime, links });
  *   const intake = messaging.attachEngine(engine);   // engine: PlanEngine
  *   await messaging.start();
  *   // question policy: await intake.renderBundle(decision)
@@ -44,7 +44,11 @@ export interface Messaging {
   /** Wire inbound messages to the engine. Call once, before start(). */
   attachEngine(
     engine: PlanEngine,
-    options?: { classifier?: Classifier | null; isOnboarded?: (userId: string) => boolean },
+    options?: {
+      classifier?: Classifier | null;
+      isOnboarded?: (userId: string) => boolean;
+      claimsDm?: (userId: string, text: string) => boolean;
+    },
   ): PlanIntake;
   /** One-time registration: Photon user + bubble number + CrewDirectory user. */
   signup(raw: unknown): Promise<SignupResult>;
@@ -55,6 +59,11 @@ export interface Messaging {
 export interface CreateMessagingOptions {
   config: MessagingConfig;
   runtime: Pick<Runtime, 'handle' | 'crews' | 'plans' | 'log' | 'bus' | 'venues'>;
+  /**
+   * Server base URL and HMAC key for the booked ticket link (/t/<token>), the same pair the doers
+   * sign .ics links with. The server passes them; scripts fall back to the same env lookup.
+   */
+  links?: { publicBaseUrl: string; linkSecret: string; pageBaseUrl?: string | null };
   /** Test and sim override. */
   transport?: Transport;
   /** Test override; defaults to Haiku when ANTHROPIC_API_KEY is set. */
@@ -120,6 +129,12 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
     plans: runtime.plans,
     venues: () => runtime.venues(),
     crews: runtime.crews,
+    ticketLinks: options.links ?? {
+      publicBaseUrl: process.env['SERVER_PUBLIC_URL'] || 'http://localhost:3001',
+      linkSecret:
+        process.env['GOOGLE_CLIENT_SECRET'] || process.env['SPECTRUM_PROJECT_SECRET'] || 'dev-only',
+      pageBaseUrl: process.env['TICKET_PAGE_URL'] || null,
+    },
     log,
   });
 
@@ -167,8 +182,9 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
         bundleMode: config.MESSAGING_BUNDLE_MODE,
         crews: runtime.crews,
         ...(attachOptions.isOnboarded ? { isOnboarded: attachOptions.isOnboarded } : {}),
+        ...(attachOptions.claimsDm ? { claimsDm: attachOptions.claimsDm } : {}),
       });
-      port.setCrewPick((userId, text) => intake!.crewPick(userId, text));
+      port.setPendingAnswer((userId) => intake!.pendingAnswer(userId));
       intake.start();
       return intake;
     },

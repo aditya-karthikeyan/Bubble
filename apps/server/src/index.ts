@@ -6,6 +6,8 @@ import { createBubbles } from './bubbles/index.js';
 import { createCaller, loadCallerConfig } from './caller/index.js';
 import { GooglePlacesSource } from './venues/places.js';
 import { joinPageHtml } from './web/join-page.js';
+import { loadTicketPage, ticketPageHtml } from './web/ticket-page.js';
+import { registerWatchRoute } from './web/watch-route.js';
 import { seedDemoBubbles } from './bubbles/seed.js';
 import { registerDevRoutes } from './dev/routes.js';
 import { Doers } from './doers/index.js';
@@ -47,8 +49,20 @@ async function main(): Promise<void> {
   // P2 messaging adapter. The terminal provider is Spectrum's local TUI, so it only starts
   // when there is a terminal to draw on; the real line starts only when SPECTRUM_PROVIDER=imessage
   // is set on the process holding the LINE LOCK. Signup works either way.
+  // Signed links (.ics, booked ticket page) share one base URL and one HMAC key.
+  const publicBase = (config.SERVER_PUBLIC_URL ?? `http://localhost:${config.PORT}`).replace(
+    /\/$/,
+    '',
+  );
+  const linkSecret =
+    process.env['GOOGLE_CLIENT_SECRET'] || process.env['SPECTRUM_PROJECT_SECRET'] || 'dev-only';
   const messagingConfig = loadMessagingConfig();
-  const messaging = createMessaging({ config: messagingConfig, runtime });
+  const messaging = createMessaging({
+    config: messagingConfig,
+    runtime,
+    // The booked card opens the ticket on the website when there is one (WEB_PUBLIC_URL).
+    links: { publicBaseUrl: publicBase, linkSecret, pageBaseUrl: config.TICKET_PAGE_URL ?? null },
+  });
   const startMessaging = messagingConfig.SPECTRUM_PROVIDER === 'imessage' || process.stdin.isTTY;
 
   // P3 bubbles: facts, onboarding, crews over DM, passive learning, calendar connect. They
@@ -75,12 +89,8 @@ async function main(): Promise<void> {
     : new FakeMessaging({ print: false, log: (line) => app.fastify.log.debug(line) });
   if (!startMessaging) app.fastify.log.info('engine messaging: silent fake (transport off)');
 
-  // P3 doers: Inviter (.ics link), Splitter (Venmo, ledger), Watcher (ETAs, lateness), and the
+  // P3 doers: Inviter (.ics link), Splitter (silent at booking; the bubble splits after), Watcher (ETAs, lateness), and the
   // private summary for represented members. Lateness asks the caller to hold the table.
-  const publicBase = (config.SERVER_PUBLIC_URL ?? `http://localhost:${config.PORT}`).replace(
-    /\/$/,
-    '',
-  );
   const doers = new Doers({
     db: runtime.db,
     crews: runtime.crews,
@@ -89,8 +99,7 @@ async function main(): Promise<void> {
     timers: runtime.timers,
     bus: runtime.bus,
     publicBaseUrl: publicBase,
-    linkSecret:
-      process.env['GOOGLE_CLIENT_SECRET'] || process.env['SPECTRUM_PROJECT_SECRET'] || 'dev-only',
+    linkSecret,
     onLate: async (n) => {
       const venue = runtime.venues().find((v) => v.id === n.venueId);
       if (!venue) return;
@@ -141,6 +150,7 @@ async function main(): Promise<void> {
   app.fastify.log.info({ mode: caller.mode }, 'caller ready');
   const intake = messaging.attachEngine(engine, {
     isOnboarded: (userId) => bubbles.service.isOnboarded(userId),
+    claimsDm: (userId, text) => bubbles.service.claimsDm(userId, text),
   });
   engine.setIntake(intake);
 
@@ -203,6 +213,32 @@ async function main(): Promise<void> {
       .send(joinPageHtml({ code: request.params.code, crewName: crew?.name ?? null }));
   });
 
+  const ticketDeps = {
+    db: runtime.db,
+    plans: runtime.plans,
+    crews: runtime.crews,
+    publicBaseUrl: publicBase,
+    linkSecret,
+  };
+  /**
+   * The booked ticket the Mini App card opens. The token is the signed .ics booking token. With
+   * WEB_PUBLIC_URL set the card opens the website's /t/ page (fed by /api/tickets/:token); this
+   * page is the fallback.
+   */
+  app.fastify.get<{ Params: { token: string } }>('/t/:token', async (request, reply) => {
+    const ticket = await loadTicketPage(ticketDeps, request.params.token);
+    return reply
+      .code(ticket ? 200 : 404)
+      .type('text/html; charset=utf-8')
+      .send(ticketPageHtml(ticket));
+  });
+
+  app.fastify.get<{ Params: { token: string } }>('/api/tickets/:token', async (request, reply) => {
+    const ticket = await loadTicketPage(ticketDeps, request.params.token);
+    if (!ticket) return reply.code(404).send({ ok: false, error: 'no such ticket' });
+    return { ok: true, ticket };
+  });
+
   app.fastify.get<{ Params: { code: string } }>('/api/crews/:code', async (request, reply) => {
     const crew = await runtime.crews.crewByJoinCode(request.params.code);
     if (!crew) return reply.code(404).send({ ok: false, error: 'no such crew' });
@@ -222,6 +258,13 @@ async function main(): Promise<void> {
       request.log.warn({ err: String(err) }, 'signup rejected');
       return reply.code(400).send({ ok: false, error: 'invalid signup' });
     }
+  });
+
+  /** The organizer's private, stable link to the newest plan's live page. */
+  registerWatchRoute(app.fastify, {
+    secret: config.DEV_ROUTES_SECRET,
+    plans: runtime.plans,
+    webPublicUrl: config.WEB_PUBLIC_URL,
   });
 
   const active = runtime.plans.findAllActive();

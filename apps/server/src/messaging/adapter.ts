@@ -43,7 +43,7 @@ import type { Logger } from '../events/bus.js';
 import { Batcher, mergeBatch, type Batch } from './batcher.js';
 import type { RawInbound } from './normalize.js';
 import type { MessagingStore } from './store.js';
-import type { OutContent, Transport } from './transport.js';
+import type { MiniAppCard, OutContent, Transport } from './transport.js';
 
 export interface SpectrumMessagingOptions {
   transport: Transport;
@@ -134,11 +134,22 @@ export class SpectrumMessaging implements MessagingPort {
   /** Last time each person texted their bubble, for the quiet-hours override. */
   private readonly lastInbound = new Map<string, number>();
   private readonly signupNudged = new Map<string, number>();
-  private crewPick: ((userId: string, text: string) => string | null) | null = null;
+  private pendingAnswer: ((userId: string) => string | null) | null = null;
 
-  /** The intake's answer to "which crew?": a text naming a crew routes to that crew. */
-  setCrewPick(fn: (userId: string, text: string) => string | null): void {
-    this.crewPick = fn;
+  /**
+   * The intake's open plan question ("Which crew, and what are we feeling?"): while one waits on
+   * this person, their next text is the answer and routes to the crew chat this returns.
+   */
+  setPendingAnswer(fn: (userId: string) => string | null): void {
+    this.pendingAnswer = fn;
+  }
+
+  /**
+   * Hands a message the plan intake routed to itself but did not act on (not a plan after all,
+   * "new crew <name>" mid-question) to the private handlers, so the bubble answers it.
+   */
+  async deliverPrivate(m: InboundPrivateMessage): Promise<void> {
+    await this.emit(this.handlers.private, m);
   }
   /** Provider id -> the batch messageId it was delivered under, so an edit can name it. */
   private readonly deliveredAs = new Map<string, string>();
@@ -246,6 +257,19 @@ export class SpectrumMessaging implements MessagingPort {
         name: input.name,
         mimeType: input.mimeType,
       }),
+    });
+  }
+
+  /** Native iMessage Mini App card to every member of a crew (or one dm: chat). Not part of MessagingPort. */
+  sendMiniApp(
+    input: MiniAppCard & { chatId: string; idempotencyKey: string },
+  ): Promise<SendResult> {
+    const { chatId, idempotencyKey: key, ...card } = input;
+    return this.fan({
+      chatId,
+      key,
+      planId: planIdFromKey(key),
+      content: () => ({ kind: 'mini_app', ...card }),
     });
   }
 
@@ -535,10 +559,13 @@ export class SpectrumMessaging implements MessagingPort {
     });
   }
 
-  /** The crew a DM belongs to: the one with a plan in flight, or any active crew if it reads like a plan. */
+  /**
+   * The crew a DM belongs to: the one an open plan question is waiting on, the one with a plan in
+   * flight, or any active crew if it reads like a plan.
+   */
   private async planCrewChat(userId: string, text: string): Promise<string | null> {
-    const picked = this.crewPick?.(userId, text);
-    if (picked) return picked;
+    const answering = this.pendingAnswer?.(userId);
+    if (answering) return answering;
     const open = await this.o.openPlanCrew?.(userId);
     if (open) return `crew:${open}`;
     if (!looksLikePlan(text)) return null;

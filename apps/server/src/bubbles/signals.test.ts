@@ -5,7 +5,7 @@ import type { Runtime } from '../runtime.js';
 import { testRuntime } from '../test-helpers.js';
 import { RuleExtractor, type ExtractedFact, type FactExtractor } from './extract.js';
 import { mightContainFact } from './learner.js';
-import { DbBubbleService } from './service.js';
+import { DbBubbleService, FALLBACK_TEXT } from './service.js';
 import {
   inQuietHours,
   parsePresenceCommand,
@@ -230,7 +230,8 @@ describe('DbBubbleService signals and learning', () => {
     const t0 = performance.now();
     const res = await dm(u, "btw I'm allergic to shellfish");
     expect(performance.now() - t0).toBeLessThan(25); // the 30 ms extractor runs after return
-    expect(res.handled).toBe(false);
+    // Handled: the bubble owns the answer (a yes/no here, the fallback line if nothing is learned).
+    expect(res.handled).toBe(true);
 
     await bubbles.learner.idle();
     const allergy = (await bubbles.getHardLimits(u.id)).find((f) => f.type === 'allergy');
@@ -241,6 +242,26 @@ describe('DbBubbleService signals and learning', () => {
     await dm(u, 'yes');
     expect(lastTo(u.id)).toBe('Locked in.');
     expect(bubbles.facts.get(allergy!.id)?.confirmed).toBe(true);
+  });
+
+  it('answers a DM nothing else handled with what the bubble can do, but leaves commands to the engine', async () => {
+    const u = await onboarded('Rae', '+19195550206');
+    const res = await dm(u, 'how was the midterm');
+    expect(res.handled).toBe(true);
+    expect(lastTo(u.id)).toBe(FALLBACK_TEXT);
+
+    // Might state a fact, but the learner finds none: the fallback lands once it has read it.
+    await dm(u, 'i love this weather');
+    await bubbles.learner.idle();
+    await new Promise((r) => setTimeout(r, 0));
+    const fallbacks = messaging.sent.filter(
+      (s) => s.kind === 'private_text' && s.input.userId === u.id && s.input.text === FALLBACK_TEXT,
+    );
+    expect(fallbacks).toHaveLength(2);
+
+    const before = messaging.sent.length;
+    expect((await dm(u, 'cancel')).handled).toBe(false);
+    expect(messaging.sent.length).toBe(before);
   });
 
   it('turns "broke till Friday" into a temporary budget and skips small talk', async () => {

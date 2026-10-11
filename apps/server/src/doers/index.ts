@@ -3,11 +3,9 @@
  * Owner: P3.
  *
  * - Inviter DMs each attending member a short .ics link (/ics/<signed>.ics).
- * - Splitter estimates per-person cost from the price level, picks the payer (attending member
- *   with a payment method and the fewest "paid" ledger rows in this crew), DMs everyone else
- *   the payer's methods (Venmo, Cash App, PayPal links with the amount; Zelle as text), and
- *   records the payer in the ledger. Fast-food venues (style fast_food or price level 1) get no
- *   split, and anyone who said they don't split is left off the bill.
+ * - Splitter stays silent at booking: nobody knows the bill yet. After the meal the person who
+ *   paid tells their bubble ("I covered this one"), and the bubble asks the total, DMs everyone
+ *   their share with the payer's handle, and writes the paid/owes ledger rows (bubbles/bill.ts).
  * - Watcher wakes 45 minutes before the booking and every 60 s after: reads Find My, estimates
  *   ETAs, updates the live card, and reports anyone 15+ minutes late (once per member).
  * - Representation: when a plan locks, each represented member gets a private summary with a
@@ -17,7 +15,7 @@
  * presence expires (sleep ends 07:00). Messages carry names, times, and amounts only; never
  * another member's facts.
  */
-import { and, desc, eq, ne, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
   idempotencyKey,
@@ -29,30 +27,17 @@ import {
   type MessagingPort,
   type PlanEvent,
   type User,
+  type Venue,
 } from '@bubbleworks/shared';
-import { payLine } from '../bubbles/payments.js';
 import type { DbBubbleService } from '../bubbles/service.js';
 import type { Db } from '../db/client.js';
-import {
-  audit,
-  bookings,
-  bubbleState,
-  ledger,
-  planMembers,
-  plans,
-  timers,
-  venues,
-} from '../db/schema.js';
+import { bookings, bubbleState, planMembers, plans, timers, venues } from '../db/schema.js';
 import { silentLogger, type Logger } from '../events/bus.js';
 import type { TimerService } from '../timers/service.js';
 import { distanceM } from '../venues/geo.js';
 import { buildIcs, signBookingToken, verifyBookingToken } from './ics.js';
 import { LedgerWriter } from './ledger.js';
 
-/** Per-person estimate by venue price level, USD (role prompt: 1 = 15, 2 = 30, 3 = 55). */
-export const COST_BY_PRICE_LEVEL: Record<number, number> = { 1: 15, 2: 30, 3: 55, 4: 85 };
-/** At or below this price level (OSM fast_food / cafe) the Splitter stays quiet. */
-export const COUNTER_SERVICE_MAX_PRICE_LEVEL = 1;
 export const WATCH_LEAD_MS = 45 * 60_000;
 export const WATCH_EVERY_MS = 60_000;
 export const LATE_AFTER_MIN = 15;
@@ -124,11 +109,21 @@ export class Doers implements DoerPorts {
     const url = `${this.d.publicBaseUrl}/ics/${token}.ics`;
     const when = clock(s.startAt);
     const people = await this.attending(s);
-    for (const u of people) {
+    const place = s.venue.address ?? s.venue.name;
+    const maps = mapsLink(s.venue);
+    // The Watcher can only hold the table for people it can find. Anyone it can't locate gets
+    // one optional line in this same invite (no extra message); nobody is ever asked again.
+    const watched = Date.parse(s.startAt) > this.now().getTime();
+    const located = watched
+      ? await Promise.all(people.map((u) => this.locatable(u.id)))
+      : people.map(() => true);
+    for (const [i, u] of people.entries()) {
       await this.dm(
         u,
-        `✅ Booked: ${s.venue.name}, ${when}, table for ${people.length} under ${s.reservationName}. ` +
-          `Add it to your calendar: ${url}`,
+        `✅ Booked: ${s.venue.name}, ${when}, table for ${people.length} under ${s.reservationName}.\n` +
+          `📍 ${place} · ${maps}\n` +
+          `Add it to your calendar: ${url}` +
+          (located[i] ? '' : `\n${lateNudge(s.venue.name)}`),
         `${s.idempotencyKey}:${u.id}`,
       );
     }
@@ -176,150 +171,14 @@ export class Doers implements DoerPorts {
 
   // -- Splitter --------------------------------------------------------------
 
+  /**
+   * At booking nobody knows the bill yet, so the Splitter sends nothing. After the meal the
+   * person who paid tells their bubble ("I covered this one"), and the bubble asks for the total
+   * and DMs everyone their share (DbBubbleService.startBillSplit).
+   */
   private async split(s: BookingSummary & { idempotencyKey: string }): Promise<DoerResult> {
-    // Counter service (fast food, cafes: style fast_food or price level 1 from OSM) means
-    // everyone pays at the register, so there is nothing to split and nobody gets a message.
-    if (s.venue.style === 'fast_food' || s.venue.priceLevel <= COUNTER_SERVICE_MAX_PRICE_LEVEL) {
-      this.log.info({ planId: s.planId, venue: s.venue.name }, 'split skipped: counter service');
-      return { ok: true, detail: 'Counter service, everyone pays for themselves' };
-    }
-    const each = COST_BY_PRICE_LEVEL[s.venue.priceLevel] ?? s.venue.typicalCostUsd;
-    const groupId = this.groupIdOf(s.planId);
-    const attending = await this.attending(s);
-    // Anyone who said they don't split pays for themselves: off the bill, no messages.
-    const people = attending.filter((u) => !this.d.bubbles.optedOutOfSplits(u.id));
-    if (people.length < 2) {
-      // A re-split that drops to one person on the bill: nobody is fronting anything now.
-      this.d.db
-        .delete(ledger)
-        .where(eq(ledger.id, `ledger_paid_${s.bookingId}`))
-        .run();
-      this.log.info(
-        { planId: s.planId, attending: attending.length, onBill: people.length },
-        'split skipped: fewer than 2 on the bill',
-      );
-      return { ok: true, detail: 'No split, everyone pays for themselves' };
-    }
-    const handlesOf = new Map(people.map((u) => [u.id, this.d.bubbles.payHandles(u.id)]));
-    const withHandle = people
-      .map((u) => ({ u, handles: handlesOf.get(u.id)! }))
-      .filter((x) => x.handles.length > 0);
-    if (!withHandle.length) {
-      return { ok: false, detail: 'Nobody has a payment method yet' };
-    }
-
-    // History only: this plan's own rows (a first split's paid row) must not count against anyone.
-    const count = (userId: string, kind: 'paid' | 'compromised') =>
-      Number(
-        this.d.db
-          .select({ n: sql<number>`count(*)` })
-          .from(ledger)
-          .where(
-            and(
-              eq(ledger.userId, userId),
-              eq(ledger.kind, kind),
-              eq(ledger.groupId, groupId),
-              ne(ledger.planId, s.planId),
-            ),
-          )
-          .get()?.n ?? 0,
-      );
-    // A re-split keeps the payer if they are still attending, so the bill never flips.
-    // Otherwise: fewest times paid in this crew; ties go to whoever has compromised least (the
-    // person who keeps bending is not also the one fronting the bill); then join order, then id.
-    const prior = this.lastSplit(s.bookingId);
-    const order = new Map(s.members.map((m, i) => [m.userId, i]));
-    const payer =
-      withHandle.find((x) => x.u.id === prior?.payerId) ??
-      withHandle
-        .map((x) => ({ ...x, paid: count(x.u.id, 'paid'), bent: count(x.u.id, 'compromised') }))
-        .sort(
-          (a, b) =>
-            a.paid - b.paid ||
-            a.bent - b.bent ||
-            (order.get(a.u.id) ?? 99) - (order.get(b.u.id) ?? 99) ||
-            a.u.id.localeCompare(b.u.id),
-        )[0]!;
-
-    // Count only who is attending now (in or represented), never s.partySize from the booking.
-    const total = each * people.length;
-    const note = `${s.venue.name} ${shortDay(s.startAt)}`;
-    // Each person sees the payer's methods, the ones they use too first.
-    const linesFor = (u: User) => {
-      const theirs = new Set((handlesOf.get(u.id) ?? []).map((h) => h.method));
-      return [...payer.handles]
-        .sort((a, b) => Number(theirs.has(b.method)) - Number(theirs.has(a.method)))
-        .map((h) => payLine(h, payer.u.displayName, each, note));
-    };
-
-    // A rerun after someone dropped (the engine re-splits on a table change): anyone on the
-    // last split who is no longer attending is told they are off the bill.
-    const nowIds = new Set(people.map((u) => u.id));
-    const stillComing = new Set(attending.map((u) => u.id));
-    for (const id of prior?.userIds ?? []) {
-      // Someone still coming who opted out already got "ignore any link" from their bubble.
-      if (nowIds.has(id) || stillComing.has(id)) continue;
-      const gone = await this.d.crews.userById(id);
-      if (!gone) continue;
-      await this.dm(
-        gone,
-        `Plans changed and you're not on ${s.venue.name} anymore, so you're off the bill. ` +
-          'Ignore the earlier payment link.',
-        `${s.idempotencyKey}:offbill:${id}`,
-      );
-    }
-
-    await this.dm(
-      payer.u,
-      `You're covering ${s.venue.name} this time, about $${total} for ${people.length} ($${each} each). ` +
-        "I'll send everyone else a way to pay you back. It rotates, so next time is someone else.",
-      `${s.idempotencyKey}:payer`,
-    );
-    let requests = 0;
-    for (const u of people) {
-      if (u.id === payer.u.id) continue;
-      const lines = linesFor(u);
-      await this.dm(
-        u,
-        `${payer.u.displayName} is covering ${s.venue.name}. Your share is about $${each}:` +
-          (lines.length === 1
-            ? ` ${lines[0]!.replace(/^(Venmo|Cash App|PayPal): /, '')}`
-            : `\n${lines.join('\n')}`),
-        `${s.idempotencyKey}:${u.id}`,
-      );
-      requests++;
-    }
-
-    // One paid row per booking; a re-split moves it to the current payer and total.
-    const at = this.now().toISOString();
-    this.d.db
-      .insert(ledger)
-      .values({
-        id: `ledger_paid_${s.bookingId}`,
-        groupId,
-        planId: s.planId,
-        userId: payer.u.id,
-        kind: 'paid',
-        amount: total,
-        note: s.venue.name,
-        at,
-      })
-      .onConflictDoUpdate({ target: ledger.id, set: { userId: payer.u.id, amount: total, at } })
-      .run();
-    this.d.db
-      .insert(audit)
-      .values({
-        planId: s.planId,
-        at,
-        actor: 'p3_splitter',
-        action: 'split_sent',
-        detail: { bookingId: s.bookingId, payerId: payer.u.id, userIds: [...nowIds], each },
-      })
-      .run();
-    // Keep the fairness ledger in step with who is actually attending.
-    this.ledger.recordPlan(s.planId);
-    this.log.info({ planId: s.planId, payer: payer.u.id, each, requests }, 'split sent');
-    return { ok: true, detail: `${payer.u.displayName} covers, ${requests} payment requests sent` };
+    this.log.info({ planId: s.planId, bookingId: s.bookingId }, 'split waits for the payer');
+    return { ok: true, detail: 'waiting for the payer' };
   }
 
   // -- Watcher ---------------------------------------------------------------
@@ -545,6 +404,15 @@ export class Doers implements DoerPorts {
     return at.getTime();
   }
 
+  /** Whether the Watcher could find this person right now (Find My or a recent pin). */
+  private async locatable(userId: string): Promise<boolean> {
+    try {
+      return (await this.d.bubbles.readLocation(userId)).value !== null;
+    } catch {
+      return false;
+    }
+  }
+
   private async attending(s: BookingSummary): Promise<User[]> {
     // The database is the source of truth: someone who said no after the summary was built
     // must not get an invite or a bill. Order follows the summary (join order).
@@ -566,25 +434,6 @@ export class Doers implements DoerPorts {
     }
     return out;
   }
-
-  private lastSplit(bookingId: string): { userIds: string[]; payerId: string } | null {
-    const rows = this.d.db
-      .select({ detail: audit.detail })
-      .from(audit)
-      .where(and(eq(audit.actor, 'p3_splitter'), eq(audit.action, 'split_sent')))
-      .orderBy(desc(audit.id))
-      .all();
-    const hit = rows.find((r) => r.detail?.['bookingId'] === bookingId)?.detail;
-    return hit
-      ? { userIds: (hit['userIds'] as string[]) ?? [], payerId: String(hit['payerId']) }
-      : null;
-  }
-
-  private groupIdOf(planId: string): string {
-    return (
-      this.d.db.select({ g: plans.groupId }).from(plans).where(eq(plans.id, planId)).get()?.g ?? ''
-    );
-  }
 }
 
 export interface WatchReport {
@@ -596,6 +445,17 @@ export interface WatchReport {
     minutesLate: number | null;
     here: boolean;
   }>;
+}
+
+/**
+ * The one optional ask for a location, tied to what it gets them. A pin only lasts the
+ * evening, which is a much smaller ask than sharing for good.
+ */
+export function lateNudge(venueName: string): string {
+  return (
+    `Running late? Send me a location pin before you head out and I'll ask ${venueName} to ` +
+    'hold the table. Totally optional; your crew never sees where you are.'
+  );
 }
 
 /** Walk under 1.5 km (80 m/min), otherwise drive (400 m/min) plus 5 minutes to park. */
@@ -621,18 +481,16 @@ export function limitPhrase(f: { type: string; value: string }): string {
   }
 }
 
+/** A Google Maps search link: by address when known, else by coordinates. */
+export function mapsLink(venue: Pick<Venue, 'address' | 'location'>): string {
+  const query = venue.address ?? `${venue.location.lat},${venue.location.lng}`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
 function clock(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-US', {
     timeZone: 'America/New_York',
     hour: 'numeric',
     minute: '2-digit',
-  });
-}
-
-function shortDay(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
-    timeZone: 'America/New_York',
-    month: 'short',
-    day: 'numeric',
   });
 }

@@ -3,7 +3,7 @@
  * transition table, persisted in one transaction with an audit row, then published as
  * plan_state_changed. Terminal transitions stamp closedAt and the page token expiry.
  */
-import { and, asc, eq, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, notInArray } from 'drizzle-orm';
 import {
   DEADLINES,
   PLAN_MESSAGE_BUDGET,
@@ -139,6 +139,12 @@ export class PlanStore {
       .where(notInArray(plans.state, [...TERMINAL_STATES]))
       .all()
       .map(toPlan);
+  }
+
+  /** The most recently created plan in any state, or null when there are none. */
+  newest(): Plan | null {
+    const row = this.db.select().from(plans).orderBy(desc(plans.createdAt)).limit(1).get();
+    return row ? toPlan(row) : null;
   }
 
   /**

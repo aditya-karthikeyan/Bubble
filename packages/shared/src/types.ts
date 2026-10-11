@@ -383,7 +383,15 @@ export const Booking = z.object({
 });
 export type Booking = z.infer<typeof Booking>;
 
-export const LedgerKind = z.enum(['compromised', 'got_preference', 'organized', 'paid', 'absent']);
+export const LedgerKind = z.enum([
+  'compromised',
+  'got_preference',
+  'organized',
+  'paid',
+  'absent',
+  /** A member's share of a bill someone else paid (amount in dollars). */
+  'owes',
+]);
 export type LedgerKind = z.infer<typeof LedgerKind>;
 
 /** Fairness ledger. One row per member per plan outcome. Owner: P3 writes, P1 reads for scoring. */
@@ -393,7 +401,7 @@ export const LedgerEntry = z.object({
   planId: z.string(),
   userId: z.string(),
   kind: LedgerKind,
-  /** Magnitude in the kind's unit: dollars for paid, concession cost otherwise, 1 for flags. */
+  /** Magnitude in the kind's unit: dollars for paid and owes, concession cost otherwise, 1 for flags. */
   amount: z.number(),
   note: z.string().nullable().default(null),
   at: IsoDateTime,

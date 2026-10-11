@@ -1496,6 +1496,110 @@ input:focus {
   padding: 24px 0 8px;
 }
 
+/* ---------- Ticket (/t/[token]): what the booked card in iMessage opens ---------- */
+.ticket {
+  margin: 0 14px 14px;
+  border: 1px solid #c8d8e6;
+  border-radius: 4px;
+  background: linear-gradient(#ffffff, #f2f8fd);
+  box-shadow: inset 0 1px 0 #fff;
+}
+.ticket-when {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 18px 16px 14px;
+}
+.ticket-time {
+  font-size: 30px;
+  font-weight: 300;
+  color: var(--instruction);
+}
+.ticket-party {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.ticket-tear {
+  margin: 0 14px;
+  border-top: 2px dashed #c8d8e6;
+}
+.ticket-rows {
+  margin: 0;
+  padding: 4px 16px 0;
+}
+.ticket-rows div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e3ebf3;
+  font-size: 14px;
+}
+.ticket-rows dt {
+  color: var(--ink-soft);
+}
+.ticket-rows dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.ticket-label {
+  margin: 14px 16px 8px;
+  font-size: 12px;
+  color: #5b6b78;
+}
+.ticket-who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0 16px 16px;
+  list-style: none;
+}
+/* Each guest as a little glossy bubble chip. */
+.ticket-who li {
+  padding: 5px 13px;
+  border: 1px solid rgba(4, 60, 100, 0.35);
+  border-radius: 999px;
+  background:
+    radial-gradient(
+      ellipse 70% 50% at 50% 15%,
+      rgba(255, 255, 255, 0.95),
+      rgba(255, 255, 255, 0) 70%
+    ),
+    linear-gradient(#d8f3ff, #8fd3f5);
+  box-shadow: 0 2px 5px rgba(0, 60, 110, 0.2);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #0b3550;
+}
+.ticket-actions .button {
+  width: auto;
+}
+/* A standard Windows 7 push button, for secondary actions. */
+.win-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 110px;
+  min-height: 34px;
+  padding: 6px 18px;
+  border: 1px solid #707070;
+  border-radius: 3px;
+  background: linear-gradient(#f2f2f2, #ebebeb 50%, #dddddd 50%, #cfcfcf);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.8);
+  color: #1e1e1e;
+  font-size: 14px;
+  text-decoration: none;
+}
+.win-button:hover {
+  border-color: #3c7fb1;
+  background: linear-gradient(#eaf6fd, #d9f0fc 50%, #bee6fd 50%, #a7d9f5);
+}
+
 /* ---------- QR poster and expired page ---------- */
 .poster {
   display: grid;
