@@ -2,8 +2,9 @@
  * ElevenLabsCaller: the real CallerPort. book() dials the venue through the ElevenLabs agent on
  * Twilio; the post-call webhook (or the poller, when the webhook is late or missing) reports what
  * happened. No answer, voicemail, or a full house sends it to the backup venue automatically.
- * Exactly one CallResult reaches the engine per booking, and doer_status events narrate the call
- * on the live page with page-safe lines only (venue names, never phones, budgets, or diets).
+ * Exactly one CallResult reaches the engine per booking. The engine publishes the first and final
+ * doer_status and booking_confirmed; the caller adds the mid-call lines ("On the phone with X",
+ * "X can't take us. Calling Y") with page-safe text only (venue names, never phones or diets).
  */
 import {
   newId,
@@ -49,6 +50,7 @@ export interface ElevenLabsCallerOptions {
     | 'CALLER_TIMEZONE'
     | 'CALLER_POLL_MS'
     | 'TWILIO_PHONE_NUMBER'
+    | 'CALLER_DISCLOSE'
   >;
   log: Logger;
   now?: () => Date;
@@ -185,6 +187,9 @@ export class ElevenLabsCaller implements CallerPort {
       booking_name: request.reservationName,
       callback_number: this.o.config.TWILIO_PHONE_NUMBER ?? 'this number',
       table_notes: request.tableNotes.length ? request.tableNotes.join('; ') : 'none',
+      opener: this.o.config.CALLER_DISCLOSE
+        ? `Hi, this is an AI assistant calling for ${request.reservationName}. Do you take reservations?`
+        : 'Hey! Quick question, do you guys take reservations?',
     };
   }
 
@@ -197,7 +202,6 @@ export class ElevenLabsCaller implements CallerPort {
       await this.conclude(row, { kind: 'other', notes: 'not allowlisted' });
       return;
     }
-    await this.doer(row.planId, 'started', `Dialing ${venue.name}`);
     try {
       const { conversationId, callSid } = await this.o.api.outboundCall({
         toNumber: venue.phone,
@@ -272,26 +276,12 @@ export class ElevenLabsCaller implements CallerPort {
       at,
     };
 
+    // The engine publishes the final doer_status and booking_confirmed on handleCallResult.
     if (booked) {
-      await this.doer(row.planId, 'done', `Booked at ${venue.name}`);
-      await this.o.bus.publish({
-        type: 'booking_confirmed',
-        planId: row.planId,
-        at,
-        bookingId: row.bookingId,
-        venue: { venueId: venue.id, name: venue.name, cuisine: venue.cuisine },
-        startAt,
-        partySize: request.partySize,
-        reservationName: name,
-      });
       this.o.log.info(
         { planId: row.planId, callId: row.callId, outcome, mark: 't_booked', at },
         'caller booked',
       );
-    } else if (outcome === 'needs_human') {
-      await this.doer(row.planId, 'needs_human', `${venue.name} wants a card to hold the table`);
-    } else {
-      await this.doer(row.planId, 'failed', result.summary);
     }
     await this.o.onResult(result);
     return true;

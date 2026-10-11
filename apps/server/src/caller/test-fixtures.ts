@@ -61,7 +61,7 @@ export function conversation(
   };
 }
 
-export function setup(overrides: { allowed?: string[]; pollMs?: number } = {}) {
+export function setup(overrides: { allowed?: string[]; pollMs?: number; disclose?: boolean } = {}) {
   const rt = testRuntime();
   const plan = rt.plans.create({
     groupId: 'group_demo',
@@ -85,6 +85,7 @@ export function setup(overrides: { allowed?: string[]; pollMs?: number } = {}) {
       CALLER_TIMEZONE: 'America/New_York',
       CALLER_POLL_MS: overrides.pollMs ?? 0,
       TWILIO_PHONE_NUMBER: '+12297922464',
+      CALLER_DISCLOSE: overrides.disclose ?? true,
     },
     log: rt.log,
   });

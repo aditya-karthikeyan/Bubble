@@ -27,6 +27,11 @@ const Env = z
           .filter(Boolean),
       )
       .pipe(z.array(E164)),
+    /**
+     * Real bookings open with the AI disclosure (product invariant 5). false only for test-number
+     * calls, where everyone on the line knows it's the agent.
+     */
+    CALLER_DISCLOSE: z.stringbool().default(true),
     CALLER_RING_TIMEOUT_S: z.coerce.number().int().min(5).max(60).default(20),
     /** Venue-local time zone for the times the agent says and hears. */
     CALLER_TIMEZONE: z.string().default('America/New_York'),

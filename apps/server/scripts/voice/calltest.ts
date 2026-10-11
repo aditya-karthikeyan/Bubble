@@ -32,7 +32,12 @@ const SCENARIOS: { name: string; script: string; expect: CallOutcome }[] = [
 ];
 
 async function main(): Promise<void> {
-  const config = loadCallerConfig({ ...process.env, CALLER_MODE: 'real' });
+  // Test-number calls: everyone on the line knows it's the agent, so no disclosure.
+  const config = loadCallerConfig({
+    ...process.env,
+    CALLER_MODE: 'real',
+    CALLER_DISCLOSE: 'false',
+  });
   const only = process.argv.includes('--only')
     ? Number(process.argv[process.argv.indexOf('--only') + 1])
     : null;

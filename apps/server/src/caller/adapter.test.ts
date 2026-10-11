@@ -24,6 +24,7 @@ describe('ElevenLabsCaller', () => {
         booking_name: 'Ava',
         callback_number: '+12297922464',
         table_notes: 'none',
+        opener: 'Hi, this is an AI assistant calling for Ava. Do you take reservations?',
       },
     });
 
@@ -45,10 +46,8 @@ describe('ElevenLabsCaller', () => {
       summary: 'Table for 4 at 7:15 PM at The Demo Table under Ava.',
     });
 
-    const types = (await events()).map((e) =>
-      e.type === 'doer_status' ? `doer:${e.state}` : e.type,
-    );
-    expect(types).toEqual(['doer:started', 'doer:done', 'booking_confirmed']);
+    // First and final events are the engine's; a clean primary booking adds none.
+    expect(await events()).toEqual([]);
   });
 
   it('is idempotent on the booking key', async () => {
@@ -60,7 +59,7 @@ describe('ElevenLabsCaller', () => {
   });
 
   it('dials the backup when the primary does not answer, and reports booked_backup', async () => {
-    const { api, caller, results, request } = setup();
+    const { api, caller, results, request, events } = setup();
     await caller.book(request());
     await caller.handleWebhook({
       type: 'call_initiation_failure',
@@ -69,6 +68,13 @@ describe('ElevenLabsCaller', () => {
 
     expect(results).toHaveLength(0);
     expect(api.calls.map((c) => c.toNumber)).toEqual([DEMO_PHONE, BACKUP_PHONE]);
+    expect(await events()).toMatchObject([
+      {
+        type: 'doer_status',
+        state: 'working',
+        detail: "The Demo Table can't take us. Calling Backup Bistro",
+      },
+    ]);
 
     await caller.handleWebhook(
       transcription('conv_2', { booked: true, confirmed_time: '7:00 PM' }),
@@ -94,7 +100,7 @@ describe('ElevenLabsCaller', () => {
   });
 
   it('stops at a deposit request and asks for a human, without trying the backup', async () => {
-    const { api, caller, results, request, events } = setup();
+    const { api, caller, results, request } = setup();
     await caller.book(request());
     await caller.handleWebhook(
       transcription('conv_1', {
@@ -109,8 +115,6 @@ describe('ElevenLabsCaller', () => {
       depositRequested: true,
       venueId: null,
     });
-    const last = (await events()).at(-1);
-    expect(last).toMatchObject({ type: 'doer_status', state: 'needs_human' });
   });
 
   it('refuses numbers that are neither the demo venue nor allowlisted', async () => {
@@ -145,6 +149,14 @@ describe('ElevenLabsCaller', () => {
     expect(results.map((r) => r.outcome)).toEqual(['booked']);
     expect(await caller.handleWebhook({ type: 'post_call_transcription', data: done })).toBe(
       'duplicate',
+    );
+  });
+
+  it('skips the disclosure only when CALLER_DISCLOSE is off', async () => {
+    const { api, caller, request } = setup({ disclose: false });
+    await caller.book(request());
+    expect(api.calls[0]!.dynamicVariables['opener']).toBe(
+      'Hey! Quick question, do you guys take reservations?',
     );
   });
 
