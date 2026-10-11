@@ -130,6 +130,8 @@ export interface BubbleServiceDeps {
   calendarLink?: (userId: string) => string | null;
   /** Signup page for people who are not registered yet (WEB_PUBLIC_URL landing page). */
   signupUrl?: string | null;
+  /** Base for crew join links (/join/<code>); the server serves that page. Falls back to signupUrl. */
+  joinBaseUrl?: string | null;
   /** The engine's "crew changed, rerun" hook (PlanEngine.handleMemberChange). */
   onCrewChanged?: (input: {
     chatId: string;
@@ -1172,7 +1174,8 @@ export class DbBubbleService implements BubbleService {
   /** The link friends tap to land in the crew (signup page with the code), or null. */
   private joinLink(crew: Group): string | null {
     if (!crew.joinCode) return null;
-    return this.deps.signupUrl ? `${this.deps.signupUrl}/join/${crew.joinCode}` : null;
+    const base = this.deps.joinBaseUrl ?? this.deps.signupUrl;
+    return base ? `${base}/join/${crew.joinCode}` : null;
   }
 
   private async hasActiveCrew(userId: string): Promise<boolean> {
