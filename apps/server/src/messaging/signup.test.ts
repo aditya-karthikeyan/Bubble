@@ -71,6 +71,13 @@ describe('signup', () => {
     expect(result.crewName).toBe('the boys');
     expect((await crews.membersOf(crew.id)).map((u) => u.id)).toContain(result.user.id);
     expect((await crews.crewById(crew.id))?.status).toBe('active');
+    expect(result).toMatchObject({ crewId: crew.id, newMember: true, created: true });
+    // The same person again: already in, so nobody is told twice.
+    const again = await signup(
+      { crews, photon: null },
+      { name: 'Dee', email: 'd@x.co', phone: '+15550000010', crewCode: crew.joinCode! },
+    );
+    expect(again).toMatchObject({ crewName: 'the boys', newMember: false, created: false });
   });
 
   it('rejects a phone that is not E.164 and a bad email', async () => {

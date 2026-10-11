@@ -16,8 +16,10 @@
  * onGroupMessage when it is plan-related (reply to a crew message, the member's crew has a plan
  * in flight, or it reads like a plan); everything else goes to onPrivateMessage.
  *
- * The adapter only texts people who have texted their bubble (User.onboardedAt), except on the
- * terminal provider. Logs carry ids, kinds, and timings, never message text.
+ * Crew sends only reach people who have texted their bubble (User.onboardedAt). A private DM also
+ * reaches someone who signed up on the website (User.bubbleNumber, set by Photon registration),
+ * so their bubble can text them first. The terminal provider reaches everyone. Logs carry ids,
+ * kinds, and timings, never message text.
  */
 import {
   groupIdFromChatId,
@@ -597,7 +599,7 @@ export class SpectrumMessaging implements MessagingPort {
     } else throw new Error(`unknown chat id ${chatId}`);
     const out: User[] = [];
     for (const user of users) {
-      if (!this.reachable(user)) continue;
+      if (!this.reachable(user, dmUser !== null)) continue;
       if (await this.isQuiet(user)) {
         this.o.log.info({ userId: user.id, chatId }, 'quiet hours: message held');
         continue;
@@ -607,8 +609,14 @@ export class SpectrumMessaging implements MessagingPort {
     return out;
   }
 
-  private reachable(user: User): boolean {
-    return this.o.transport.provider === 'terminal' || user.onboardedAt !== null;
+  /**
+   * Someone who texted their bubble is reachable everywhere. Someone who only signed up (Photon
+   * registered them and gave them a bubble number) is reachable in their own DM, so the bubble
+   * can text first; crew fan-out still waits for their first reply.
+   */
+  private reachable(user: User, dm: boolean): boolean {
+    if (this.o.transport.provider === 'terminal' || user.onboardedAt !== null) return true;
+    return dm && user.bubbleNumber !== null;
   }
 
   /**

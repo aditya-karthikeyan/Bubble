@@ -156,7 +156,8 @@ export interface MemberChange {
  * setBackground are no-ops on crews. closePoll sends a "Voting closed" message, because
  * iMessage polls cannot be closed or edited. Inbound DMs that are plan-related arrive through
  * onGroupMessage with the member's crew chatId; everything else goes to onPrivateMessage.
- * The adapter may only text people who have texted their bubble first (User.onboardedAt).
+ * Crew sends only reach people who have texted their bubble (User.onboardedAt); a private DM
+ * also reaches someone who signed up (User.bubbleNumber), so the bubble can text first.
  */
 export interface MessagingPort {
   sendGroupText(input: GroupTextInput): Promise<SendResult>;

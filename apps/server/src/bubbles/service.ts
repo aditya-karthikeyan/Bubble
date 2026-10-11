@@ -4,7 +4,8 @@
  * Inbound non-plan DMs arrive at onPrivateMessage. In order, a bubble handles:
  *   1. "forget me" / "forget that"
  *   2. the one pending yes/no question (allergy check, crew invite, forget-me confirm)
- *   3. onboarding, five short questions, for anyone who has not finished it
+ *   3. onboarding, four short questions, for anyone who has not finished it (the bubble texts
+ *      first after signup: greet())
  *   4. crew declarations ("my crew is Ava, Ben, +19195551234")
  *   5. "I covered this one": the bill total, then everyone's share with the payer's handle
  * Anything else returns handled = false so the engine can treat it as a command.
@@ -387,6 +388,72 @@ export class DbBubbleService implements BubbleService {
     await this.startOnboarding(input.userId, this.replier(input.userId, `member:${input.groupId}`));
   }
 
+  /**
+   * The bubble texts first, right after signup: the welcome and question 1, the same way a
+   * first "hi" starts onboarding. Once per person: false when onboarding already started or
+   * finished, so a second signup or a later "hi" never restarts it. With crewName (they came in
+   * through a crew link) the welcome says which crew they are in.
+   */
+  async greet(userId: string, opts: { crewName?: string | null } = {}): Promise<boolean> {
+    const state = this.state(userId);
+    if (state.onboardingCompletedAt || state.onboardingStep) return false;
+    await this.startOnboarding(userId, this.replier(userId, 'greet'), opts);
+    return true;
+  }
+
+  /**
+   * Puts a person in a crew, confirmed. Membership only, no messages: welcome() does those, so
+   * callers that must answer fast (the join page) can send them in the background.
+   */
+  async addToCrew(userId: string, crew: Group): Promise<{ crew: Group; newMember: boolean }> {
+    const already = (await this.crews.membersOf(crew.id)).some((u) => u.id === userId);
+    if (already) return { crew, newMember: false };
+    await this.crews.addMember(crew.id, userId);
+    return { crew: await this.crews.confirmMember(crew.id, userId), newMember: true };
+  }
+
+  /**
+   * The messages after someone signs up or joins a crew, shared by signup, the join page, and
+   * "join <code>". A new crew member hears "You're in" (inside the onboarding welcome when they
+   * have not started it) and the crew's creator hears who joined. Otherwise this only starts
+   * onboarding if it has not started.
+   */
+  async welcome(
+    userId: string,
+    opts: { crewId?: string | null; newMember?: boolean } = {},
+    reply: Reply = this.replier(userId, `welcome:${opts.crewId ?? 'none'}`),
+  ): Promise<void> {
+    const crew = opts.crewId ? await this.crews.crewById(opts.crewId) : null;
+    if (!crew || !opts.newMember) {
+      await this.greet(userId, { crewName: crew?.name ?? null });
+      return;
+    }
+    const user = await this.crews.userById(userId);
+    if (!user) return;
+    if (!(await this.greet(userId, { crewName: crew.name }))) {
+      const st = this.state(userId);
+      if (st.onboardingCompletedAt) {
+        await reply(
+          `You're in ${crew.name} 🫧 Anyone in it can text me "dinner tonight?" to start a plan.`,
+        );
+      } else {
+        const open =
+          st.onboardingStep && !isDone(st.onboardingStep) ? decodeStep(st.onboardingStep) : null;
+        await reply(
+          `You're in ${crew.name} 🫧${open ? `\n\n${question(open.step, open.fast)}` : ''}`,
+        );
+      }
+    }
+    if (crew.createdByUserId && crew.createdByUserId !== userId) {
+      await this.replier(
+        crew.createdByUserId,
+        `joined:${crew.id}:${userId}`,
+      )(`${user.displayName} joined ${crew.name}.`);
+    }
+    await this.deps.onCrewChanged?.({ chatId: crew.chatId, userId, change: 'joined' });
+    this.log.info({ groupId: crew.id, userId }, 'joined crew');
+  }
+
   isOnboarded(userId: string): boolean {
     return this.state(userId).onboardingCompletedAt !== null;
   }
@@ -530,6 +597,13 @@ export class DbBubbleService implements BubbleService {
     }
 
     if (!state.onboardingCompletedAt) {
+      // "hi bubble" after the bubble already texted first (the signup page's fallback link) is
+      // not an answer: ask the open question again instead of saving "hi" as their diet.
+      if (state.onboardingStep && !isDone(state.onboardingStep) && GREETING_ONLY.test(text)) {
+        const open = decodeStep(state.onboardingStep);
+        await reply(`Hey 🫧 ${question(open.step, open.fast)}`);
+        return true;
+      }
       if (!state.onboardingStep) await this.startOnboarding(user.id, reply);
       else if (isDone(state.onboardingStep)) await this.finishOnboarding(user, reply);
       else await this.answerOnboarding(user, state.onboardingStep, text, m.messageId, reply);
@@ -1125,23 +1199,35 @@ export class DbBubbleService implements BubbleService {
 
   // -- onboarding ------------------------------------------------------------
 
-  private async startOnboarding(userId: string, reply: Reply): Promise<void> {
-    const user = await this.crews.userById(userId);
+  private async startOnboarding(
+    userId: string,
+    reply: Reply,
+    opts: { crewName?: string | null } = {},
+  ): Promise<void> {
     const nowIso = this.now().toISOString();
     // Late joiner: a crew they belong to (or are invited to) is planning right now, so ask
     // only what changes tonight's decision and let them join the live plan.
     const fast = this.activePlanFor(userId) !== null;
     const first: OnboardingStep = 'diet_allergy'; // first in both flows
+    // The step is saved before anything is awaited, so a second greet or a "hi" racing this
+    // one sees onboarding as started and never asks the first question twice.
     this.upsertState(userId, {
       onboardingStep: encodeStep(first, fast),
       onboardingStartedAt: nowIso,
     });
+    const user = await this.crews.userById(userId);
+    const hey = `Hey ${user?.displayName ?? 'there'}, I'm your bubble 🫧`;
+    const crew = opts.crewName ?? null;
     // First message to a new person: no links, no media (Apple deliverability rule).
-    const intro = fast
-      ? `Hey ${user?.displayName ?? 'there'}, I'm your bubble 🫧 Your crew is planning food ` +
-        "right now, so two quick questions and you're in."
-      : `Hey ${user?.displayName ?? 'there'}, I'm your bubble 🫧 I plan food with your crew ` +
-        "so the group chat doesn't have to. Five quick questions, about a minute.";
+    const intro = crew
+      ? fast
+        ? `${hey} You're in ${crew}, and they're planning food right now. Two quick questions ` +
+          'so I can plan around you.'
+        : `${hey} You're in ${crew}. Four quick questions so I can plan around you.`
+      : fast
+        ? `${hey} Your crew is planning food right now, so two quick questions and you're in.`
+        : `${hey} I plan food with your crew so the group chat doesn't have to. Four quick ` +
+          'questions, about a minute.';
     await reply(`${intro}\n\n${question(first, fast)}`);
     this.log.info({ userId, fast }, 'onboarding started');
   }
@@ -1538,29 +1624,17 @@ export class DbBubbleService implements BubbleService {
 
   /** "join boys-4821": straight in, confirmed; the organizer hears who joined. */
   private async joinByCode(user: User, code: string, reply: Reply): Promise<void> {
-    const crew = await this.crews.crewByJoinCode(code);
-    if (!crew) {
+    const found = await this.crews.crewByJoinCode(code);
+    if (!found) {
       await reply("I don't know that code. Ask whoever made the crew for their link.");
       return;
     }
-    const already = (await this.crews.membersOf(crew.id)).some((u) => u.id === user.id);
-    if (already) {
+    const { crew, newMember } = await this.addToCrew(user.id, found);
+    if (!newMember) {
       await reply(`You're already in ${crew.name}.`);
       return;
     }
-    await this.crews.addMember(crew.id, user.id);
-    const after = await this.crews.confirmMember(crew.id, user.id);
-    await reply(
-      `You're in ${after.name} 🫧 Anyone in it can text me "dinner tonight?" to start a plan.`,
-    );
-    if (after.createdByUserId && after.createdByUserId !== user.id) {
-      await this.replier(
-        after.createdByUserId,
-        `joined:${crew.id}:${user.id}`,
-      )(`${user.displayName} joined ${after.name}.`);
-    }
-    await this.deps.onCrewChanged?.({ chatId: after.chatId, userId: user.id, change: 'joined' });
-    this.log.info({ groupId: crew.id, userId: user.id }, 'joined crew by code');
+    await this.welcome(user.id, { crewId: crew.id, newMember }, reply);
   }
 
   private async declareCrew(creator: User, names: CrewDeclaration, reply: Reply): Promise<void> {
@@ -1897,6 +1971,10 @@ export function isNo(text: string): boolean {
     /^\s*👎/.test(text)
   );
 }
+
+/** A bare hello ("hi bubble", "hey!"), which never answers an onboarding question. */
+const GREETING_ONLY =
+  /^(?:hi|hii+|hey+|hello|yo|hiya|howdy|sup|what'?s up)(?:\s+(?:there|bubble|again))*[\s!.?🫧👋]*$/iu;
 
 /** Late joiners answer only what changes tonight's decision. */
 const FAST_STEPS = ['diet_allergy', 'budget'] as const satisfies readonly OnboardingStep[];

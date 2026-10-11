@@ -3,7 +3,8 @@
  *
  * On Photon Pro a person must be a registered Spectrum user before their bubble can text them,
  * and registration is what assigns their bubble number. The landing page (P4) posts here; the
- * person then texts that number, which sets User.onboardedAt.
+ * server then has the bubble text the person first (DbBubbleService.greet), and their first reply
+ * sets User.onboardedAt.
  */
 import type { CrewDirectory, User } from '@bubbleworks/shared';
 import { z } from 'zod';
@@ -26,6 +27,11 @@ export interface SignupResult {
   smsLink: string | null;
   /** The crew the code put them in, when a code came along and matched. */
   crewName: string | null;
+  crewId: string | null;
+  /** True when this signup added them to that crew (false when they were already in it). */
+  newMember: boolean;
+  /** True when this signup created the user (false for a repeat signup by the same phone). */
+  created: boolean;
 }
 
 export async function signup(
@@ -62,13 +68,18 @@ export async function signup(
     ? `sms:${bubbleNumber}&body=${encodeURIComponent('hi bubble')}`
     : null;
   let crewName: string | null = null;
+  let crewId: string | null = null;
+  let newMember = false;
   if (input.crewCode) {
     const crew = await deps.crews.crewByJoinCode(input.crewCode);
     if (crew) {
+      newMember = !(await deps.crews.membersOf(crew.id)).some((u) => u.id === user.id);
+      // Both are no-ops for a confirmed member, and confirm someone who was only invited.
       await deps.crews.addMember(crew.id, user.id);
       const after = await deps.crews.confirmMember(crew.id, user.id);
       crewName = after.name;
+      crewId = after.id;
     }
   }
-  return { user, bubbleNumber, smsLink, crewName };
+  return { user, bubbleNumber, smsLink, crewName, crewId, newMember, created: !existing };
 }

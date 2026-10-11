@@ -5,7 +5,7 @@ import { FakeMessaging } from '@bubbleworks/shared/fakes';
 import { createBubbles } from './bubbles/index.js';
 import { createCaller, loadCallerConfig } from './caller/index.js';
 import { GooglePlacesSource } from './venues/places.js';
-import { joinPageHtml } from './web/join-page.js';
+import { registerJoinRoutes } from './web/join-routes.js';
 import { loadTicketPage, ticketPageHtml } from './web/ticket-page.js';
 import { registerWatchRoute } from './web/watch-route.js';
 import { seedDemoBubbles } from './bubbles/seed.js';
@@ -204,13 +204,12 @@ async function main(): Promise<void> {
     app.fastify.log.info('dev routes enabled at /api/dev/*');
   }
 
-  /** The join page shows the crew's name before signup. Only the name leaves the server. */
-  /** The crew link people tap. Served here so it works even when the web app lags behind. */
-  app.fastify.get<{ Params: { code: string } }>('/join/:code', async (request, reply) => {
-    const crew = await runtime.crews.crewByJoinCode(request.params.code);
-    return reply
-      .type('text/html; charset=utf-8')
-      .send(joinPageHtml({ code: request.params.code, crewName: crew?.name ?? null }));
+  // Join page, crew lookup, signup, and phone-only join. After a signup or a join the bubble
+  // texts the person first (onboarding question 1 or "You're in <crew>"), in the background.
+  registerJoinRoutes(app.fastify, {
+    crews: runtime.crews,
+    signup: (raw) => messaging.signup(raw),
+    bubbles: bubbles.service,
   });
 
   const ticketDeps = {
@@ -237,27 +236,6 @@ async function main(): Promise<void> {
     const ticket = await loadTicketPage(ticketDeps, request.params.token);
     if (!ticket) return reply.code(404).send({ ok: false, error: 'no such ticket' });
     return { ok: true, ticket };
-  });
-
-  app.fastify.get<{ Params: { code: string } }>('/api/crews/:code', async (request, reply) => {
-    const crew = await runtime.crews.crewByJoinCode(request.params.code);
-    if (!crew) return reply.code(404).send({ ok: false, error: 'no such crew' });
-    return { ok: true, name: crew.name };
-  });
-
-  app.fastify.post('/api/signup', async (request, reply) => {
-    try {
-      const result = await messaging.signup(request.body);
-      return {
-        ok: true,
-        bubbleNumber: result.bubbleNumber,
-        smsLink: result.smsLink,
-        crewName: result.crewName,
-      };
-    } catch (err) {
-      request.log.warn({ err: String(err) }, 'signup rejected');
-      return reply.code(400).send({ ok: false, error: 'invalid signup' });
-    }
   });
 
   /** The organizer's private, stable link to the newest plan's live page. */

@@ -236,6 +236,52 @@ describe('DbBubbleService', () => {
       expect(lastTo(bo.id)).toMatch(/^I don't know that code/);
     });
 
+    it('greet: the bubble texts first once, naming the crew, and the reply answers question 1', async () => {
+      const eve = await newUser('Eve', '+19195550151');
+      expect(await bubbles.greet(eve.id, { crewName: 'the boys' })).toBe(true);
+      expect(textsTo(eve.id)).toHaveLength(1);
+      expect(lastTo(eve.id)).toBe(
+        "Hey Eve, I'm your bubble 🫧 You're in the boys. Four quick questions so I can plan " +
+          "around you.\n\n1/4 Anything you don't eat? Diet, allergies, halal, kosher, or just say none.",
+      );
+      // Once per person: a second greet and a later "hi bubble" never restart onboarding.
+      expect(await bubbles.greet(eve.id)).toBe(false);
+      expect(textsTo(eve.id)).toHaveLength(1);
+      await dm(eve, 'hi bubble');
+      expect(lastTo(eve.id)).toMatch(/^Hey 🫧 1\/4 Anything you don't eat/);
+      expect(lastTo(eve.id)).not.toMatch(/I'm your bubble/);
+      await dm(eve, 'vegetarian');
+      expect(lastTo(eve.id)).toMatch(/^2\/4/);
+      const diet = (await bubbles.getProfile(eve.id)).facts.find((f) => f.type === 'diet');
+      expect(diet?.value).toBe('vegetarian');
+    });
+
+    it('welcome after a join: a new member hears "You\'re in", the creator hears who joined', async () => {
+      const ana = await newUser('Ana', '+19195550152');
+      const bo = await newUser('Bo', '+19195550153');
+      const cy = await newUser('Cy', '+19195550154');
+      await onboard(ana);
+      await onboard(bo);
+      await dm(ana, 'new crew the boys');
+      const crew = (await rt.crews.crewsOf(ana.id)).find((g) => g.name === 'the boys')!;
+
+      // Bo already has a bubble: straight in.
+      const joined = await bubbles.addToCrew(bo.id, crew);
+      expect(joined.newMember).toBe(true);
+      await bubbles.welcome(bo.id, { crewId: crew.id, newMember: true });
+      expect(lastTo(bo.id)).toMatch(/^You're in the boys 🫧 Anyone in it can text me/);
+      expect(lastTo(ana.id)).toBe('Bo joined the boys.');
+      expect(changes.at(-1)).toMatchObject({ userId: bo.id, change: 'joined' });
+      expect((await bubbles.addToCrew(bo.id, crew)).newMember).toBe(false);
+
+      // Cy never texted: the onboarding welcome carries the crew.
+      await bubbles.addToCrew(cy.id, crew);
+      await bubbles.welcome(cy.id, { crewId: crew.id, newMember: true });
+      expect(textsTo(cy.id)).toHaveLength(1);
+      expect(lastTo(cy.id)).toMatch(/^Hey Cy, I'm your bubble 🫧 You're in the boys\./);
+      expect(lastTo(ana.id)).toBe('Cy joined the boys.');
+    });
+
     it('a plan-shaped text from someone with no crew points them at "new crew"', async () => {
       const dee = await newUser('Dee', '+19195550143');
       await onboard(dee);
