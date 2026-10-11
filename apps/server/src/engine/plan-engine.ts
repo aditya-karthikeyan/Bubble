@@ -673,6 +673,10 @@ export class BubbleworksEngine implements PlanEngine {
         return;
       }
       case 'failed': {
+        // One venue we could not call (bad number, refused, provider error) is not the end of
+        // the plan: drop it and let the solver try the next place. Only the deadlock path can
+        // close a plan for lack of venues.
+        if (plan.state !== 'BOOKING') return;
         this.rt.db
           .update(bookings)
           .set({ status: 'failed', callId: result.callId, notes: 'failed', updatedAt: at })
@@ -682,9 +686,11 @@ export class BubbleworksEngine implements PlanEngine {
           type: 'doer_status',
           doer: 'caller',
           state: 'failed',
-          detail: 'Call failed',
+          detail: 'Could not reach them, trying the next place',
         });
-        await this.fail(plan.id, 'call failed');
+        this.addVetoed(plan.id, booking.venueId);
+        await this.rt.plans.transition(plan.id, 'DELIBERATING', { reason: 'call failed' });
+        await this.deliberate(plan.id);
         return;
       }
       case 'modified': {
@@ -1288,15 +1294,6 @@ export class BubbleworksEngine implements PlanEngine {
       state: 'working',
       detail: 'Watching for changes',
     });
-  }
-
-  private async fail(planId: string, reason: string): Promise<void> {
-    this.rt.timers.cancel(planId);
-    const r = await this.rt.plans.tryTransition(planId, 'FAILED', { reason });
-    if (!r.ok) return;
-    await this.publish(planId, { type: 'plan_closed', reason: 'failed' });
-    this.deps.intake?.closePlan(planId);
-    await this.groupText(r.plan, 'failed', 'I could not get a table tonight. Sorry.');
   }
 
   /** The organizer's answer to a deposit request. Yes books it under their name; no moves on. */

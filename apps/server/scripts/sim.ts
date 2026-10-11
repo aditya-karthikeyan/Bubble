@@ -3,7 +3,9 @@
  * Drives the real engine with every fake, short deadlines, and real time. Prints a timeline:
  * state transitions, page events, outbound messages, and the timing marks
  * (t_detect, t_poll_posted, t_lock, t_dial, t_booked) relative to the intent.
+ * SIM_EVENTS_OUT=<path> also writes every page event as JSON (P4's live page replay fixtures).
  */
+import { writeFileSync } from 'node:fs';
 import type { PlanEvent } from '@bubbleworks/shared';
 import {
   FakeBubbles,
@@ -82,7 +84,9 @@ async function main(): Promise<void> {
     log,
   });
   ref.engine = engine;
+  const recorded: PlanEvent[] = [];
   rt.bus.subscribe('*', (e: PlanEvent) => {
+    recorded.push(e);
     const extra =
       e.type === 'private_ask_sent'
         ? ` ${e.askId}`
@@ -252,6 +256,9 @@ async function main(): Promise<void> {
   console.log(
     `Group messages: ${messaging.sent.filter((s) => s.kind === 'group_text').length}, doers: ${doers.calls.map((c) => c.doer).join(',') || 'none'}`,
   );
+  if (process.env['SIM_EVENTS_OUT']) {
+    writeFileSync(process.env['SIM_EVENTS_OUT'], `${JSON.stringify(recorded, null, 2)}\n`);
+  }
   caller.dispose();
   rt.close();
   const ok =

@@ -80,6 +80,17 @@ const body = {
     turn: { turn_eagerness: 'patient' },
   },
   platform_settings: {
+    // Post-call webhook to Railway (created once; its id lives in .env).
+    ...(process.env['ELEVENLABS_POST_CALL_WEBHOOK_ID']
+      ? {
+          workspace_overrides: {
+            webhooks: {
+              post_call_webhook_id: process.env['ELEVENLABS_POST_CALL_WEBHOOK_ID'],
+              events: ['transcript', 'call_initiation_failure'],
+            },
+          },
+        }
+      : {}),
     data_collection: {
       booked: {
         type: 'boolean',
