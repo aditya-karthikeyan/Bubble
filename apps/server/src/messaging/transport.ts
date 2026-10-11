@@ -52,11 +52,12 @@ export interface SpectrumTransportOptions {
   /** Terminal chats not named after a phone (chat-1, chat-2) speak as this phone. */
   terminalDefaultPhone?: string;
   /**
-   * How links render on iMessage. "app" (default): a generic iMessage app card, the only form
-   * that shows a preview (page title and description) from the Photon shared line. "richlink":
-   * a bare URL bubble (no preview on the shared line, but no app needed to open it).
+   * How links render on iMessage. "text" (default): "🫧 <title>: <url>", tap opens Safari with
+   * nothing to install. "app": a generic iMessage app card, the only form that shows a preview
+   * from the Photon shared line, but phones without the "Spectrum by Photon" iMessage app are
+   * asked to download it first. "richlink": a bare URL bubble.
    */
-  linkStyle?: 'app' | 'richlink';
+  linkStyle?: 'text' | 'app' | 'richlink';
   log?: (obj: Record<string, unknown>, msg: string) => void;
 }
 
@@ -205,8 +206,13 @@ export class SpectrumTransport implements Transport {
         if (terminal) {
           return { messageId: this.remember(await space.send(`${content.title}\n${content.url}`)) };
         }
+        const style = this.options.linkStyle ?? 'text';
         const link =
-          (this.options.linkStyle ?? 'app') === 'app' ? app(content.url) : richlink(content.url);
+          style === 'app'
+            ? app(content.url)
+            : style === 'richlink'
+              ? richlink(content.url)
+              : text(`🫧 ${content.title}: ${content.url}`);
         return { messageId: this.remember(await space.send(link)) };
       }
       case 'image': {

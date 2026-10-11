@@ -16,7 +16,7 @@ const Env = z
       .regex(/^\+[1-9]\d{7,14}$/)
       .optional(),
     /** app: iMessage app card with a page preview (default). richlink: bare URL bubble. */
-    MESSAGING_LINK_STYLE: z.enum(['app', 'richlink']).default('app'),
+    MESSAGING_LINK_STYLE: z.enum(['text', 'app', 'richlink']).default('text'),
     /** Send "Voting closed: X". Off by default: the live card already shows the plan moved on. */
     MESSAGING_ANNOUNCE_POLL_CLOSE: z.stringbool().default(false),
     /** staged: headcount, then poll once enough are in, then link at deliberation. */
