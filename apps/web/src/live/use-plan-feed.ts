@@ -9,9 +9,13 @@
  * merge, lock) within milliseconds, so a queue paces them with a dwell after the moments worth
  * watching. History that arrives on join plays as a fast recap, so a late viewer still sees the
  * crew come together instead of landing on the end state.
+ *
+ * The arena can also hold the queue: before each event the feed asks whether every animation
+ * from the last one has finished (the crew bubble filling, doers splitting off, a pop), so no
+ * step ever starts before the one before it ends.
  */
 import { PlanEvent, SOCKET } from '@bubbleworks/shared';
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState, type MutableRefObject } from 'react';
 import { io } from 'socket.io-client';
 import { SERVER_URL } from '../../app/site';
 import basic from '../../fixtures/basic.json';
@@ -53,6 +57,10 @@ export const DWELL_MS: Partial<Record<PlanEvent['type'], number>> = {
   booking_confirmed: 800,
 };
 
+/** How often the feed re-checks a busy arena, and the longest it waits on one event. */
+const SETTLE_POLL_MS = 120;
+const SETTLE_MAX_MS = 6000;
+
 export function gapAfter(
   event: PlanEvent,
   next: PlanEvent | undefined,
@@ -66,7 +74,11 @@ export function gapAfter(
   return Math.min(2200, Math.max(300, real * 3)) + dwell;
 }
 
-export function usePlanFeed(token: string, replay: string | null) {
+export function usePlanFeed(
+  token: string,
+  replay: string | null,
+  settled?: MutableRefObject<(() => boolean) | null>,
+) {
   const [vm, dispatch] = useReducer(feedReducer, EMPTY);
   const [status, setStatus] = useState<FeedStatus>(replay ? 'replay' : 'connecting');
   const [run, setRun] = useState(0);
@@ -74,9 +86,20 @@ export function usePlanFeed(token: string, replay: string | null) {
   const queue = useRef<{ event: PlanEvent; pace: Pace }[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onDrained = useRef<(() => void) | null>(null);
+  const waited = useRef(0);
 
   const pump = useCallback(() => {
     if (timer.current) return;
+    // Hold everything, the end of the replay included, while the arena is still animating.
+    if (settled?.current && !settled.current() && waited.current < SETTLE_MAX_MS) {
+      waited.current += SETTLE_POLL_MS;
+      timer.current = setTimeout(() => {
+        timer.current = null;
+        pump();
+      }, SETTLE_POLL_MS);
+      return;
+    }
+    waited.current = 0;
     const item = queue.current.shift();
     if (!item) {
       onDrained.current?.();
@@ -90,7 +113,7 @@ export function usePlanFeed(token: string, replay: string | null) {
       timer.current = null;
       pump();
     }, gap);
-  }, []);
+  }, [settled]);
 
   const enqueue = useCallback(
     (events: PlanEvent[], pace: Pace) => {

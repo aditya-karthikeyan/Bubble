@@ -163,22 +163,35 @@ describe('arena layout', () => {
     }
   });
 
-  it('ends as one bubble: the doers are absorbed into the destination once the plan is complete', () => {
+  it('pops each helper that finishes, and ends as one bubble once the plan is complete', () => {
     const vm = reduceAll(BASIC);
     expect(phaseOf(vm)).toBe('complete');
     const l = computeLayout(vm, 'complete', PHONE);
-    expect(Object.values(l.doers).map((d) => d.absorb?.into)).toEqual([
-      venueNode('venue_demo'),
-      venueNode('venue_demo'),
-      venueNode('venue_demo'),
-      venueNode('venue_demo'),
+    // Caller, Inviter, and Splitter finished: they pop. The Watcher goes into the destination.
+    expect(['caller', 'inviter', 'splitter'].map((k) => l.doers[k as 'caller']!.pop)).toEqual([
+      0, 0, 0,
     ]);
+    expect(l.doers.watcher!.absorb?.into).toBe(venueNode('venue_demo'));
     const people = Object.values(l.bubbles).filter((b) => b.opacity > 0);
     expect(people.every((b) => b.absorb?.into === CREW)).toBe(true);
     expect(l.crew!.absorb?.into).toBe(venueNode('venue_demo'));
     expect(l.venues['venue_demo']!.r).toBeGreaterThan(
       computeLayout(vm, 'summary', PHONE).venues['venue_demo']!.r,
     );
+  });
+
+  it('pops the places that were ruled out, one after another, once one is locked', () => {
+    const l = computeLayout(reduceAll(upTo('plan_locked')), 'locked', PHONE);
+    const gone = Object.values(l.venues).filter((v) => !v.leader);
+    expect(gone.map((v) => v.pop)).toEqual(gone.map((_, i) => i));
+    expect(gone.every((v) => v.opacity === 0)).toBe(true);
+  });
+
+  it('gives desktop bubbles the whole screen and keeps phone sizes', () => {
+    expect(safeArea(LAPTOP, true).top).toBeLessThan(30);
+    expect(safeArea(LAPTOP, true).bottom).toBeGreaterThan(LAPTOP.h - 70);
+    expect(sizes(LAPTOP).bubble).toBeGreaterThan(sizes(PHONE).bubble * 1.6);
+    expect(sizes(PHONE)).toEqual({ bubble: 30, venue: 390 / 14, doer: 390 / 11 });
   });
 
   it('keeps the doers in a compact group with only gentle drift', () => {

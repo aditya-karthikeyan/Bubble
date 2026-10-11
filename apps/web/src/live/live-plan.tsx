@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Arena } from './arena';
 import { AeroIcon, AeroWindow, Desktop, Taskbar } from '../../app/aero';
+import { floatingWindows } from './layout';
+import type { Rect } from './physics';
 import { usePlanFeed, type FeedStatus } from './use-plan-feed';
 import { PHASE_COPY, phaseOf, type Phase } from './view-model';
 
@@ -33,6 +35,45 @@ const PHASE_ICON: Record<Phase, { kind: 'info' | 'ok' | 'warn'; glyph: string }>
   complete: { kind: 'ok', glyph: '✓' },
   closed: { kind: 'warn', glyph: '!' },
 };
+
+type WindowId = 'plan' | 'locked' | 'booked' | 'done';
+const WINDOW_IDS: WindowId[] = ['plan', 'locked', 'booked', 'done'];
+/** Widths match the .floating rules in globals.css; heights are estimates for placement. */
+const WINDOW_SIZE: Record<WindowId, { w: number; h: number }> = {
+  plan: { w: 440, h: 190 },
+  locked: { w: 400, h: 150 },
+  booked: { w: 400, h: 200 },
+  done: { w: 400, h: 150 },
+};
+
+const overlaps = (a: Rect, b: Rect) =>
+  a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/**
+ * Where a window pops up on the desktop: a random corner, nudged a little, clear of the
+ * windows already open. The plan window takes a top corner; dialogs prefer the bottom.
+ */
+function pickSpot(id: WindowId, open: Rect[]): CSSProperties {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const { w, h } = WINDOW_SIZE[id];
+  const corners = (id === 'plan' ? ['tl', 'tr'] : ['bl', 'br', 'tr', 'tl']).sort(
+    () => Math.random() - 0.5,
+  );
+  if (id !== 'plan') corners.sort((a, b) => Number(a[0] === 't') - Number(b[0] === 't'));
+  const spots = corners.map((c) => {
+    const x = c[1] === 'l' ? 16 + Math.random() * 90 : vw - w - 16 - Math.random() * 90;
+    const fromBottom = 58 + Math.random() * 50;
+    const y = c[0] === 't' ? 16 + Math.random() * 50 : vh - fromBottom - h;
+    return {
+      rect: { x, y, w, h },
+      style: (c[0] === 't'
+        ? { left: x, top: y }
+        : { left: x, bottom: fromBottom }) satisfies CSSProperties,
+    };
+  });
+  return (spots.find((s) => !open.some((r) => overlaps(s.rect, r))) ?? spots[0]!).style;
+}
 
 function time(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -67,17 +108,25 @@ export function PhaseBanner({
   bubbles,
   minimized,
   onMinimize,
+  className,
+  style,
+  onRect,
 }: {
   phase: Phase;
   bubbles: number;
   minimized: boolean;
   onMinimize: () => void;
+  className?: string;
+  style?: CSSProperties;
+  onRect?: (rect: DOMRect | null) => void;
 }) {
   const copy = PHASE_COPY[phase];
   const icon = PHASE_ICON[phase];
   return (
     <AeroWindow
-      className="hud-top"
+      className={`hud-top popup${className ? ` ${className}` : ''}`}
+      style={style}
+      onRect={onRect}
       title="Bubbleworks · Live plan"
       labelledBy="phase-title"
       minimized={minimized}
@@ -105,15 +154,63 @@ export function PhaseBanner({
 }
 
 export function LivePlan({ token, replay }: { token: string; replay: string | null }) {
-  const { vm, status, restart, run } = usePlanFeed(token, replay);
+  // The arena tells the feed when its animations finish, so each step waits for the last.
+  const settled = useRef<(() => boolean) | null>(null);
+  const { vm, status, restart, run } = usePlanFeed(token, replay, settled);
   const [hudMinimized, setHudMinimized] = useState(false);
   const [dismissed, setDismissed] = useState<string | null>(null);
+  // Desktop windows pop up at random spots and float; the arena keeps bubbles out from under them.
+  const [floating, setFloating] = useState(false);
+  const [spots, setSpots] = useState<Partial<Record<WindowId, CSSProperties>>>({});
+  const rects = useRef<Partial<Record<WindowId, Rect>>>({});
+  const windows = useRef<Rect[]>([]);
+  const track = useMemo(
+    () =>
+      Object.fromEntries(
+        WINDOW_IDS.map((id) => [
+          id,
+          (r: DOMRect | null) => {
+            if (r) rects.current[id] = { x: r.left, y: r.top, w: r.width, h: r.height };
+            else delete rects.current[id];
+            windows.current = Object.values(rects.current);
+          },
+        ]),
+      ) as Record<WindowId, (r: DOMRect | null) => void>,
+    [],
+  );
+  useEffect(() => {
+    const on = () => setFloating(floatingWindows({ w: window.innerWidth, h: window.innerHeight }));
+    on();
+    window.addEventListener('resize', on);
+    return () => window.removeEventListener('resize', on);
+  }, []);
+  const sheet: WindowId | null = vm.booking
+    ? 'booked'
+    : vm.locked
+      ? 'locked'
+      : status === 'replay_done'
+        ? 'done'
+        : null;
+  // Each window gets its spot the first time it opens, clear of the ones already up.
+  useEffect(() => {
+    if (!floating) return;
+    setSpots((sp) => {
+      if (sp.plan && (!sheet || sp[sheet])) return sp;
+      const next = { ...sp };
+      next.plan ??= pickSpot('plan', []);
+      if (sheet) next[sheet] ??= pickSpot(sheet, Object.values(rects.current));
+      return next;
+    });
+  }, [floating, sheet]);
+  // Floating windows wait for their spot, so they never flash in the docked position first.
+  const placed = (id: WindowId): CSSProperties | undefined =>
+    floating ? (spots[id] ?? { visibility: 'hidden' }) : undefined;
 
   if (status === 'expired') {
     return (
       <main className="sky poster">
         <Desktop />
-        <AeroWindow className="poster-window" title="Bubbleworks" controls="dialog">
+        <AeroWindow className="poster-window" title="Bubbleworks" controls="dialog" closeHref="/">
           <div className="dialog-main">
             <AeroIcon kind="warn">!</AeroIcon>
             <div>
@@ -135,16 +232,10 @@ export function LivePlan({ token, replay }: { token: string; replay: string | nu
   }
 
   const phase = phaseOf(vm);
-  const sheet = vm.booking
-    ? 'booked'
-    : vm.locked
-      ? 'locked'
-      : status === 'replay_done'
-        ? 'done'
-        : null;
   const sheetOpen = sheet !== null && sheet !== dismissed;
   const again = () => {
     setDismissed(null);
+    setSpots((sp) => ({ plan: sp.plan }));
     restart();
   };
   const bubbles = vm.bubbles.filter((b) => b.present).length;
@@ -152,12 +243,21 @@ export function LivePlan({ token, replay }: { token: string; replay: string | nu
   return (
     <main className="stage">
       <Desktop />
-      <Arena key={`${token}:${replay}:${run}`} vm={vm} phase={phase} />
+      <Arena
+        key={`${token}:${replay}:${run}`}
+        vm={vm}
+        phase={phase}
+        windows={windows}
+        settled={settled}
+      />
       <PhaseBanner
         phase={phase}
         bubbles={bubbles}
         minimized={hudMinimized}
         onMinimize={() => setHudMinimized(true)}
+        className={floating ? 'floating' : undefined}
+        style={placed('plan')}
+        onRect={track.plan}
       />
       {status === 'offline' && (
         <div className="balloon" role="status">
@@ -168,7 +268,9 @@ export function LivePlan({ token, replay }: { token: string; replay: string | nu
       {sheetOpen && (
         <AeroWindow
           key={sheet}
-          className="hud-sheet"
+          className={`hud-sheet popup${floating ? ' floating' : ''}`}
+          style={placed(sheet)}
+          onRect={track[sheet]}
           title={sheet === 'booked' ? 'Booked' : sheet === 'locked' ? 'Plan locked' : 'Replay'}
           controls="dialog"
           labelledBy="sheet-title"

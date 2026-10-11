@@ -11,15 +11,18 @@
  * are scaled per frame, so a glass restyle only touches their markup.
  */
 import type { BubblePageStatus, DoerKind, DoerState } from '@bubbleworks/shared';
+import { forceSimulation, type Force, type Simulation, type SimulationNodeDatum } from 'd3-force';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import {
-  forceCollide,
-  forceSimulation,
-  type Force,
-  type Simulation,
-  type SimulationNodeDatum,
-} from 'd3-force';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { computeLayout, CREW, safeArea, type Layout, type Size, type Target } from './layout';
+  computeLayout,
+  CREW,
+  floatingWindows,
+  safeArea,
+  type Layout,
+  type Size,
+  type Target,
+} from './layout';
+import { avoidRects, clearOf, separate, steer, type Body, type Rect } from './physics';
 import { STATUS_LABEL, type Phase, type ViewModel } from './view-model';
 import {
   createDrift,
@@ -32,8 +35,7 @@ import {
   type Random,
 } from './motion';
 
-interface Node extends SimulationNodeDatum {
-  id: string;
+interface Node extends SimulationNodeDatum, Body {
   kind: 'bubble' | 'venue' | 'doer' | 'crew';
   /** Target centre and float radius from the layout. */
   bx: number;
@@ -46,8 +48,9 @@ interface Node extends SimulationNodeDatum {
   opt: number;
   /** Each bubble chooses new directions on its own irregular clock. */
   drift: Drift;
-  tx: number;
-  ty: number;
+  /** When it appeared, and its place in its group (doers split off in this order). */
+  bornAt: number;
+  order: number;
   /** The node this one flies into (the crew bubble or the venue), and when it takes off. */
   absorbInto?: string;
   absorbAt?: number;
@@ -56,16 +59,36 @@ interface Node extends SimulationNodeDatum {
   hy?: number;
   rBase?: number;
   absorbed?: boolean;
-  /** The destination while it absorbs: collisions add both radii, so it must yield too. */
+  /** Something is being absorbed into it (the venue during the finale). */
   swallowing?: boolean;
   /** Crew bubble: who it takes in, and its full radius once everyone is inside. */
   members?: string[];
   rFull?: number;
+  /** Doer: when it splits off the crew bubble; hidden inside it until then. */
+  appearAt?: number;
+  /** Ruled out or finished: its place in the pop queue, when it pops, and whether it has. */
+  pop?: number;
+  popAt?: number;
+  popped?: boolean;
 }
 
 /** Stagger between bubbles taking off into the destination, and the pause before the first. */
 const ABSORB_FIRST_MS = 700;
 const ABSORB_STAGGER_MS = 420;
+const ABSORB_GIVE_UP_MS = 2600;
+/** Doers split off the crew bubble once everyone is inside it, one after another. */
+const DOER_FIRST_MS = 350;
+const DOER_STAGGER_MS = 380;
+/** A doer stays up at least this long before it pops, so every step reads. */
+const DOER_MIN_MS = 1400;
+/** Ruled-out places pop one after another, and never before they have been seen. */
+const POP_STAGGER_MS = 170;
+const POP_MIN_MS = 700;
+/** Length of one pop: a ring and droplets flying off. */
+const POP_MS = 480;
+const POP_POOL = 6;
+/** Collision radius per orb, as a multiple of its radius, so labels get room too. */
+const BODY: Record<Node['kind'], number> = { bubble: 1.2, venue: 1.42, doer: 1.28, crew: 1.15 };
 
 const STATUS_HUE: Record<BubblePageStatus, string> = {
   fits: 'fits',
@@ -248,38 +271,29 @@ export function BubbleNode({
   );
 }
 
+/** A venue orb. Its glyph and labels hide once the finale inflates it (the arena adds `.finale`). */
 export function VenueOrb({
   name,
   cuisine,
   leader,
-  final,
 }: {
   name: string;
   cuisine: string;
   leader: boolean;
-  /** Marks the confirmed destination for the success finale. */
-  final: string | null;
 }) {
   return (
     <g>
       {leader && <circle r={1.5} fill="url(#g-halo)" />}
       <Orb hue={leader ? 'leader' : 'venue'} />
-      {!final && (
-        <>
-          <Cutlery />
-          <text className="orb-label" y={1.52} fontSize={0.3}>
-            {clip(name, 18)}
-          </text>
-          <text className="orb-sub" y={1.86} fontSize={0.24}>
-            {cuisine}
-          </text>
-        </>
-      )}
-      {final && (
-        <text className="orb-name" y={0.06} fontSize={0.2}>
-          Success!
+      <g className="venue-marks">
+        <Cutlery />
+        <text className="orb-label" y={1.52} fontSize={0.3}>
+          {clip(name, 18)}
         </text>
-      )}
+        <text className="orb-sub" y={1.86} fontSize={0.24}>
+          {cuisine}
+        </text>
+      </g>
     </g>
   );
 }
@@ -361,7 +375,9 @@ function syncNode(
   t: Target,
   spawn: { x: number; y: number },
   random: Random,
+  order = 0,
 ): Node {
+  const now = performance.now();
   const n =
     map.get(id) ??
     ({
@@ -369,8 +385,13 @@ function syncNode(
       kind,
       x: spawn.x,
       y: spawn.y,
+      tx: spawn.x,
+      ty: spawn.y,
       r: t.r * 0.4,
       op: 0,
+      body: 0,
+      mass: 1,
+      bornAt: now,
       drift: createDrift(random),
     } as Node);
   n.bx = t.x;
@@ -378,13 +399,12 @@ function syncNode(
   n.wander = t.wander;
   n.rt = t.r;
   n.opt = t.opacity;
-  n.tx ??= spawn.x;
-  n.ty ??= spawn.y;
+  n.order = order;
   if (t.absorb) {
     const into = t.absorb.into;
     if (n.absorbInto !== into) {
       n.absorbInto = into;
-      n.absorbAt = performance.now() + ABSORB_FIRST_MS + t.absorb.order * ABSORB_STAGGER_MS;
+      n.absorbAt = now + ABSORB_FIRST_MS + t.absorb.order * ABSORB_STAGGER_MS;
       n.hx = n.x ?? t.x;
       n.hy = n.y ?? t.y;
       n.rBase = t.r;
@@ -393,6 +413,12 @@ function syncNode(
   } else {
     n.absorbInto = undefined;
     n.absorbAt = undefined;
+  }
+  if (t.pop !== undefined) {
+    if (n.pop === undefined) n.pop = t.pop;
+  } else {
+    n.pop = n.popAt = undefined;
+    n.popped = false;
   }
   return n;
 }
@@ -403,13 +429,6 @@ function revealName(crew: SVGGElement | undefined, memberId: string) {
     crew?.querySelector<SVGTextElement>(`[data-member="${CSS.escape(memberId)}"]`) ??
     crew?.querySelector<SVGTextElement>('[data-more]');
   if (name) name.style.opacity = '1';
-}
-
-/** Collision radius. Labels need room too: venue names sit below orbs, statuses below bubbles. */
-function collideRadius(n: Node): number {
-  // Headed into the destination, or the destination itself: no collisions, so it can swallow.
-  if (n.absorbInto || n.swallowing) return 0;
-  return n.r * (n.kind === 'venue' ? 1.75 : n.kind === 'doer' ? 1.3 : 1.15) + 3;
 }
 
 /**
@@ -431,7 +450,46 @@ function seek(): Force<Node, undefined> {
   return force;
 }
 
-export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
+/**
+ * Collisions, steering around each other, and sliding around the windows. A bubble flying into
+ * its destination passes behind windows (they sit above the arena) so none can strand it.
+ */
+function physics(windows: () => Rect[]): Force<Node, undefined> {
+  let nodes: Node[] = [];
+  const force = () => {
+    steer(nodes);
+    separate(nodes);
+    avoidRects(
+      nodes.filter((n) => !n.into),
+      windows(),
+    );
+  };
+  force.initialize = (ns: Node[]) => {
+    nodes = ns;
+  };
+  return force;
+}
+
+interface Pop {
+  x: number;
+  y: number;
+  r: number;
+  at: number;
+}
+
+export function Arena({
+  vm,
+  phase,
+  windows,
+  settled: settledRef,
+}: {
+  vm: ViewModel;
+  phase: Phase;
+  /** Window rectangles on screen, in page pixels; bubbles keep out of them. */
+  windows?: MutableRefObject<Rect[]>;
+  /** Set to a check the feed calls before the next event: has every animation finished? */
+  settled?: MutableRefObject<(() => boolean) | null>;
+}) {
   const size = useViewport();
   const reduced = useReducedMotion();
   const [seed] = useState(() => Math.floor(Math.random() * 4294967296));
@@ -445,14 +503,16 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
   const els = useRef(new Map<string, SVGGElement>());
   const burstEl = useRef<SVGGElement | null>(null);
   const successEl = useRef<SVGGElement | null>(null);
+  const popsEl = useRef<SVGGElement | null>(null);
+  const pops = useRef<(Pop | null)[]>(Array.from({ length: POP_POOL }, () => null));
   const scene = useRef({ phase, size, reduced });
   const finale = useRef<{ elapsed: number; initial: number; x: number; y: number } | null>(null);
   const layoutRef = useRef<Layout | null>(null);
+  const changedAt = useRef(0);
   const sim = useRef<Simulation<Node, undefined> | null>(null);
 
   // One simulation for the page's lifetime; it idles warm so things keep floating.
   useEffect(() => {
-    const collide = forceCollide<Node>(collideRadius).strength(0.25).iterations(2);
     let moving: Node[] = [];
     const soften: Force<Node, undefined> = () => {
       for (const node of moving) softenVelocity(node, !!node.absorbInto);
@@ -460,17 +520,30 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
     soften.initialize = (ns) => {
       moving = ns;
     };
+    const rects = () => windows?.current ?? [];
     let previousTick = performance.now();
     let completeSince: number | null = null;
+    const popAt = (n: Node, now: number) => {
+      const slot = pops.current.findIndex((p) => !p || now - p.at >= POP_MS);
+      pops.current[slot === -1 ? 0 : slot] = { x: n.x!, y: n.y!, r: n.r, at: now };
+      n.popped = true;
+      n.op = n.opt = 0;
+    };
     const s = forceSimulation<Node>([])
       .alphaDecay(0.01)
       .alphaTarget(0.12)
       .velocityDecay(0.25)
-      .force('collide', collide)
       .force('seek', seek())
       .force('soften', soften)
+      .force('physics', physics(rects))
       .on('tick', () => {
         const now = performance.now();
+        const all = nodes.current;
+        const crew = all.get(CREW);
+        const crewWhole = !crew || !!crew.members?.every((id) => all.get(id)?.absorbed);
+        const doers = [...all.values()].filter((n) => n.kind === 'doer');
+        const doersOut = doers.every((d) => d.appearAt !== undefined && now >= d.appearAt);
+        const doersOutAt = Math.max(0, ...doers.map((d) => d.appearAt ?? Infinity));
 
         for (const n of s.nodes()) {
           const viewport = scene.current.size;
@@ -491,29 +564,59 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
           );
           n.tx = scene.current.reduced ? n.bx : destination.x;
           n.ty = scene.current.reduced ? n.by : destination.y;
-          if (n.opt === 0 && !n.absorbInto) {
+          if (n.opt === 0 && !n.absorbInto && n.pop === undefined) {
             n.tx = n.bx;
             n.ty = n.by;
           }
+          let hidden = false;
           if (n.kind === 'crew' && n.members?.length) {
-            // The crew bubble grows with each person it takes in and yields collisions until full.
-            const inside = n.members.filter((id) => nodes.current.get(id)?.absorbed).length;
-            const pending = inside < n.members.length;
-            n.swallowing = pending;
+            // The crew bubble grows with each person it takes in.
+            const inside = n.members.filter((id) => all.get(id)?.absorbed).length;
+            n.swallowing = inside < n.members.length;
             if (!n.absorbInto) n.rt = n.rFull! * (0.45 + 0.55 * (inside / n.members.length));
-            else if (pending && n.absorbAt !== undefined) {
-              // Joined late: let everyone get inside before the crew heads for the venue.
-              n.absorbAt = Math.max(n.absorbAt, now + 400);
+            else if (
+              n.absorbAt !== undefined &&
+              !(crewWhole && doersOut && now >= doersOutAt + 600)
+            ) {
+              // Booked: head for the venue only once the crew is whole and its doers are out.
+              n.absorbAt = Math.max(n.absorbAt, now + 300);
             }
           }
-          const into = n.absorbInto ? nodes.current.get(n.absorbInto) : undefined;
-          if (into && n.absorbAt !== undefined) {
+          if (n.kind === 'doer' && !n.popped) {
+            // Doers wait inside the crew bubble until everyone is in, then split off one by one.
+            if (n.appearAt === undefined && crewWhole) {
+              n.appearAt = now + DOER_FIRST_MS + n.order * DOER_STAGGER_MS;
+            }
+            if (n.appearAt === undefined || now < n.appearAt) {
+              const from = crew && !crew.absorbed ? crew : { x: n.bx, y: n.by };
+              n.x = n.tx = from.x!;
+              n.y = n.ty = from.y!;
+              n.vx = n.vy = 0;
+              n.op = 0;
+              n.r = n.rt * 0.3;
+              hidden = true;
+            }
+          }
+          if (!hidden && n.pop !== undefined && !n.popped) {
+            // Finished or ruled out: stay up long enough to read, then pop in turn.
+            const shown =
+              n.kind === 'doer' ? (n.appearAt ?? now) + DOER_MIN_MS : n.bornAt + POP_MIN_MS;
+            n.popAt ??= Math.max(now + n.pop * POP_STAGGER_MS, shown);
+            if (now >= n.popAt) popAt(n, now);
+            else {
+              n.opt = 1;
+              n.tx = n.x!;
+              n.ty = n.y!;
+            }
+          }
+          const into = n.absorbInto ? all.get(n.absorbInto) : undefined;
+          if (!hidden && into && n.absorbAt !== undefined) {
             if (now < n.absorbAt) {
               // Wait near its own gathering position for its turn.
               n.tx = n.hx!;
               n.ty = n.hy!;
             } else if (n.absorbed) {
-              // Inside: ride along with it, hidden, so its collisions can't push us back out.
+              // Inside: ride along with it, hidden.
               n.x = n.tx = into.x!;
               n.y = n.ty = into.y!;
               n.vx = 0;
@@ -528,7 +631,8 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
               const near = Math.min(1, Math.max(0, (d - into.r * 0.3) / (into.r * 1.6)));
               n.opt = near;
               n.rt = n.rBase! * (0.3 + 0.7 * near);
-              if (!n.absorbed && near < 0.08) {
+              // Close enough, or flying long enough that something must be in the way.
+              if (near < 0.08 || now - n.absorbAt > ABSORB_GIVE_UP_MS) {
                 // Gulp: the destination swells a little with each bubble it takes in.
                 n.absorbed = true;
                 into.r += into.rt * 0.12;
@@ -536,8 +640,13 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
               }
             }
           }
+          if (!hidden && !n.absorbInto) {
+            const clear = clearOf(n.tx, n.ty, n.r * BODY[n.kind], rects());
+            n.tx = clear.x;
+            n.ty = clear.y;
+          }
           if (area && viewport && !n.absorbInto && !n.swallowing && n.opt > 0) {
-            // Collisions can shove an orb past the edge or under the plan window; hold it in.
+            // Collisions can shove an orb past the edge or under a docked window; hold it in.
             const m = n.r + 4;
             const top = area.top - 6 + n.r;
             if (n.x! < area.left + m || n.x! > area.right - m) {
@@ -547,22 +656,53 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
             if (n.y! < top) {
               n.y = top;
               n.vy = 0;
+            } else if (n.y! > area.bottom - n.r * BODY[n.kind]) {
+              // Labels hang below the orb; keep them clear of the taskbar too.
+              n.y = area.bottom - n.r * BODY[n.kind];
+              n.vy = 0;
             }
           }
           n.r += (n.rt - n.r) * 0.06;
           n.op += (n.opt - n.op) * 0.05;
+          // What the physics sees next tick: hidden and fading bubbles don't collide, and a
+          // bubble passes through the one it is being absorbed into.
+          n.body = hidden || n.popped || n.absorbed || n.opt === 0 ? 0 : n.r * BODY[n.kind] + 4;
+          n.mass = n.r * n.r * (n.kind === 'venue' || n.kind === 'crew' ? 3 : 1);
+          n.into = n.absorbInto && !n.absorbed ? n.absorbInto : undefined;
           const el = els.current.get(n.id);
           if (el) {
             el.setAttribute(
               'transform',
               `translate(${n.x!.toFixed(1)} ${n.y!.toFixed(1)}) scale(${n.r.toFixed(2)})`,
             );
-            el.style.opacity = n.op.toFixed(3);
+            el.style.opacity = (n.popped ? 0 : n.op).toFixed(3);
           }
         }
-        // forceCollide caches radii; refresh them as nodes grow, shrink, and take off.
-        collide.radius(collideRadius);
-        // Let the crew finish gathering before the one-shot inflate-and-pop finale.
+
+        // Pops: a ring and droplets flying off where a bubble burst.
+        const popGroups = popsEl.current?.children;
+        pops.current.forEach((p, i) => {
+          const g = popGroups?.[i] as SVGGElement | undefined;
+          if (!g) return;
+          const t = p ? (now - p.at) / POP_MS : 1;
+          if (!p || t >= 1) {
+            if (g.style.opacity !== '0') g.style.opacity = '0';
+            return;
+          }
+          g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`);
+          g.style.opacity = (1 - t * t).toFixed(3);
+          const [ring, ...drops] = Array.from(g.children);
+          ring?.setAttribute('r', (p.r * (1 + 0.45 * t)).toFixed(1));
+          drops.forEach((drop, j) => {
+            const angle = (j / drops.length) * Math.PI * 2 + (j % 3) * 0.3;
+            const dist = p.r * (0.8 + 0.9 * t + (j % 2) * 0.15);
+            drop.setAttribute('cx', (Math.cos(angle) * dist).toFixed(1));
+            drop.setAttribute('cy', (Math.sin(angle) * dist).toFixed(1));
+            drop.setAttribute('r', (p.r * 0.1 * (1 - 0.7 * t)).toFixed(2));
+          });
+        });
+
+        // Once complete, and every doer has popped or gone in, the one-shot inflate-and-pop.
         const current = scene.current;
         const step = Math.min(50, now - previousTick);
         previousTick = now;
@@ -577,21 +717,33 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
         const winner = s.nodes().find((n) => n.kind === 'venue' && n.swallowing);
         if (!winner || !current.size) return;
         const gathering = s.nodes().filter((n) => n.absorbInto === winner.id);
+        const doersGone = doers.every((d) => d.popped || d.absorbed);
+        const popping = pops.current.some((p) => p && now - p.at < POP_MS);
         if (
           !finale.current &&
-          (current.reduced || gathering.every((n) => n.absorbed) || now - completeSince > 8000)
+          (current.reduced ||
+            (gathering.every((n) => n.absorbed) && doersGone && !popping) ||
+            now - completeSince > 12000)
         ) {
           finale.current = { elapsed: 0, initial: winner.r, x: winner.x!, y: winner.y! };
+          els.current.get(winner.id)?.classList.add('finale');
         }
         const ending = finale.current;
         if (!ending) return;
         ending.elapsed += step;
-        // The finale sits centred in the space between the plan window and the booking dialog.
+        // The finale sits centred in the space between the windows.
         const room = safeArea(current.size, true);
         const centreY = room.top + room.height / 2;
         ending.x += (room.left + room.width / 2 - ending.x) * 0.035;
         ending.y += (centreY - ending.y) * 0.035;
-        const maxRadius = Math.max(40, Math.min(room.width * 0.37, room.height * 0.46, 190));
+        const maxRadius = Math.max(
+          40,
+          Math.min(
+            room.width * 0.37,
+            room.height * 0.46,
+            floatingWindows(current.size) ? 260 : 190,
+          ),
+        );
         const frame = finaleFrame(
           ending.elapsed,
           Math.min(ending.initial, maxRadius * 0.65),
@@ -642,7 +794,29 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
       document.removeEventListener('visibilitychange', onVisible);
       s.stop();
     };
-  }, []);
+  }, [windows]);
+
+  // The feed waits on this before the next event, so no step starts before the last one ends.
+  useEffect(() => {
+    if (!settledRef) return;
+    settledRef.current = () => {
+      if (scene.current.reduced) return true;
+      const now = performance.now();
+      if (now - changedAt.current < 300) return false;
+      for (const n of nodes.current.values()) {
+        if (n.absorbInto && !n.absorbed) return false;
+        if (n.kind === 'doer' && !n.popped && (n.appearAt === undefined || now < n.appearAt + 500))
+          return false;
+        if (n.pop !== undefined && !n.popped) return false;
+      }
+      if (pops.current.some((p) => p && now - p.at < POP_MS)) return false;
+      if (scene.current.phase === 'complete' && (finale.current?.elapsed ?? 0) < 3300) return false;
+      return true;
+    };
+    return () => {
+      settledRef.current = null;
+    };
+  }, [settledRef]);
 
   // New layout: retarget nodes, add and drop nodes, kick the simulation.
   useEffect(() => {
@@ -650,6 +824,7 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
     if (!s || !layout || !size) return;
     layoutRef.current = layout;
     scene.current = { phase, size, reduced };
+    changedAt.current = performance.now();
     const next = new Map<string, Node>();
     const spawn = (t: Target) =>
       randomPoint({ left: t.x - 8, right: t.x + 8, top: t.y - 8, bottom: t.y + 8 }, random.current);
@@ -659,13 +834,12 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
     for (const [id, t] of Object.entries(layout.bubbles)) {
       next.set(id, syncNode(nodes.current, id, 'bubble', t, spawn(t), random.current));
     }
-    for (const [kind, t] of Object.entries(layout.doers)) {
-      const origin = spawn(t);
+    Object.entries(layout.doers).forEach(([kind, t], i) => {
       next.set(
         `d:${kind}`,
-        syncNode(nodes.current, `d:${kind}`, 'doer', t, origin, random.current),
+        syncNode(nodes.current, `d:${kind}`, 'doer', t, spawn(t), random.current, i),
       );
-    }
+    });
     if (layout.crew) {
       const crew = syncNode(
         nodes.current,
@@ -679,7 +853,7 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
       crew.rFull = layout.crew.r;
       next.set(CREW, crew);
     }
-    // Whatever is being absorbed, the destination must yield its collisions to take it in.
+    // The destination of whatever is being absorbed; the finale inflates it.
     const swallowers = new Set(
       [
         ...Object.values(layout.bubbles),
@@ -692,16 +866,19 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
     const list = [...next.values()];
     if (reduced) {
       s.stop();
+      const now = performance.now();
       for (const n of list) {
         n.wander = 0;
         n.x = n.bx;
         n.y = n.by;
         n.r = n.rt;
-        n.op = n.absorbInto ? 0 : n.opt;
+        n.op = n.absorbInto || n.pop !== undefined ? 0 : n.opt;
         if (n.absorbInto) {
           n.opt = 0;
           n.absorbed = true;
         }
+        if (n.pop !== undefined) n.popped = true;
+        if (n.kind === 'doer') n.appearAt = now - DOER_FIRST_MS;
       }
       for (const id of layout.crew?.members ?? []) revealName(els.current.get(CREW), id);
       s.nodes(list);
@@ -747,11 +924,6 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
                 name={v.name}
                 cuisine={v.cuisine}
                 leader={layout.venues[v.venueId]!.leader}
-                final={
-                  phase === 'complete' && layout.venues[v.venueId]!.leader && vm.booking
-                    ? `${new Date(vm.booking.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · table for ${vm.booking.partySize}`
-                    : null
-                }
               />,
             )
           : null,
@@ -792,6 +964,16 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
             />,
           ),
         )}
+      <g ref={popsEl} aria-hidden="true">
+        {Array.from({ length: POP_POOL }, (_, i) => (
+          <g key={i} style={{ opacity: 0 }}>
+            <circle r={1} fill="none" stroke="#fff" strokeWidth={2} strokeOpacity={0.85} />
+            {Array.from({ length: 10 }, (_, j) => (
+              <circle key={j} r={1} fill={j % 2 ? '#e6fdff' : '#dcffa8'} />
+            ))}
+          </g>
+        ))}
+      </g>
       <g ref={burstEl} style={{ opacity: 0 }} aria-hidden="true">
         {Array.from({ length: 18 }, (_, i) =>
           i % 3 === 0 ? (

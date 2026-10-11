@@ -1,4 +1,4 @@
-import { AeroIcon, AeroWindow, Brand, Desktop, Taskbar } from './aero';
+import { AeroIcon, AeroWindow, Brand, Desktop, TaskButton, Taskbar } from './aero';
 import { QrCode } from './qr-code';
 import { SignupForm } from './signup-form';
 import { siteUrl } from './site';
@@ -51,6 +51,7 @@ export default function Home() {
         </section>
         <AeroWindow
           className="signup-window"
+          windowId="signup"
           id="get-started"
           labelledBy="signup-heading"
           title="Get your bubble"
@@ -76,6 +77,7 @@ export default function Home() {
       </div>
       <AeroWindow
         className="how-window"
+        windowId="how"
         id="how-it-works"
         labelledBy="how-heading"
         title="How it works"
@@ -123,15 +125,15 @@ export default function Home() {
         </a>
       </footer>
       <Taskbar>
-        <a className="task" href="#get-started">
+        <TaskButton windowId="signup" href="#get-started">
           <span className="tiny-orb" aria-hidden="true" />
           <span className="task-long">Get your bubble</span>
           <span className="task-short">Sign up</span>
-        </a>
-        <a className="task" href="#how-it-works">
+        </TaskButton>
+        <TaskButton windowId="how" href="#how-it-works">
           <span className="task-long">How it works</span>
           <span className="task-short">How</span>
-        </a>
+        </TaskButton>
         <a className="task" href="/p/demo?replay=basic">
           <span className="task-play" aria-hidden="true" />
           <span className="task-long">Watch the bubbles</span>

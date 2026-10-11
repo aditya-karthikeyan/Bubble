@@ -6,6 +6,8 @@
 import type { ReactNode } from 'react';
 import { Clock } from './clock';
 
+export { AeroWindow, setMinimized, TaskButton } from './aero-window';
+
 export function Brand() {
   return (
     <a className="brand" href="/" aria-label="Bubbleworks home">
@@ -209,104 +211,6 @@ export function Desktop() {
         ))}
       </div>
     </div>
-  );
-}
-
-/** Caption-button glyph: a dark outline under a white stroke, like Win7's. */
-function Glyph({ kind }: { kind: 'min' | 'max' | 'close' }) {
-  const d =
-    kind === 'min'
-      ? 'M2.5 8.5h6'
-      : kind === 'max'
-        ? 'M2 2.5h7v6h-7zM2 3.6h7'
-        : 'M2.5 2.5l6 6M8.5 2.5l-6 6';
-  return (
-    <svg viewBox="0 0 11 11" width="11" height="11" aria-hidden="true">
-      <path
-        d={d}
-        fill="none"
-        stroke="#14243a"
-        strokeWidth={kind === 'close' ? 3.4 : 3}
-        opacity={0.7}
-      />
-      <path d={d} fill="none" stroke="#fff" strokeWidth={kind === 'close' ? 1.8 : 1.4} />
-    </svg>
-  );
-}
-
-function CaptionButton({
-  kind,
-  label,
-  onClick,
-}: {
-  kind: 'min' | 'max' | 'close';
-  label: string;
-  onClick?: () => void;
-}) {
-  return onClick ? (
-    <button type="button" className={`cap cap-${kind}`} aria-label={label} onClick={onClick}>
-      <Glyph kind={kind} />
-    </button>
-  ) : (
-    <span className={`cap cap-${kind}`} aria-hidden="true">
-      <Glyph kind={kind} />
-    </span>
-  );
-}
-
-/**
- * A Win7 glass window: title bar with a white text glow, caption buttons, and a white client
- * area. `controls="dialog"` shows only Close. Without handlers the caption buttons are décor.
- * The maximize button is always disabled, as on a fixed-size dialog.
- */
-export function AeroWindow({
-  title,
-  icon,
-  controls = 'window',
-  onMinimize,
-  onClose,
-  minimized = false,
-  id,
-  labelledBy,
-  className,
-  bar,
-  children,
-}: {
-  title: string;
-  icon?: ReactNode;
-  controls?: 'window' | 'dialog';
-  onMinimize?: () => void;
-  onClose?: () => void;
-  /** Shrunk into the taskbar: hidden from view, focus, and screen readers. */
-  minimized?: boolean;
-  id?: string;
-  labelledBy?: string;
-  className?: string;
-  /** Glass toolbar row under the title, like Explorer's address bar. */
-  bar?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section
-      id={id}
-      aria-labelledby={labelledBy}
-      className={`aero-window${minimized ? ' minimized' : ''}${className ? ` ${className}` : ''}`}
-      inert={minimized}
-    >
-      <div className="aero-titlebar">
-        {icon ?? <span className="tiny-orb" aria-hidden="true" />}
-        <span className="aero-title">{title}</span>
-        <div className="caption">
-          {controls === 'window' && (
-            <CaptionButton kind="min" label="Minimize" onClick={onMinimize} />
-          )}
-          {controls === 'window' && <CaptionButton kind="max" label="Maximize" />}
-          <CaptionButton kind="close" label="Close" onClick={onClose} />
-        </div>
-      </div>
-      {bar}
-      <div className="aero-client">{children}</div>
-    </section>
   );
 }
 

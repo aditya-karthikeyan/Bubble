@@ -24,6 +24,8 @@ export interface Target extends Point {
   opacity: number;
   /** Fly into this node (`CREW` or `venueNode(id)`) and get absorbed, in this order. */
   absorb?: { into: string; order: number };
+  /** Ruled out or finished: pop in place, after this many staggers. */
+  pop?: number;
 }
 
 /** Node ids the arena uses, so absorb targets can name them. */
@@ -49,6 +51,15 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 /** Radii scale with the screen, within readable bounds. */
 export function sizes(size: Size) {
+  if (floatingWindows(size)) {
+    // Desktop: the windows float over the arena, so the bubbles get the whole screen.
+    const m = Math.min(size.w * 0.62, size.h);
+    return {
+      bubble: clamp(m / 15, 30, 64),
+      venue: clamp(m / 14, 32, 70),
+      doer: clamp(m / 14, 36, 66),
+    };
+  }
   const m = Math.min(size.w, size.h * 0.7);
   return {
     bubble: clamp(m / 13, 24, 40),
@@ -59,6 +70,8 @@ export function sizes(size: Size) {
 
 /** A landscape phone: the windows stack in a column on the left instead (see globals.css). */
 export const sideWindows = (size: Size) => size.h <= 500 && size.w >= 640;
+/** Desktop: windows pop up anywhere and can be dragged; phones keep them docked. */
+export const floatingWindows = (size: Size) => size.w > 760 && size.h > 500;
 
 /**
  * Space the window chrome leaves free: the plan window on top, the taskbar below, and the
@@ -66,6 +79,10 @@ export const sideWindows = (size: Size) => size.h <= 500 && size.w >= 640;
  * browser toolbars showing, a short laptop) the windows go compact; see globals.css.
  */
 export function safeArea(size: Size, sheet: boolean) {
+  if (floatingWindows(size)) {
+    const bottom = size.h - 58;
+    return { left: 0, right: size.w, width: size.w, top: 16, bottom, height: bottom - 16 };
+  }
   if (sideWindows(size)) {
     const left = 320;
     const bottom = size.h - 58;
@@ -94,7 +111,7 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size, seed = 0)
   const booked = phase === 'summary' || complete;
   const settled = phase === 'locked' || booked;
   const area = safeArea(size, settled || phase === 'closed');
-  const span = Math.min(area.width * 0.84, 960);
+  const span = area.width * (floatingWindows(size) ? 0.8 : 0.84);
   const cx = area.left + area.width / 2;
 
   // Settled: a hub (the crew, then the destination once booked) with the doers in a ring around
@@ -128,6 +145,7 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size, seed = 0)
     );
   });
   const venues: Layout['venues'] = {};
+  let popped = 0;
   for (const v of live) {
     const chosen = v.venueId === leaderId;
     const gone = v.eliminated || (settled && !chosen);
@@ -140,7 +158,6 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size, seed = 0)
           : slot[v.venueId]!;
     venues[v.venueId] = {
       ...at,
-      y: gone ? -s.venue * 3 : at.y,
       r:
         complete && chosen
           ? s.venue * 2.4 * fitK
@@ -153,6 +170,7 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size, seed = 0)
       opacity: gone ? 0 : 1,
       leader: chosen,
       dim: gone,
+      ...(gone ? { pop: popped++ } : {}),
     };
   }
 
@@ -263,12 +281,19 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size, seed = 0)
         x: centre.x + Math.cos(angle) * reach * SPREAD[i]!,
         y: centre.y + Math.sin(angle) * reach * SPREAD[i]! * squash,
       };
+      // A helper that finishes pops; whoever is still at it once the plan completes (the
+      // Watcher) goes into the destination with everything else.
+      const done = vm.doers[kind]?.state === 'done';
       doers[kind] = {
         ...at,
         r: s.doer * fitK,
         wander: complete ? 0 : s.doer * 0.12,
-        opacity: 1,
-        ...(complete && leaderId ? { absorb: { into: venueNode(leaderId), order: i } } : {}),
+        opacity: done ? 0 : 1,
+        ...(done
+          ? { pop: 0 }
+          : complete && leaderId
+            ? { absorb: { into: venueNode(leaderId), order: i } }
+            : {}),
       };
     });
   }
