@@ -534,6 +534,112 @@ describe('BubbleworksEngine', () => {
     });
   });
 
+  describe('cuisine options come after the style vote', () => {
+    /** Dev (vegan here) and Ben, with P2's staged intake: the cuisine poll waits for the style. */
+    async function staged() {
+      h.caller.dispose();
+      h.rt.close();
+      const veganDev = {
+        ...PERSONA_FACTS[0]!,
+        id: 'fact_dev_vegan',
+        userId: 'user_dev',
+        value: 'vegan',
+      };
+      h = harness({ bubbles: new FakeBubbles(undefined, [...PERSONA_FACTS, veganDev]) });
+      const updates: Array<{ pollId: string; options: string[] | null }> = [];
+      const seen: {
+        request: {
+          stylePoll: { pollId: string } | null;
+          cuisinePoll: { pollId: string } | null;
+        } | null;
+      } = { request: null };
+      h.engine.setIntake({
+        renderBundle: async (r) => void (seen.request = r),
+        closePlan: () => undefined,
+        updatePoll: (_planId, pollId, options) => {
+          updates.push({ pollId, options: options ? options.map((o) => o.key) : null });
+          return true;
+        },
+      });
+      const crew = await h.rt.crews.createCrew({
+        name: 'two',
+        createdByUserId: 'user_dev',
+        memberIds: ['user_ben'],
+      });
+      await h.rt.crews.confirmMember(crew.id, 'user_ben');
+      const { planId } = await h.engine.handleIntent({
+        chatId: crew.chatId,
+        userId: 'user_dev',
+        messageId: 'm1',
+        text: 'dinner?',
+        at: h.at(),
+      });
+      await h.engine.handleHeadcount({ planId: planId!, userId: 'user_ben', in: true, at: h.at() });
+      const r = seen.request;
+      if (!r?.stylePoll || !r.cuisinePoll) throw new Error('expected style then cuisine');
+      const vote = async (pollId: string, choice: string) => {
+        for (const u of ['user_dev', 'user_ben'])
+          await h.engine.handleVote({
+            planId: planId!,
+            pollId,
+            userId: u,
+            choices: [choice],
+            at: h.at(),
+          });
+      };
+      return {
+        planId: planId!,
+        style: r.stylePoll.pollId,
+        cuisine: r.cuisinePoll.pollId,
+        updates,
+        vote,
+      };
+    }
+    const venueOf = (planId: string) =>
+      h.rt.venues().find((v) => v.id === h.rt.plans.get(planId)?.chosenVenueId);
+
+    it('fast food with one vegan: only Chipotle fits, so no cuisine poll and Chipotle locks', async () => {
+      const t = await staged();
+      await t.vote(t.style, 'fast_food');
+      expect(t.updates).toEqual([{ pollId: t.cuisine, options: null }]);
+      expect(h.rt.plans.get(t.planId)?.state).toBe('LOCKED');
+      expect(venueOf(t.planId)?.name).toBe('Chipotle');
+    });
+
+    it('fast food fits nobody: the group hears it and gets sit-down cuisines that fit', async () => {
+      const t = await staged();
+      const all = h.rt.venues();
+      all.splice(
+        all.findIndex((v) => v.name === 'Chipotle'),
+        1,
+      ); // out of range tonight
+      await t.vote(t.style, 'fast_food');
+      const texts = h.messaging.sent
+        .filter((s) => s.kind === 'group_text')
+        .map((s) => ('input' in s ? s.input.text : ''));
+      expect(texts).toContain(
+        'Nothing fast food works for everyone tonight, so here are sit-down options.',
+      );
+      const offered = t.updates.at(-1)!.options!;
+      expect(offered.length).toBeGreaterThanOrEqual(2);
+      for (const key of offered) {
+        expect(
+          h.rt
+            .venues()
+            .some(
+              (v) => v.cuisine === key && v.style === 'sit_down' && v.dietTags.includes('vegan'),
+            ),
+        ).toBe(true);
+      }
+      expect(h.rt.plans.get(t.planId)?.state).toBe('GATHERING');
+      await t.vote(t.cuisine, offered[0]!);
+      expect(h.rt.plans.get(t.planId)?.state).toBe('LOCKED');
+      const venue = venueOf(t.planId)!;
+      expect([venue.cuisine, venue.style]).toEqual([offered[0], 'sit_down']);
+      expect(venue.dietTags).toContain('vegan');
+    });
+  });
+
   it('a typed style skips the style poll', async () => {
     await h.engine.handleIntent({
       chatId: CHAT,
