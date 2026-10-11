@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import type { Runtime } from '../runtime.js';
 import { createDemoPlan, HAPPY_PATH, stepDemoPlan } from './demo-plan.js';
+import { demoReset } from './demo-reset.js';
 
 export interface DevRouteOptions {
   secret: string;
@@ -81,6 +82,13 @@ export function registerDevRoutes(app: FastifyInstance, options: DevRouteOptions
       members: runtime.plans.members(plan.id),
       events,
     };
+  });
+
+  /** Rehearsal reset: plans and plan state go, people, facts, crews, venues stay. */
+  app.post('/api/dev/reset', async () => {
+    const result = demoReset(runtime.db);
+    runtime.candidates.invalidate();
+    return { ok: true, ...result };
   });
 
   app.get('/api/dev/plans', async () => ({
