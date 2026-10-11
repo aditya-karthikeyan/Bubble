@@ -36,6 +36,7 @@ import {
   type RichLinkInput,
   type SendResult,
   type Unsubscribe,
+  type Presence,
   type User,
 } from '@bubbleworks/shared';
 import type { Logger } from '../events/bus.js';
@@ -58,6 +59,8 @@ export interface SpectrumMessagingOptions {
 }
 
 const DM_PREFIX = 'dm:';
+/** Someone who texted within this window is treated as awake, whatever their presence says. */
+export const QUIET_OVERRIDE_MS = 15 * 60_000;
 
 export function dmChatId(userId: string): string {
   return `${DM_PREFIX}${userId}`;
@@ -108,6 +111,12 @@ export class SpectrumMessaging implements MessagingPort {
     reaction: [],
     member: [],
   };
+  private gate:
+    | ((m: { userId: string; messageId: string; text: string; at: string }) => Promise<boolean>)
+    | null = null;
+  private presence: ((userId: string) => Promise<Presence>) | null = null;
+  /** Last time each person texted their bubble, for the quiet-hours override. */
+  private readonly lastInbound = new Map<string, number>();
   private readonly rawText: Array<(userId: string, text: string, at: string) => boolean | void> =
     [];
   private readonly batcher: Batcher;
@@ -324,6 +333,7 @@ export class SpectrumMessaging implements MessagingPort {
       this.o.log.warn({ kind: event.kind }, 'inbound from an unregistered phone dropped');
       return;
     }
+    this.lastInbound.set(user.id, Date.now());
     if (!user.onboardedAt) {
       await this.o.crews.updateUser(user.id, { onboardedAt: new Date().toISOString() });
       this.o.log.info({ userId: user.id }, 'first message from member: onboarded');
@@ -383,9 +393,36 @@ export class SpectrumMessaging implements MessagingPort {
     }
   }
 
+  /**
+   * Runs on every inbound batch before routing. Returning true means the gate handled the message
+   * (e.g. refused a probe about someone else) and nobody else sees it. Not part of MessagingPort.
+   */
+  setInboundGate(
+    gate: (m: { userId: string; messageId: string; text: string; at: string }) => Promise<boolean>,
+  ): void {
+    this.gate = gate;
+  }
+
+  /** Presence source for quiet hours (P3's BubbleService.getPresence). Not part of MessagingPort. */
+  setPresence(presence: (userId: string) => Promise<Presence>): void {
+    this.presence = presence;
+  }
+
   private async flushBatch(batch: Batch): Promise<void> {
     const userId = batch.key;
     const merged = mergeBatch(batch.items);
+    if (this.gate) {
+      const handled = await this.gate({
+        userId,
+        messageId: merged.messageId,
+        text: merged.text,
+        at: merged.at,
+      }).catch((err: unknown) => {
+        this.o.log.error({ err: String(err), userId }, 'inbound gate failed; passing message on');
+        return false;
+      });
+      if (handled) return;
+    }
     const replied = merged.replyToMessageId ? this.o.store.copy(merged.replyToMessageId) : null;
     const crewChat =
       replied && groupIdFromChatId(replied.chatId)
@@ -446,11 +483,32 @@ export class SpectrumMessaging implements MessagingPort {
       const user = await this.o.crews.userById(dmUser);
       users = user ? [user] : [];
     } else throw new Error(`unknown chat id ${chatId}`);
-    return users.filter((u) => this.reachable(u));
+    const out: User[] = [];
+    for (const user of users) {
+      if (!this.reachable(user)) continue;
+      if (await this.isQuiet(user)) {
+        this.o.log.info({ userId: user.id, chatId }, 'quiet hours: message held');
+        continue;
+      }
+      out.push(user);
+    }
+    return out;
   }
 
   private reachable(user: User): boolean {
     return this.o.transport.provider === 'terminal' || user.onboardedAt !== null;
+  }
+
+  /**
+   * Quiet hours: nobody asleep or driving gets pinged. Someone who texted in the last 15 minutes
+   * is clearly awake and not driving, whatever their Focus says.
+   */
+  private async isQuiet(user: User): Promise<boolean> {
+    if (!this.presence) return false;
+    const last = this.lastInbound.get(user.id);
+    if (last !== undefined && Date.now() - last < QUIET_OVERRIDE_MS) return false;
+    const presence = await this.presence(user.id).catch(() => 'unknown' as const);
+    return presence === 'sleep' || presence === 'driving';
   }
 
   /** Terminal chats are named after the phone; iMessage DMs are "any;-;<phone>". */
@@ -510,6 +568,10 @@ export class SpectrumMessaging implements MessagingPort {
     const deduplicated = sent.length > 0 && sent.every((r) => r.deduplicated);
     if (logicalId) return { messageId: logicalId, deduplicated };
     const only = sent[0];
+    if (!only && members.length === 0) {
+      // Quiet hours or not onboarded: hold the private message instead of failing the caller.
+      return { messageId: `held:${options.key}`, deduplicated: false };
+    }
     if (!only) throw new Error(`nobody reachable in ${options.chatId}`);
     return only;
   }
