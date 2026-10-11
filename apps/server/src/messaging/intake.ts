@@ -205,6 +205,12 @@ export class PlanIntake {
     if (open) {
       const stance = await this.rsvpStance(m.text, open.organizerName, open.meal);
       if (stance !== 'unclear') {
+        // Logged on arrival: the engine call below can run the whole deliberation, so a line
+        // written after it would land after the lock and read as a late answer.
+        this.o.log.info(
+          { planId: open.planId, userId: m.userId, stance, via: 'reply' },
+          'headcount',
+        );
         await this.o.engine.handleHeadcount({
           planId: open.planId,
           userId: m.userId,
@@ -212,10 +218,6 @@ export class PlanIntake {
           at: m.at,
         });
         await this.recordHeadcount(open.planId, m.userId, stance === 'in');
-        this.o.log.info(
-          { planId: open.planId, userId: m.userId, stance, via: 'reply' },
-          'headcount',
-        );
         return;
       }
     }
@@ -280,6 +282,11 @@ export class PlanIntake {
     if (!bundle) return;
     const stance = r.removed ? 'out' : stanceFromEmoji(r.emoji);
     if (stance === 'unclear') return;
+    // Logged on arrival, before the engine call that may deliberate and lock (see above).
+    this.o.log.info(
+      { planId: bundle.planId, userId: r.userId, stance, via: 'tapback' },
+      'headcount',
+    );
     await this.o.engine.handleHeadcount({
       planId: bundle.planId,
       userId: r.userId,
@@ -287,10 +294,6 @@ export class PlanIntake {
       at: r.at,
     });
     await this.recordHeadcount(bundle.planId, r.userId, stance === 'in');
-    this.o.log.info(
-      { planId: bundle.planId, userId: r.userId, stance, via: 'tapback' },
-      'headcount',
-    );
   }
 
   private async onPollVote(v: {

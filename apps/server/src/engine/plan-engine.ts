@@ -1116,8 +1116,17 @@ export class BubbleworksEngine implements PlanEngine {
     if (!plan || plan.state !== 'GATHERING') return;
     const members = this.rt.plans.members(planId);
     const undecided = members.filter((m) => m.status === 'invited');
-    if (undecided.length > 0) return;
     const inCount = members.filter((m) => m.status === 'in' || m.status === 'represented').length;
+    this.log.info(
+      {
+        planId,
+        inCount,
+        waitingOn: undecided.map((m) => m.userId),
+        statuses: Object.fromEntries(members.map((m) => [m.userId, m.status])),
+      },
+      undecided.length > 0 ? 'headcount: still waiting' : 'headcount: everyone answered',
+    );
+    if (undecided.length > 0) return;
     if (inCount < MIN_PARTY_SIZE) {
       // Nobody left to wait for and not enough people: close now instead of holding the poll.
       this.rt.timers.cancel(planId, 'poll_deadline');

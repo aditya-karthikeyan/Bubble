@@ -857,6 +857,39 @@ describe('BubbleworksEngine', () => {
       expect(h.rt.plans.get(planId!)?.state).toBe('BOOKED');
     });
 
+    it('waits for every invited member after one tap, then the poll deadline moves it on', async () => {
+      const intent = start('dinner with the group tonight');
+      const { planId } = await intent();
+      expect(h.rt.plans.get(planId!)?.state).toBe('GATHERING');
+      await h.engine.handleHeadcount({ planId: planId!, userId: 'user_ben', in: true, at: h.at() });
+      expect(h.rt.plans.get(planId!)?.state).toBe('GATHERING');
+      await h.advance(DEADLINES.poll_ms + 1);
+      expect(h.rt.plans.get(planId!)?.state).not.toBe('GATHERING');
+    });
+
+    it('two taps landing together lock once, with both counted and no late-joiner rerun', async () => {
+      // The headcount reaches every phone at once, so people in one room tap within a second.
+      // Each tap is handled concurrently; the tap that answers for the last person moves the plan.
+      const intent = start('dinner with the group tonight');
+      const { planId } = await intent();
+      for (const u of ['user_dev', 'user_eli'])
+        await h.engine.handleHeadcount({ planId: planId!, userId: u, in: false, at: h.at() });
+      await Promise.all(
+        ['user_ben', 'user_chloe'].map((u) =>
+          h.engine.handleHeadcount({ planId: planId!, userId: u, in: true, at: h.at() }),
+        ),
+      );
+      expect(h.rt.plans.get(planId!)?.state).toBe('LOCKED');
+      const st = statuses(planId!);
+      expect([st['user_ava'], st['user_ben'], st['user_chloe']]).toEqual(['in', 'in', 'in']);
+      const reasons = h.rt.plans
+        .auditFor(planId!)
+        .filter((a) => a.kind === 'transition')
+        .map((a) => (a.payload as { reason?: string }).reason);
+      expect(reasons.filter((r) => r === 'headcount and poll in')).toHaveLength(1);
+      expect(reasons.some((r) => r?.includes('late joiner'))).toBe(false);
+    });
+
     it('asks the one person to stretch before changing the cuisine', async () => {
       // The only stored Indian place is $22 and Chloe's budget is $20.
       const intent = start('dinner with the group tonight, feeling indian');
