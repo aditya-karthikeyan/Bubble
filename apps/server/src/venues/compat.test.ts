@@ -29,6 +29,25 @@ describe('hard fact compatibility', () => {
     expect(isCompatible(venue({ dietTags: ['vegetarian'] }), ava)).toBe(true);
   });
 
+  it('no_pork / no_beef rule out meat-centered cuisines without needing a tag', () => {
+    const fact = (value: string): Fact => ({
+      id: value,
+      userId: 'u',
+      type: 'diet',
+      value,
+      hard: true,
+      confidence: 1,
+      source: 'onboarding',
+      confirmed: true,
+      expiresAt: null,
+      createdAt: '2026-10-10T00:00:00Z',
+    });
+    expect(isCompatible(venue({ cuisine: 'thai' }), [fact('no_pork'), fact('no_beef')])).toBe(true);
+    expect(isCompatible(venue({ cuisine: 'hot_dog' }), [fact('no_pork')])).toBe(false);
+    expect(isCompatible(venue({ cuisine: 'burger' }), [fact('no_beef')])).toBe(false);
+    expect(isCompatible(venue({ cuisine: 'burger' }), [fact('no_pork')])).toBe(true);
+  });
+
   it('halal accepts tagged halal or vegetarian-capable venues', () => {
     const chloe = factsFor('user_chloe');
     expect(isCompatible(venue({ dietTags: [] }), chloe)).toBe(false);

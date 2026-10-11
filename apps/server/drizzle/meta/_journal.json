@@ -33,8 +33,15 @@
     {
       "idx": 4,
       "version": "6",
-      "when": 1791685287553,
-      "tag": "0004_venue_style",
+      "when": 1791684885447,
+      "tag": "0004_bubble_pin",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791685459585,
+      "tag": "0005_venue_style",
       "breakpoints": true
     }
   ]

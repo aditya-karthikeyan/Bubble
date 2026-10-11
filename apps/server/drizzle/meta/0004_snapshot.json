@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9206fd71-367a-44b4-96b5-e1d96c5db9c7",
+  "id": "92656027-8cc7-4b4a-bfac-f2c982fa45fe",
   "prevId": "6015e678-8257-4c43-93a8-407152563bc7",
   "tables": {
     "asks": {
@@ -419,6 +419,27 @@
         },
         "presence_until": {
           "name": "presence_until",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pin_lat": {
+          "name": "pin_lat",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pin_lng": {
+          "name": "pin_lng",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pin_at": {
+          "name": "pin_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1445,22 +1466,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "cuisine_tags": {
-          "name": "cuisine_tags",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
-        },
-        "style": {
-          "name": "style",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'sit_down'"
         },
         "diet_tags": {
           "name": "diet_tags",
