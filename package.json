@@ -42,7 +42,8 @@
     "p4:number": "pnpm --filter @bubbleworks/server p4:number",
     "p4:testcall": "pnpm --filter @bubbleworks/server p4:testcall",
     "p4:phase0": "pnpm --filter @bubbleworks/server p4:phase0",
-    "p4:calltest": "pnpm --filter @bubbleworks/server p4:calltest"
+    "p4:calltest": "pnpm --filter @bubbleworks/server p4:calltest",
+    "p2:demo": "pnpm --filter @bubbleworks/server p2:demo"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
