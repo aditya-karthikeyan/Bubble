@@ -41,6 +41,19 @@ async function main(): Promise<void> {
       agent_id: env('ELEVENLABS_AGENT_ID'),
       agent_phone_number_id: env('ELEVENLABS_PHONE_NUMBER_ID'),
       to_number: env('TEST_CALL_NUMBER'),
+      // Real calls need every variable the agent's first message and prompt use.
+      conversation_initiation_client_data: {
+        dynamic_variables: {
+          venue_name: 'Test Bistro',
+          party_size: 4,
+          preferred_time: '7:00 PM',
+          window_start: '6:30 PM',
+          window_end: '8:00 PM',
+          booking_name: 'Mahil',
+          callback_number: process.env['TWILIO_PHONE_NUMBER'] ?? 'this number',
+          table_notes: 'none',
+        },
+      },
       telephony_call_config: { ringing_timeout_secs: 20 },
     }),
   );
