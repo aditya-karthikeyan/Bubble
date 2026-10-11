@@ -231,6 +231,40 @@ describe('outbound', () => {
     );
   });
 
+  it('holds messages for members who are asleep or driving (quiet hours)', async () => {
+    const { transport, messaging } = await setup();
+    messaging.setPresence(async (userId) => (userId === BEN.id ? 'sleep' : 'available'));
+    await messaging.sendGroupText({
+      chatId: CREW,
+      text: 'locked',
+      idempotencyKey: 'plan_1:locked',
+    });
+    expect(transport.sends().map((s) => s.chatId)).not.toContain(`any;-;${BEN.handle}`);
+    expect(transport.sends()).toHaveLength(PERSONAS.length - 1);
+    const held = await messaging.sendPrivateText({
+      userId: BEN.id,
+      text: 'ask',
+      idempotencyKey: 'plan_1:ask:ben',
+    });
+    expect(held.messageId).toBe('held:plan_1:ask:ben');
+  });
+
+  it('treats someone who just texted as awake, whatever their presence says', async () => {
+    const { transport, messaging } = await setup();
+    messaging.setPresence(async () => 'driving');
+    await messaging.handleInbound({
+      kind: 'reaction',
+      providerId: 'r1',
+      phone: BEN.handle,
+      targetMessageId: 'x',
+      emoji: '👍',
+      removed: false,
+      at,
+    });
+    await messaging.sendPrivateText({ userId: BEN.id, text: 'thanks', idempotencyKey: 'p:thanks' });
+    expect(transport.sends().map((s) => s.chatId)).toEqual([`any;-;${BEN.handle}`]);
+  });
+
   it('makes rename and background no-ops', async () => {
     const { transport, messaging } = await setup();
     await messaging.renameGroup({ chatId: CREW, name: 'x' });

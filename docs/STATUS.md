@@ -2,12 +2,12 @@
 
 One row per role. Update your row at the end of every phase.
 
-| Role                      | Person | Phase | State       | PR                                                   | Known issues                                                                                                                                                                                                                          |
-| ------------------------- | ------ | ----- | ----------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P1 Core and Integration   | Aditya | 3     | in review   | Phase 3 PR (deadlock breaker); #12 #13 merged        | OSM wheelchair tags mostly missing (unknown passes, caller confirms); halal satisfied by vegetarian-capable venues; deploy to Railway after merge                                                                                     |
-| P2 Messaging and Surfaces | Pranav | 3     | in review   | https://github.com/aditya-karthikeyan/Bubble/pull/16 | Live card = headcount line edited in place (iMessage: 15 min, 5 edits). Ticket image at booking. Opt-out headcount needs P1 to pass headcount.mode and count silence as in. Link preview needs P4 og:image.                           |
-| P3 Bubbles and Context    | Soham  | 4     | in review   | #9, #11 merged; #15 (Phase 3), Phase 4 PR pending   | Phone checks wait on Railway + LINE LOCK; venue-level dislike stored as other=avoid_venue:<id> until FactType has one; Inviter uses an .ics link                      |
-| P4 Voice and Live Page    | Mahil  | 0     | not started |                                                      |                                                                                                                                                                                                                                       |
+| Role                      | Person | Phase | State       | PR                                                   | Known issues                                                                                                                                      |
+| ------------------------- | ------ | ----- | ----------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1 Core and Integration   | Aditya | 4     | in review   | Phase 4 PR (edge cases, chaos, speed); #14 merged    | OSM wheelchair tags mostly missing (unknown passes, caller confirms); halal satisfied by vegetarian-capable venues; deploy to Railway after merge |
+| P2 Messaging and Surfaces | Pranav | 4     | in review   | https://github.com/aditya-karthikeyan/Bubble/pull/18 | Quiet hours need index.ts: messaging.setPresence(id => bubbles.service.getPresence(id)). Phase 3: #16. Red team: 10/10 probes refused, 0 leaks.   |
+| P3 Bubbles and Context    | Soham  | 4     | in review   | #9, #11 merged; #15 (Phase 3), Phase 4 PR pending    | Phone checks wait on Railway + LINE LOCK; venue-level dislike stored as other=avoid_venue:<id> until FactType has one; Inviter uses an .ics link  |
+| P4 Voice and Live Page    | Mahil  | 0     | not started |                                                      |                                                                                                                                                   |
 
 ## Checkpoints
 

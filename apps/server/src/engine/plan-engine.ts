@@ -56,7 +56,7 @@ import {
   decideStartTime,
   zonedInstant,
 } from './question-policy.js';
-import { IllegalTransitionError } from './state-machine.js';
+import { IllegalTransitionError, isTerminal } from './state-machine.js';
 import type { FiredTimer } from '../timers/service.js';
 
 /** Structurally identical to P2's QuestionDecision so PlanIntake.renderBundle accepts it. */
@@ -131,16 +131,32 @@ export class BubbleworksEngine implements PlanEngine {
   async handleIntent(input: IntentInput): Promise<IntentResult> {
     const crew = await this.rt.crews.crewByChatId(input.chatId);
     if (!crew) return { planId: null, created: false };
-    const active = this.rt.plans.findActiveForChat(input.chatId)[0];
-    if (active) {
-      this.log.info(
-        { planId: active.id, state: active.state },
-        'intent ignored: plan already open',
-      );
-      return { planId: active.id, created: false };
+    const intent = parseIntent(input.text, { now: this.now(), timezone: this.tz });
+    const changeWords = /\b(actually|instead|change|switch|make it|move it|rather)\b/i.test(
+      input.text,
+    );
+    const actives = this.rt.plans.findActiveForChat(input.chatId);
+    const same = actives.find(
+      (p) => p.intent.date === intent.date && p.intent.meal === intent.meal,
+    );
+    const differentTime = (p: Plan) =>
+      intent.startMinutes !== null && intent.startMinutes !== p.intent.startMinutes;
+    // "actually tomorrow" / "make it 8 instead" from the organizer restarts their open plan.
+    const changed = actives.find(
+      (p) =>
+        p.createdByUserId === input.userId &&
+        changeWords &&
+        (p.intent.date !== intent.date || differentTime(p)),
+    );
+    if (changed) {
+      await this.restart(changed.id, `plan changed: ${input.text.slice(0, 60)}`);
+    } else if (same) {
+      // Same meal, same day, no change asked: a repeat joins the open plan. A different meal or
+      // day on the same chat becomes a second plan, scoped by its own id, poll, and messages.
+      this.log.info({ planId: same.id, state: same.state }, 'intent ignored: plan already open');
+      return { planId: same.id, created: false };
     }
     const started = Date.now();
-    const intent = parseIntent(input.text, { now: this.now(), timezone: this.tz });
     const organizer = await this.rt.crews.userById(input.userId);
     const plan = this.rt.plans.create({
       groupId: crew.id,
@@ -233,10 +249,11 @@ export class BubbleworksEngine implements PlanEngine {
 
   async handleHeadcount(input: HeadcountInput): Promise<void> {
     const plan = this.rt.plans.get(input.planId);
-    if (!plan || !['GATHERING', 'DELIBERATING', 'DEADLOCK'].includes(plan.state)) return;
+    if (!plan || isTerminal(plan.state) || plan.state === 'PAUSED') return;
     const before = this.rt.plans.members(plan.id).find((m) => m.userId === input.userId);
     const status = input.in ? 'in' : 'out';
     if (before?.status === status) return;
+    const wasIn = before?.status === 'in' || before?.status === 'represented';
     this.rt.plans.upsertMember(plan.id, input.userId, status);
     const user = await this.rt.crews.userById(input.userId);
     if (input.in) {
@@ -248,10 +265,46 @@ export class BubbleworksEngine implements PlanEngine {
           status: 'fits',
         },
       });
+      if (before === undefined || before.status === 'dropped') {
+        // A late joiner the bubble has not met: let P3 catch them up.
+        await this.deps.bubbles.onNewMember({
+          groupId: plan.groupId,
+          chatId: plan.chatId,
+          userId: input.userId,
+        });
+      }
     } else {
       await this.publish(plan.id, { type: 'bubble_left', userId: input.userId, reason: 'out' });
     }
-    if (plan.state === 'GATHERING') await this.maybeAdvance(plan.id);
+    this.rt.candidates.invalidate(plan.groupId);
+
+    switch (plan.state) {
+      case 'GATHERING':
+        await this.maybeAdvance(plan.id);
+        return;
+      case 'DELIBERATING':
+      case 'DEADLOCK':
+      case 'LOCKED':
+        // Before booking the table changed, so the answer may change: rerun.
+        if (input.in || wasIn)
+          await this.rerun(plan.id, input.in ? 'late joiner' : 'dropout before booking');
+        return;
+      case 'BOOKING':
+        // Mid-call: note it; the next booked result reflects the table at lock time and a
+        // follow-up headcount after BOOKED modifies the reservation.
+        this.rt.plans.audit(plan.id, 'headcount_during_call', { userId: input.userId, status });
+        return;
+      case 'BOOKED':
+      case 'DAY_OF':
+        if (input.in || wasIn)
+          await this.modifyBooking(
+            plan.id,
+            input.in ? 'late joiner after booking' : 'dropout after booking',
+          );
+        return;
+      default:
+        return;
+    }
   }
 
   async handleVote(input: VoteInput): Promise<void> {
@@ -302,6 +355,10 @@ export class BubbleworksEngine implements PlanEngine {
     const plan = this.rt.plans.get(ask.planId);
     if (!plan) return;
     const at = this.now().toISOString();
+    if (ask.kind === 'deposit') {
+      await this.answerDeposit(plan, ask.id, input.answer, at);
+      return;
+    }
     if (input.answer === 'no') {
       this.rt.db
         .update(asks)
@@ -510,14 +567,38 @@ export class BubbleworksEngine implements PlanEngine {
           type: 'doer_status',
           doer: 'caller',
           state: 'needs_human',
-          detail: 'The restaurant needs a person',
+          detail: result.depositRequested
+            ? 'The restaurant wants a deposit'
+            : 'The restaurant needs a person',
         });
-        await this.privateText(
-          plan,
-          plan.createdByUserId,
-          'needs_human',
-          `${result.summary} Reply "yes" to go ahead or "no" to pick somewhere else.`,
-        );
+        // One person decides; nothing is secured until they say yes.
+        const askId = newId('ask');
+        const key = idempotencyKey(plan.id, 'deposit_ask', booking.id);
+        const text = `${result.summary} Reply "yes" to go ahead or "no" to pick somewhere else.`;
+        this.rt.db
+          .insert(asks)
+          .values({
+            id: askId,
+            planId: plan.id,
+            userId: plan.createdByUserId,
+            kind: 'deposit',
+            concession: null,
+            text,
+            status: 'pending',
+            idempotencyKey: key,
+            sentAt: at,
+            expiresAt: new Date(
+              this.now().getTime() + this.rt.timers.deadlines.private_ask_ms,
+            ).toISOString(),
+          })
+          .onConflictDoNothing()
+          .run();
+        await this.publish(plan.id, { type: 'private_ask_sent', askId });
+        await this.deps.messaging.sendPrivateText({
+          userId: plan.createdByUserId,
+          text,
+          idempotencyKey: key,
+        });
         return;
       }
       case 'declined':
@@ -560,9 +641,153 @@ export class BubbleworksEngine implements PlanEngine {
         await this.fail(plan.id, 'call failed');
         return;
       }
+      case 'modified': {
+        const party = this.rt.plans
+          .members(plan.id)
+          .filter((m) => m.status === 'in' || m.status === 'represented');
+        this.rt.db
+          .update(bookings)
+          .set({
+            status: 'booked',
+            partySize: party.length,
+            callId: result.callId,
+            startAt: result.confirmedStartAt ?? booking.startAt,
+            updatedAt: at,
+          })
+          .where(eq(bookings.id, booking.id))
+          .run();
+        await this.publish(plan.id, {
+          type: 'doer_status',
+          doer: 'caller',
+          state: 'done',
+          detail: `Updated to ${party.length}`,
+        });
+        await this.groupText(
+          plan,
+          `modified:${party.length}`,
+          `Updated the table to ${party.length}. ${result.summary}`.trim(),
+        );
+        const venue = this.rt.venues().find((v) => v.id === booking.venueId);
+        if (venue) {
+          await this.publish(plan.id, { type: 'doer_status', doer: 'splitter', state: 'started' });
+          const r = await this.deps.doers.splitter.send({
+            bookingId: booking.id,
+            planId: plan.id,
+            chatId: plan.chatId,
+            venue,
+            startAt: booking.startAt,
+            partySize: party.length,
+            reservationName: booking.reservationName,
+            confirmationCode: booking.confirmationCode,
+            members: this.rt.plans.members(plan.id),
+            idempotencyKey: idempotencyKey(plan.id, 'splitter', booking.id, party.length),
+          });
+          await this.publish(plan.id, {
+            type: 'doer_status',
+            doer: 'splitter',
+            state: r.ok ? 'done' : 'failed',
+          });
+        }
+        return;
+      }
+      case 'cancelled': {
+        this.rt.db
+          .update(bookings)
+          .set({ status: 'cancelled', callId: result.callId, updatedAt: at })
+          .where(eq(bookings.id, booking.id))
+          .run();
+        await this.publish(plan.id, {
+          type: 'doer_status',
+          doer: 'caller',
+          state: 'done',
+          detail: 'Reservation cancelled',
+        });
+        return;
+      }
       default:
         this.log.info({ planId: plan.id, outcome: result.outcome }, 'call result noted');
     }
+  }
+
+  /** A seat count change after booking: keep the venue, ask the caller to modify, redo the split. */
+  private async modifyBooking(planId: string, reason: string): Promise<void> {
+    const plan = this.rt.plans.mustGet(planId);
+    const booking = this.rt.db
+      .select()
+      .from(bookings)
+      .where(and(eq(bookings.planId, planId), eq(bookings.status, 'booked')))
+      .get();
+    const venue = booking ? this.rt.venues().find((v) => v.id === booking.venueId) : null;
+    if (!booking || !venue) return;
+    const party = this.rt.plans
+      .members(planId)
+      .filter((m) => m.status === 'in' || m.status === 'represented');
+    if (party.length < MIN_PARTY_SIZE) {
+      await this.deps.caller.cancel({
+        planId,
+        bookingId: booking.id,
+        venue,
+        reservationName: booking.reservationName,
+        idempotencyKey: idempotencyKey(planId, 'cancel_call', booking.id),
+      });
+      this.rt.timers.cancel(planId);
+      await this.rt.plans.transition(planId, 'CANCELLED', {
+        reason: `${reason}: only ${party.length} left`,
+      });
+      await this.publish(planId, { type: 'plan_closed', reason: 'too_few' });
+      await this.groupText(
+        plan,
+        'cancelled_too_few',
+        'Not enough people left, so I cancelled the table.',
+      );
+      return;
+    }
+    this.rt.plans.audit(planId, 'booking_modify', { reason, partySize: party.length });
+    await this.publish(planId, {
+      type: 'doer_status',
+      doer: 'caller',
+      state: 'working',
+      detail: `Updating the table to ${party.length}`,
+    });
+    await this.deps.caller.modify({
+      planId,
+      bookingId: booking.id,
+      venue,
+      partySize: party.length,
+      startAt: booking.startAt,
+      reservationName: booking.reservationName,
+      idempotencyKey: idempotencyKey(planId, 'modify', booking.id, party.length),
+    });
+  }
+
+  /** "Actually tomorrow": cancel anything booked and close this plan so the new intent starts fresh. */
+  private async restart(planId: string, reason: string): Promise<void> {
+    const plan = this.rt.plans.mustGet(planId);
+    this.rt.timers.cancel(planId);
+    const booking = this.rt.db
+      .select()
+      .from(bookings)
+      .where(and(eq(bookings.planId, planId), eq(bookings.status, 'booked')))
+      .get();
+    const venue = booking ? this.rt.venues().find((v) => v.id === booking.venueId) : null;
+    if (booking && venue) {
+      await this.deps.caller.cancel({
+        planId,
+        bookingId: booking.id,
+        venue,
+        reservationName: booking.reservationName,
+        idempotencyKey: idempotencyKey(planId, 'cancel_call', booking.id),
+      });
+      this.rt.db
+        .update(bookings)
+        .set({ status: 'cancelled', updatedAt: this.now().toISOString() })
+        .where(eq(bookings.id, booking.id))
+        .run();
+    }
+    await this.rt.plans.transition(planId, 'CANCELLED', { reason });
+    await this.publish(planId, { type: 'plan_closed', reason: 'cancelled' });
+    this.deps.intake?.closePlan(planId);
+    await this.groupText(plan, 'restarted', 'Got it, starting over with the new plan.');
   }
 
   async handleCommand(input: CommandInput): Promise<void> {
@@ -726,6 +951,23 @@ export class BubbleworksEngine implements PlanEngine {
       this.rt.timers.schedule({ planId, kind: 'veto_window' });
     } else if (plan.state === 'DELIBERATING') {
       await this.deliberate(planId);
+    } else if (plan.state === 'BOOKING' && !pending.includes('call_timeout')) {
+      // Restart mid-call: the webhook may still deliver; if not, the timeout reruns the solver.
+      const booking = this.rt.db
+        .select()
+        .from(bookings)
+        .where(eq(bookings.planId, planId))
+        .all()
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      this.rt.timers.schedule({
+        planId,
+        kind: 'call_timeout',
+        payload: { bookingId: booking?.id ?? '' },
+        replace: true,
+      });
+      this.log.warn({ planId }, 'resumed mid-call: call_timeout rescheduled');
+    } else if (plan.state === 'DEADLOCK' && !pending.includes('ask_timeout')) {
+      await this.afterAsksResolved(planId);
     }
   }
 
@@ -1007,6 +1249,75 @@ export class BubbleworksEngine implements PlanEngine {
     await this.publish(planId, { type: 'plan_closed', reason: 'failed' });
     this.deps.intake?.closePlan(planId);
     await this.groupText(r.plan, 'failed', 'I could not get a table tonight. Sorry.');
+  }
+
+  /** The organizer's answer to a deposit request. Yes books it under their name; no moves on. */
+  private async answerDeposit(
+    plan: Plan,
+    askId: string,
+    answer: 'yes' | 'no',
+    at: string,
+  ): Promise<void> {
+    this.rt.db
+      .update(asks)
+      .set({ status: answer === 'yes' ? 'accepted' : 'declined', resolvedAt: at })
+      .where(eq(asks.id, askId))
+      .run();
+    await this.publish(plan.id, {
+      type: 'private_ask_resolved',
+      askId,
+      outcome: answer === 'yes' ? 'accepted' : 'declined',
+    });
+    const booking = this.rt.db
+      .select()
+      .from(bookings)
+      .where(and(eq(bookings.planId, plan.id), eq(bookings.status, 'needs_human')))
+      .get();
+    if (!booking) return;
+    const venue = this.rt.venues().find((v) => v.id === booking.venueId);
+    if (answer === 'yes') {
+      this.rt.db
+        .update(bookings)
+        .set({ status: 'booked', notes: 'deposit approved by organizer', updatedAt: at })
+        .where(eq(bookings.id, booking.id))
+        .run();
+      if (plan.state === 'BOOKING')
+        await this.rt.plans.transition(plan.id, 'BOOKED', {
+          reason: 'organizer approved the deposit',
+        });
+      await this.publish(plan.id, {
+        type: 'doer_status',
+        doer: 'caller',
+        state: 'done',
+        detail: 'Deposit approved',
+      });
+      if (venue) {
+        await this.publish(plan.id, {
+          type: 'booking_confirmed',
+          bookingId: booking.id,
+          venue: pageVenue(venue),
+          startAt: booking.startAt,
+          partySize: booking.partySize,
+          reservationName: booking.reservationName,
+        });
+      }
+      await this.groupText(
+        plan,
+        'booked',
+        `Booked at ${venue?.name ?? 'the place'}; the organizer is handling the deposit.`,
+      );
+      return;
+    }
+    this.rt.db
+      .update(bookings)
+      .set({ status: 'failed', notes: 'deposit declined', updatedAt: at })
+      .where(eq(bookings.id, booking.id))
+      .run();
+    this.addVetoed(plan.id, booking.venueId);
+    if (plan.state === 'BOOKING') {
+      await this.rt.plans.transition(plan.id, 'DELIBERATING', { reason: 'deposit declined' });
+      await this.deliberate(plan.id);
+    }
   }
 
   // -- deadlock breaker ----------------------------------------------------------
@@ -1359,19 +1670,6 @@ export class BubbleworksEngine implements PlanEngine {
       chatId: plan.chatId,
       text,
       idempotencyKey: idempotencyKey(plan.id, action),
-    });
-  }
-
-  private async privateText(
-    plan: Plan,
-    userId: string,
-    action: string,
-    text: string,
-  ): Promise<void> {
-    await this.deps.messaging.sendPrivateText({
-      userId,
-      text,
-      idempotencyKey: idempotencyKey(plan.id, action, userId),
     });
   }
 

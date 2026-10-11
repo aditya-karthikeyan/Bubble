@@ -64,12 +64,14 @@ if (real) {
     projectId: config.SPECTRUM_PROJECT_ID!,
     projectSecret: config.SPECTRUM_PROJECT_SECRET!,
   });
+  // Names come from Photon's user list (first name), so each phone shows its own person.
+  const names = await photon.firstNames();
   const ids: string[] = [];
   for (const phone of phones) {
     const bubbleNumber = await photon.bubbleNumberFor(phone);
     if (!bubbleNumber) throw new Error(`…${phone.slice(-4)} is not registered with Photon`);
     const user = await runtime.crews.createUser({
-      displayName: 'Pranav',
+      displayName: names.get(phone.toLowerCase()) ?? names.get(phone) ?? `…${phone.slice(-4)}`,
       handle: phone,
       bubbleNumber,
     });
@@ -145,7 +147,24 @@ class SimEngine implements PlanEngine {
   async handleAskAnswer(_input: AskAnswerInput): Promise<void> {}
   async handleMemberChange(_input: MemberChangeInput): Promise<void> {}
   async handleCallResult(_result: CallResult): Promise<void> {}
-  async handleCommand(_input: CommandInput): Promise<void> {}
+  /** Stand-in replies; the real engine has its own pause and explain logic. */
+  async handleCommand(input: CommandInput): Promise<void> {
+    console.log(
+      `engine: command ${input.command} from ${input.userId} (plan ${input.planId ?? '-'})`,
+    );
+    const replies: Record<string, string> = {
+      wait: 'Paused. Say "resume" when you want me to carry on.',
+      resume: 'Picking it back up.',
+      why: "It fits every bubble's limits and had the most support. Nobody's private details leave the server.",
+      veto: 'Got it, finding somewhere else.',
+      cancel: 'Plan cancelled.',
+    };
+    await messaging.port.sendPrivateText({
+      userId: input.userId,
+      text: replies[input.command] ?? 'Okay.',
+      idempotencyKey: `${input.planId ?? 'none'}:cmd:${input.messageId}`,
+    });
+  }
 }
 
 const messaging = createMessaging({ config, runtime });
