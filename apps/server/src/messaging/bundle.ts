@@ -1,7 +1,7 @@
 /**
  * The question bundle: what every crew member gets when a plan starts.
  *
- *   1. Headcount line: "🫧 Pranav is planning dinner tonight. Tap 👍 on this message if you're
+ *   1. Headcount line: "Pranav is planning dinner tonight. Tap 👍 on this message if you're
  *      in. Voting closes 7:05."
  *   2. Cuisine poll, only when the engine's question policy asks for one.
  *   3. Live page link (rich link), when the plan has a page.
@@ -161,7 +161,7 @@ export function headcountText(decision: QuestionDecision): string {
   if (decision.headcount.mode === 'opt_out') {
     return `🫧 ${decision.organizerName} is planning ${what} ${when}. You're counted in, reply "out" if you can't make it. Locking it in at ${closes}.`;
   }
-  return `🫧 ${decision.organizerName} is planning ${what} ${when}. Tap 👍 on this message if you're in. Voting closes ${closes}.`;
+  return `${decision.organizerName} is planning ${what} ${when}. Tap 👍 on this message if you're in. Voting closes ${closes}.`;
 }
 
 export async function renderBundle(

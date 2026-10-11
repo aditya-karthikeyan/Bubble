@@ -18,6 +18,7 @@ import { BundleStore, clockTime, headcountText, type QuestionDecision } from './
 import { StubClassifier } from './classifier.js';
 import { FakeTransport } from './fake-transport.js';
 import { PlanIntake } from './intake.js';
+import { AuditLog } from './safety.js';
 import { MessagingStore } from './store.js';
 
 const [AVA, BEN, CHLOE] = PERSONAS as [
@@ -64,7 +65,10 @@ class RecordingEngine implements PlanEngine {
   async handleAskAnswer(_input: AskAnswerInput): Promise<void> {}
   async handleMemberChange(_input: MemberChangeInput): Promise<void> {}
   async handleCallResult(_result: CallResult): Promise<void> {}
-  async handleCommand(_input: CommandInput): Promise<void> {}
+  commands: CommandInput[] = [];
+  async handleCommand(input: CommandInput): Promise<void> {
+    this.commands.push(input);
+  }
 }
 
 async function setup(classifier = new StubClassifier()) {
@@ -82,13 +86,14 @@ async function setup(classifier = new StubClassifier()) {
     openPlanCrew: async () => (bundles.openForChat(CREW) ? DEMO_GROUP.id : null),
   });
   const engine = new RecordingEngine();
-  const intake = new PlanIntake({ port, engine, bundles, classifier, log: silentLogger });
+  const audit = new AuditLog(sqlite);
+  const intake = new PlanIntake({ port, engine, bundles, classifier, log: silentLogger, audit });
   engine.intake = intake;
   intake.start();
   await port.start();
   const text = (phone: string, body: string, id: string) =>
     port.handleInbound({ kind: 'text', providerId: id, phone, text: body, at });
-  return { transport, bundles, port, engine, intake, classifier, text };
+  return { transport, bundles, port, engine, intake, classifier, text, audit };
 }
 
 describe('bundle text', () => {
@@ -105,7 +110,7 @@ describe('bundle text', () => {
         pageUrl: null,
       }),
     ).toBe(
-      "🫧 Pranav is planning dinner tonight. Tap 👍 on this message if you're in. Voting closes 7:05.",
+      "Pranav is planning dinner tonight. Tap 👍 on this message if you're in. Voting closes 7:05.",
     );
   });
 });
@@ -229,5 +234,20 @@ describe('PlanIntake', () => {
     await vi.runAllTimersAsync();
     expect(engine.intents).toHaveLength(0);
     expect(transport.calls).toHaveLength(0);
+  });
+
+  it('routes wait and why-this-place during an open plan to the engine, and audits the pause', async () => {
+    const { engine, audit, text } = await setup();
+    await text(AVA.handle, 'dinner today?', 'in_1');
+    await vi.runAllTimersAsync();
+    await text(BEN.handle, 'wait', 'in_2');
+    await text(CHLOE.handle, 'why this place?', 'in_3');
+    await vi.runAllTimersAsync();
+    expect(engine.commands.map((c) => [c.userId, c.command, c.planId, c.chatId])).toEqual([
+      [BEN.id, 'wait', 'plan_1', CREW],
+      [CHLOE.id, 'why', 'plan_1', CREW],
+    ]);
+    expect(engine.headcounts).toHaveLength(0);
+    expect(audit.list().map((e) => [e.userId, e.kind])).toEqual([[BEN.id, 'pause']]);
   });
 });

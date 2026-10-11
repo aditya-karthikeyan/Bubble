@@ -21,7 +21,14 @@ import {
   type QuestionDecision,
 } from './bundle.js';
 import type { Classifier } from './classifier.js';
-import { detectPlan, parseRsvp, stanceFromEmoji, type RsvpStance } from './detect.js';
+import {
+  detectPlan,
+  parsePlanCommand,
+  parseRsvp,
+  stanceFromEmoji,
+  type RsvpStance,
+} from './detect.js';
+import type { AuditLog } from './safety.js';
 
 export interface PlanIntakeOptions {
   port: SpectrumMessaging;
@@ -33,6 +40,8 @@ export interface PlanIntakeOptions {
   now?: () => Date;
   /** Haiku must be at least this sure before a weak detection starts a plan. */
   minConfidence?: number;
+  /** Records pauses, resumes, cancels, and vetoes. */
+  audit?: AuditLog;
 }
 
 interface Marks {
@@ -118,6 +127,34 @@ export class PlanIntake {
     at: string;
   }): Promise<void> {
     const open = this.o.bundles.openForChat(m.chatId);
+
+    // "wait", "resume", "veto", "cancel", "why this place?" always reach the engine.
+    const command = parsePlanCommand(m.text);
+    if (command) {
+      if (this.marks.get(m.userId)?.typingAt) {
+        void this.o.port.setTyping({ chatId: dmChatId(m.userId), typing: false });
+      }
+      await this.o.engine.handleCommand({
+        chatId: m.chatId,
+        userId: m.userId,
+        command,
+        ...(open ? { planId: open.planId } : {}),
+        messageId: m.messageId,
+        at: m.at,
+      });
+      if (command !== 'why') {
+        const kind = command === 'wait' ? 'pause' : command;
+        this.o.audit?.record({
+          userId: m.userId,
+          planId: open?.planId ?? null,
+          kind,
+          detail: { via: 'dm' },
+        });
+      }
+      this.o.log.info({ userId: m.userId, command, planId: open?.planId ?? null }, 'plan command');
+      return;
+    }
+
     if (open) {
       const stance = await this.rsvpStance(m.text, open.organizerName, open.meal);
       if (stance !== 'unclear') {

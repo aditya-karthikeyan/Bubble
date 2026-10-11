@@ -30,7 +30,8 @@
     "p3:phase2": "pnpm --filter @bubbleworks/server p3:phase2",
     "sim": "pnpm --filter @bubbleworks/server sim",
     "p1:phase2": "pnpm --filter @bubbleworks/server sim basic",
-    "p2:phase3": "pnpm --filter @bubbleworks/server p2:phase3"
+    "p2:phase3": "pnpm --filter @bubbleworks/server p2:phase3",
+    "p2:redteam": "pnpm --filter @bubbleworks/server p2:redteam"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

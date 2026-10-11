@@ -84,3 +84,35 @@ export function stanceFromEmoji(emoji: string): RsvpStance {
   if (emoji === '👎') return 'out';
   return 'unclear';
 }
+
+export type PlanCommandName = 'wait' | 'resume' | 'cancel' | 'veto' | 'why';
+
+/**
+ * Plan commands sent to a bubble while a plan is running. Same words as the engine's
+ * parseCommand plus the natural phrasings people use ("why this place?", "hold up").
+ */
+export function parsePlanCommand(text: string): PlanCommandName | null {
+  const t = text
+    .trim()
+    .toLowerCase()
+    .replace(/[’]/g, "'")
+    .replace(/[.!]+$/, '');
+  if (/^(wait|hold on|hold up|pause|hold|stop|wait a sec|one sec)$/.test(t)) return 'wait';
+  if (/^(resume|go ahead|continue|unpause|go|carry on|keep going)$/.test(t)) return 'resume';
+  if (/^(cancel|cancel (the )?plan|nevermind|never mind|forget the plan|call it off)$/.test(t)) {
+    return 'cancel';
+  }
+  if (
+    /^(veto|not there|no not there|somewhere else|different place|pick somewhere else)$/.test(t)
+  ) {
+    return 'veto';
+  }
+  if (
+    /^(why|why there|why that|why here|explain|how come|why this place|why that place|why this one|why did you pick (this|that)( place)?)\??$/.test(
+      t,
+    )
+  ) {
+    return 'why';
+  }
+  return null;
+}

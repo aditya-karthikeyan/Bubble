@@ -12,13 +12,14 @@
  *   // question policy: await intake.renderBundle(decision)
  *   // POST /api/signup -> messaging.signup(body)
  */
-import { crewChatId, type PlanEngine } from '@bubbleworks/shared';
+import { crewChatId, type PlanEngine, type Presence } from '@bubbleworks/shared';
 import type { Runtime } from '../runtime.js';
 import { SpectrumMessaging } from './adapter.js';
 import { BundleStore } from './bundle.js';
 import { ClaudeClassifier, type Classifier } from './classifier.js';
 import type { MessagingConfig } from './config.js';
 import { PlanIntake } from './intake.js';
+import { AuditLog, SafetyLayer } from './safety.js';
 import { LiveSurfaces } from './surfaces.js';
 import { PhotonUsers } from './photon-users.js';
 import { signup, type SignupResult } from './signup.js';
@@ -29,11 +30,17 @@ export { SpectrumMessaging, dmChatId } from './adapter.js';
 export { type BundleResult, type QuestionDecision } from './bundle.js';
 export { loadMessagingConfig, type MessagingConfig } from './config.js';
 export { PlanIntake } from './intake.js';
+export { AuditLog, REFUSAL_TEXT, SafetyLayer } from './safety.js';
 export { SignupInput, type SignupResult } from './signup.js';
 
 export interface Messaging {
   port: SpectrumMessaging;
   bundles: BundleStore;
+  /** Refusals, pauses, resumes, cancels, vetoes. */
+  audit: AuditLog;
+  safety: SafetyLayer;
+  /** Quiet hours: pass BubbleService.getPresence so nobody asleep or driving gets pinged. */
+  setPresence(presence: (userId: string) => Promise<Presence>): void;
   /** Wire inbound messages to the engine. Call once, before start(). */
   attachEngine(engine: PlanEngine, options?: { classifier?: Classifier | null }): PlanIntake;
   /** One-time registration: Photon user + bubble number + CrewDirectory user. */
@@ -47,6 +54,8 @@ export interface CreateMessagingOptions {
   runtime: Pick<Runtime, 'handle' | 'crews' | 'plans' | 'log' | 'bus' | 'venues'>;
   /** Test and sim override. */
   transport?: Transport;
+  /** Test override; defaults to Haiku when ANTHROPIC_API_KEY is set. */
+  classifier?: Classifier | null;
 }
 
 export function createMessaging(options: CreateMessagingOptions): Messaging {
@@ -109,20 +118,39 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
     log,
   });
 
+  // One Haiku classifier for detection, RSVPs, and probes. Rules only without a key.
+  const defaultClassifier: Classifier | null =
+    options.classifier !== undefined
+      ? options.classifier
+      : process.env['ANTHROPIC_API_KEY']
+        ? new ClaudeClassifier({ log })
+        : null;
+  if (!defaultClassifier)
+    log.warn({}, 'no ANTHROPIC_API_KEY: detection and safety run on rules only');
+
+  // Safety gate: every inbound message is checked for probes before anyone else sees it.
+  const audit = new AuditLog(runtime.handle.sqlite);
+  const safety = new SafetyLayer({
+    port,
+    crews: runtime.crews,
+    classifier: defaultClassifier,
+    audit,
+    log,
+  });
+  port.setInboundGate((m) => safety.gate(m));
+
   let intake: PlanIntake | null = null;
   return {
     port,
     bundles,
+    audit,
+    safety,
+    setPresence: (presence) => port.setPresence(presence),
     attachEngine(engine, attachOptions = {}) {
       if (intake) throw new Error('engine already attached');
       const classifier =
-        attachOptions.classifier !== undefined
-          ? attachOptions.classifier
-          : process.env['ANTHROPIC_API_KEY']
-            ? new ClaudeClassifier({ log })
-            : null;
-      if (!classifier) log.warn({}, 'no ANTHROPIC_API_KEY: plan detection runs on rules only');
-      intake = new PlanIntake({ port, engine, bundles, classifier, log });
+        attachOptions.classifier !== undefined ? attachOptions.classifier : defaultClassifier;
+      intake = new PlanIntake({ port, engine, bundles, classifier, log, audit });
       intake.start();
       return intake;
     },
