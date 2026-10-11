@@ -147,6 +147,16 @@ export class FactStore {
     for (const u of owners) this.cache.delete(u);
   }
 
+  setConfidence(factId: string, confidence: number): void {
+    const owners = this.ownersOf([factId]);
+    this.db
+      .update(facts)
+      .set({ confidence: Math.min(1, Math.max(0, confidence)) })
+      .where(eq(facts.id, factId))
+      .run();
+    for (const u of owners) this.cache.delete(u);
+  }
+
   /** "forget that": deletes and returns the most recently written fact, or null. */
   deleteLatest(userId: string): Fact | null {
     const row = this.db

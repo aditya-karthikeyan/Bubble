@@ -60,6 +60,13 @@ export class PassiveLearner {
     this.pump();
   }
 
+  /** "forget me": drop this person's queued texts. */
+  forget(userId: string): void {
+    for (let i = this.queue.length - 1; i >= 0; i--) {
+      if (this.queue[i]!.userId === userId) this.queue.splice(i, 1);
+    }
+  }
+
   /** Resolves when the queue is empty and nothing is running. For tests and the demo. */
   idle(): Promise<void> {
     if (!this.running && !this.queue.length) return Promise.resolve();
