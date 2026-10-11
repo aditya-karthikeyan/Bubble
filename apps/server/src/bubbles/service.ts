@@ -32,6 +32,7 @@ import {
 import type { Db } from '../db/client.js';
 import {
   asks,
+  bookings,
   groupMembers,
   bubbleInbox,
   bubbleState,
@@ -268,6 +269,28 @@ export class DbBubbleService implements BubbleService {
   }
 
   /** Find My first; without a live fix, the last location pin they sent in the last 6 hours. */
+  /**
+   * The booked dinner this person is going to within the pin's lifetime, by venue name, so a
+   * pin sent before heading out gets a reply about holding the table.
+   */
+  private upcomingDinner(userId: string): string | null {
+    const now = this.now().getTime();
+    const next = this.db
+      .select({ startAt: bookings.startAt, venue: venues.name })
+      .from(bookings)
+      .innerJoin(
+        planMembers,
+        and(eq(planMembers.planId, bookings.planId), eq(planMembers.userId, userId)),
+      )
+      .innerJoin(venues, eq(venues.id, bookings.venueId))
+      .where(and(eq(bookings.status, 'booked'), inArray(planMembers.status, ['in', 'represented'])))
+      .all()
+      .map((r) => ({ venue: r.venue, at: Date.parse(r.startAt) }))
+      .filter((r) => r.at > now - 30 * 60_000 && r.at - now <= PIN_TTL_MS)
+      .sort((a, b) => a.at - b.at)[0];
+    return next?.venue ?? null;
+  }
+
   async readLocation(userId: string): Promise<CachedRead<LocationFix>> {
     const source = this.deps.locations;
     const user = source ? await this.crews.userById(userId) : null;
@@ -414,8 +437,12 @@ export class DbBubbleService implements BubbleService {
       // Mid-onboarding, repeat the open question so the pin doesn't stall it.
       const raw = this.state(user.id).onboardingStep;
       const open = raw && !isDone(raw) ? decodeStep(raw) : null;
+      const dinner = this.upcomingDinner(user.id);
       await reply(
-        "Got your location 📍 I'll start plans near you for the next few hours. " +
+        (dinner
+          ? `Got your location 📍 If you're running late to ${dinner}, I'll ask them to hold the table. ` +
+            'Your crew only ever sees "on the way". '
+          : "Got your location 📍 I'll start plans near you for the next few hours. ") +
           'Send a new one anytime.' +
           (open ? `\n\n${question(open.step, open.fast)}` : ''),
       );
@@ -1001,7 +1028,11 @@ export class DbBubbleService implements BubbleService {
     const extras: string[] = [];
     const cal = this.deps.calendarLink?.(user.id) ?? null;
     if (cal) extras.push(`Calendar (I only see busy or free, never what): ${cal}`);
-    extras.push('Location: send me your location right here (+ → Location → Share).');
+    extras.push(
+      'Location: tap my name at the top of this chat → Share My Location. I start plans near you, ' +
+        "and if you're running late I'll ask the restaurant to hold your table. " +
+        'Your crew only ever sees "on the way".',
+    );
     await reply(
       [
         `All set ✨ ${summary}`.trim(),
