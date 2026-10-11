@@ -221,6 +221,8 @@ export const venues = sqliteTable('venues', {
   address: text('address'),
   neighborhood: text('neighborhood'),
   isDemo: integer('is_demo', { mode: 'boolean' }).notNull().default(false),
+  rating: real('rating'),
+  ratingCount: integer('rating_count'),
 });
 
 export const ledger = sqliteTable(

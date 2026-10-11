@@ -32,7 +32,7 @@ export interface SolverContext {
 }
 
 export type InfeasibleReason =
-  'closed' | 'meal' | 'style' | 'cuisine' | 'diet' | 'budget' | 'distance';
+  'closed' | 'meal' | 'style' | 'cuisine' | 'diet' | 'budget' | 'distance' | 'rating';
 
 export interface Infeasibility {
   venueId: string;

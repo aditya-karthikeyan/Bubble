@@ -113,6 +113,19 @@ function filterStrict(
         detail: `${venue.cuisine} but the table voted ${ctx.cuisine}`,
       });
     }
+    if (
+      venue.rating !== null &&
+      venue.rating !== undefined &&
+      (venue.ratingCount ?? 0) >= SOLVER.min_rating_reviews &&
+      venue.rating < SOLVER.min_rating
+    ) {
+      problems.push({
+        venueId: venue.id,
+        userId: null,
+        reason: 'rating',
+        detail: `${venue.rating} stars over ${venue.ratingCount} reviews`,
+      });
+    }
     if (!fitsMeal(venue, ctx.meal)) {
       problems.push({
         venueId: venue.id,

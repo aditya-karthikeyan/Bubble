@@ -37,6 +37,8 @@ export function upsertVenues(db: Db, list: Venue[]): number {
         address: v.address,
         neighborhood: v.neighborhood,
         isDemo: v.isDemo,
+        rating: v.rating ?? null,
+        ratingCount: v.ratingCount ?? null,
       };
       const { id: _id, ...rest } = row;
       tx.insert(venues).values(row).onConflictDoUpdate({ target: venues.id, set: rest }).run();
@@ -82,5 +84,7 @@ export function toVenue(row: typeof venues.$inferSelect): Venue {
     address: row.address,
     neighborhood: row.neighborhood,
     isDemo: row.isDemo,
+    rating: row.rating ?? null,
+    ratingCount: row.ratingCount ?? null,
   });
 }

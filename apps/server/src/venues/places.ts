@@ -178,6 +178,8 @@ export function placeToVenue(place: Place, asked: string | null): Venue | null {
     address: place.formattedAddress ?? null,
     neighborhood: null,
     isDemo: false,
+    rating: typeof place.rating === 'number' ? place.rating : null,
+    ratingCount: typeof place.userRatingCount === 'number' ? place.userRatingCount : null,
   });
 }
 

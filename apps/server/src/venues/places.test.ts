@@ -14,6 +14,8 @@ const PLACE = {
     ],
   },
   priceLevel: 'PRICE_LEVEL_MODERATE',
+  rating: 4.6,
+  userRatingCount: 812,
   reservable: true,
   servesVegetarianFood: true,
   primaryType: 'chinese_restaurant',
@@ -31,6 +33,8 @@ describe('Google Places mapping', () => {
     expect(v.phone).toBe('+19195550101');
     expect(v.typicalCostUsd).toBe(22);
     expect(v.dietTags).toContain('vegetarian');
+    expect(v.rating).toBe(4.6);
+    expect(v.ratingCount).toBe(812);
     expect(v.hours[1]).toEqual([{ open: 660, close: 1290 }]);
     // Friday 5 PM to 1 AM Saturday is one interval that runs past midnight.
     expect(v.hours[5]).toEqual([{ open: 1020, close: 1500 }]);
