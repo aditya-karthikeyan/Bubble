@@ -55,7 +55,7 @@ Checkpoint A: send P2 (Pranav) a REQUEST to run together. "dinner today?" in the
 
 1. Detect infeasibility. For each member and each relaxable limit, compute the smallest concession making a candidate feasible: budget in 5 dollar steps up to 15 dollars, distance in 10 minute steps up to 20, time in 30 minute steps up to 60.
 2. Cost each concession by size times (1 + the member's recent compromise count). Never relax allergy, religious_diet, or accessibility facts.
-3. Send the two cheapest concessions to two different members at once through sendPrivateText, worded by Haiku without naming anyone else. Two minute timeout (30 seconds in DEMO_MODE). The first yes wins, and the other member gets a short thank-you.
+3. Send the two cheapest concessions to two different members at once through sendPrivateText, worded by Haiku without naming anyone else. Two minute timeout (also two minutes in DEMO_MODE, so a real person has time to read it). The first yes wins, and the other member gets a short thank-you.
 4. No yes: offer the group a different time where everyone fits, or takeout at someone's place, without naming anyone.
 5. Emit private_ask_sent and private_ask_resolved with no contents.
 6. Integrate the real adapters as each role merges: P2 messaging, P3 bubbles and doers, P4 caller. On lock, call CallerPort.book with the backup attached, then fire Inviter, Splitter, Watcher on booking_confirmed.

@@ -26,10 +26,13 @@ export const DEADLINES: Deadlines = {
   page_token_ttl_after_close_ms: 2 * 60 * 60_000,
 };
 
-/** DEMO_MODE values. Asks and the veto window stay shorter than 60 s so a rehearsal fits. */
+/**
+ * DEMO_MODE values. The veto window stays shorter than 60 s so a rehearsal fits. The private ask
+ * gets 120 s: a real person on a phone needs time to notice and read it before the plan moves on.
+ */
 export const DEMO_DEADLINES: Deadlines = {
   poll_ms: DEMO_MODE_DEADLINE_MS,
-  private_ask_ms: 30_000,
+  private_ask_ms: 120_000,
   veto_window_ms: 15_000,
   call_ms: DEMO_MODE_DEADLINE_MS,
   page_token_ttl_after_close_ms: DEADLINES.page_token_ttl_after_close_ms,

@@ -47,7 +47,7 @@ import { groupById } from '../db/seed.js';
 import { silentLogger, type Logger } from '../events/bus.js';
 import type { Runtime } from '../runtime.js';
 import { headcountText } from '../messaging/bundle.js';
-import { filterCandidates } from '../solver/filter.js';
+import { filterCandidates, filterStrict } from '../solver/filter.js';
 import { solve } from '../solver/rounds.js';
 import type { SolverContext, SolverMember } from '../solver/types.js';
 import { distanceM, walkMinutes } from '../venues/geo.js';
@@ -2015,8 +2015,9 @@ export class BubbleworksEngine implements PlanEngine {
     const base = { ...this.ctx(plan, startMinutes), cuisine: null };
     const vetoed = this.vetoed.get(plan.id) ?? new Set<string>();
     const venues = this.venuePool().filter((v) => !vetoed.has(v.id));
+    // Strict: the table hears about a style switch here instead of the filter letting it slide.
     const fits = (style: VenueStyle | null) =>
-      filterCandidates(venues, members, { ...base, style }).feasible;
+      filterStrict(venues, members, { ...base, style }).feasible;
 
     let feasible = fits(base.style ?? null);
     if (feasible.length === 0 && base.style) {
