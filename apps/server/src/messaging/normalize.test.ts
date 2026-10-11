@@ -19,6 +19,12 @@ describe('normalize', () => {
     });
   });
 
+  it('reads an edit (our spectrum patch tags its id "<guid>:edit:<seq>")', () => {
+    expect(normalize(msg({ type: 'text', text: 'vegan' }, { id: 'GUID-1:edit:42' }))).toMatchObject(
+      { kind: 'edit', providerId: 'GUID-1:edit:42', editOf: 'GUID-1', text: 'vegan' },
+    );
+  });
+
   it('unwraps a threaded reply', () => {
     const event = normalize(
       msg({ type: 'reply', target: { id: 'spc-msg-0' }, content: { type: 'text', text: 'in' } }),

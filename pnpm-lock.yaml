@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@spectrum-ts/imessage@12.10.1':
-    hash: 5fb56caed3d6dba3cfb724b2c6f77d15221556c896d05dcb53f0744b29c93e68
+    hash: e949c9215d3bd9ece5e5cb21a25b89e745173db16d859c9e4826fd9720db4b06
     path: patches/@spectrum-ts__imessage@12.10.1.patch
 
 importers:
@@ -3832,7 +3832,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@spectrum-ts/imessage@12.10.1(patch_hash=5fb56caed3d6dba3cfb724b2c6f77d15221556c896d05dcb53f0744b29c93e68)(@spectrum-ts/core@12.10.1(typescript@5.9.3))(typescript@5.9.3)':
+  '@spectrum-ts/imessage@12.10.1(patch_hash=e949c9215d3bd9ece5e5cb21a25b89e745173db16d859c9e4826fd9720db4b06)(@spectrum-ts/core@12.10.1(typescript@5.9.3))(typescript@5.9.3)':
     dependencies:
       '@grpc/grpc-js': 1.14.6
       '@photon-ai/advanced-imessage': 2.2.0(@grpc/grpc-js@1.14.6)(nice-grpc-common@2.0.4)(nice-grpc@2.1.17)
@@ -5249,7 +5249,7 @@ snapshots:
   spectrum-ts@12.10.1(typescript@5.9.3):
     dependencies:
       '@spectrum-ts/core': 12.10.1(typescript@5.9.3)
-      '@spectrum-ts/imessage': 12.10.1(patch_hash=5fb56caed3d6dba3cfb724b2c6f77d15221556c896d05dcb53f0744b29c93e68)(@spectrum-ts/core@12.10.1(typescript@5.9.3))(typescript@5.9.3)
+      '@spectrum-ts/imessage': 12.10.1(patch_hash=e949c9215d3bd9ece5e5cb21a25b89e745173db16d859c9e4826fd9720db4b06)(@spectrum-ts/core@12.10.1(typescript@5.9.3))(typescript@5.9.3)
       '@spectrum-ts/slack': 12.10.1(@spectrum-ts/core@12.10.1(typescript@5.9.3))(typescript@5.9.3)
       '@spectrum-ts/telegram': 12.10.1(@spectrum-ts/core@12.10.1(typescript@5.9.3))(typescript@5.9.3)
       '@spectrum-ts/terminal': 12.10.1(@spectrum-ts/core@12.10.1(typescript@5.9.3))(typescript@5.9.3)
