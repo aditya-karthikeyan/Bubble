@@ -29,6 +29,13 @@
       "when": 1791673716975,
       "tag": "0003_bubble_presence",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791684885447,
+      "tag": "0004_bubble_pin",
+      "breakpoints": true
     }
   ]
 }
