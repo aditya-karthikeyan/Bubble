@@ -1,8 +1,10 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
-import { FakeCaller, FakeDoers, FakeMessaging } from '@bubbleworks/shared/fakes';
+import { idempotencyKey } from '@bubbleworks/shared';
+import { FakeCaller, FakeMessaging } from '@bubbleworks/shared/fakes';
 import { createBubbles } from './bubbles/index.js';
 import { registerDevRoutes } from './dev/routes.js';
+import { Doers } from './doers/index.js';
 import { parseCommand } from './engine/intent.js';
 import { HaikuAskWriter } from './engine/wording.js';
 import { BubbleworksEngine } from './engine/plan-engine.js';
@@ -45,19 +47,51 @@ async function main(): Promise<void> {
   bubbles.registerRoutes(app.fastify);
   bubbles.attachLearner();
 
-  // P1 engine. Caller and doers are fakes until P4's ElevenLabs caller and P3's doers merge.
+  // P1 engine. The caller is a fake until P4's ElevenLabs caller merges; doers are P3's.
   const engineRef: { engine: BubbleworksEngine | null } = { engine: null };
   const caller = new FakeCaller((result) => engineRef.engine!.handleCallResult(result), {
     delayMs: 3000,
     log: (line) => app.fastify.log.info(line),
   });
-  const doers = new FakeDoers();
   // With the transport off (headless, no line lock) the engine talks to a silent fake so plans
   // started from the dev routes still run end to end for the live page.
   const enginePort = startMessaging
     ? messaging.port
     : new FakeMessaging({ print: false, log: (line) => app.fastify.log.debug(line) });
   if (!startMessaging) app.fastify.log.info('engine messaging: silent fake (transport off)');
+
+  // P3 doers: Inviter (.ics link), Splitter (Venmo, ledger), Watcher (ETAs, lateness), and the
+  // private summary for represented members. Lateness asks the caller to hold the table.
+  const publicBase = (config.SERVER_PUBLIC_URL ?? `http://localhost:${config.PORT}`).replace(
+    /\/$/,
+    '',
+  );
+  const doers = new Doers({
+    db: runtime.db,
+    crews: runtime.crews,
+    bubbles: bubbles.service,
+    messaging: enginePort,
+    timers: runtime.timers,
+    bus: runtime.bus,
+    publicBaseUrl: publicBase,
+    linkSecret:
+      process.env['GOOGLE_CLIENT_SECRET'] || process.env['SPECTRUM_PROJECT_SECRET'] || 'dev-only',
+    onLate: async (n) => {
+      const venue = runtime.venues().find((v) => v.id === n.venueId);
+      if (!venue) return;
+      await caller.holdTable({
+        planId: n.planId,
+        bookingId: n.bookingId,
+        venue,
+        partySize: n.partySize,
+        startAt: n.startAt,
+        holdMinutes: Math.min(30, n.minutesLate + 5),
+        idempotencyKey: idempotencyKey(n.planId, 'hold_table', n.bookingId),
+      });
+    },
+    log: app.fastify.log,
+  });
+  doers.registerRoutes(app.fastify);
   const engine = new BubbleworksEngine({
     runtime,
     bubbles: bubbles.service,
