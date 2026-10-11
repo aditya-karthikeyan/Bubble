@@ -326,6 +326,51 @@ describe('inbound', () => {
     ]);
   });
 
+  it('sends an edit straight to the bubble with editOf naming the delivered message', async () => {
+    const { messaging, inbox } = await setup({ debounceMs: 1500 });
+    // Two quick texts are delivered as one message under the last id.
+    for (const [id, text] of [
+      ['g1', 'vegn'],
+      ['g2', 'no nuts'],
+    ]) {
+      await messaging.handleInbound({
+        kind: 'text',
+        providerId: id!,
+        phone: AVA.handle,
+        text: text!,
+        at,
+      });
+    }
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(inbox.private.map((m) => m.messageId)).toEqual(['g2']);
+
+    await messaging.handleInbound({
+      kind: 'edit',
+      providerId: 'g1:edit:7',
+      phone: AVA.handle,
+      editOf: 'g1',
+      text: 'vegan',
+      at,
+    });
+    expect(inbox.private.at(-1)).toEqual({
+      messageId: 'g1:edit:7',
+      editOf: 'g2',
+      userId: AVA.id,
+      text: 'vegan',
+      at,
+    });
+    // The same edit event again is dropped.
+    await messaging.handleInbound({
+      kind: 'edit',
+      providerId: 'g1:edit:7',
+      phone: AVA.handle,
+      editOf: 'g1',
+      text: 'vegan',
+      at,
+    });
+    expect(inbox.private).toHaveLength(2);
+  });
+
   it('routes every DM to the crew while that crew has a plan in flight', async () => {
     const { messaging, inbox } = await setup({ openPlanCrew: async () => DEMO_GROUP.id });
     await messaging.handleInbound({

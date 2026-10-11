@@ -131,6 +131,8 @@ export class SpectrumMessaging implements MessagingPort {
   private readonly pollClosed: Array<(pollId: string) => Promise<unknown>> = [];
   /** Last time each person texted their bubble, for the quiet-hours override. */
   private readonly lastInbound = new Map<string, number>();
+  /** Provider id -> the batch messageId it was delivered under, so an edit can name it. */
+  private readonly deliveredAs = new Map<string, string>();
   private readonly rawText: Array<(userId: string, text: string, at: string) => boolean | void> =
     [];
   private readonly batcher: Batcher;
@@ -404,6 +406,22 @@ export class SpectrumMessaging implements MessagingPort {
         if (flushNow) this.batcher.flushNow(user.id);
         return;
       }
+      case 'edit': {
+        // Straight to the bubble (P3 re-reads onboarding answers); no batching, no plan routing.
+        const edit: InboundPrivateMessage = {
+          messageId: event.providerId,
+          editOf: this.deliveredAs.get(event.editOf) ?? event.editOf,
+          userId: user.id,
+          text: event.text,
+          at: event.at,
+        };
+        if (this.gate) {
+          const handled = await this.gate(edit).catch(() => false);
+          if (handled) return;
+        }
+        await this.emit(this.handlers.private, edit);
+        return;
+      }
       case 'reaction': {
         const copy = this.o.store.copy(event.targetMessageId);
         await this.emit(this.handlers.reaction, {
@@ -462,6 +480,10 @@ export class SpectrumMessaging implements MessagingPort {
   private async flushBatch(batch: Batch): Promise<void> {
     const userId = batch.key;
     const merged = mergeBatch(batch.items);
+    for (const item of batch.items) this.deliveredAs.set(item.providerId, merged.messageId);
+    if (this.deliveredAs.size > 5_000) {
+      for (const key of [...this.deliveredAs.keys()].slice(0, 1_000)) this.deliveredAs.delete(key);
+    }
     if (this.gate) {
       const handled = await this.gate({
         userId,
