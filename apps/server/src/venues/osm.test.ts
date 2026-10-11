@@ -30,6 +30,42 @@ describe('osm conversion', () => {
     expect(dietTagsFor({ cuisine: 'turkish' }, 'mediterranean')).toContain('halal');
   });
 
+  it('skips businesses OSM marks as closed', () => {
+    const base = { type: 'node' as const, lat: 35.9, lon: -79.0 };
+    const { venues, rejections } = convertOverpass({
+      elements: [
+        {
+          ...base,
+          id: 1,
+          tags: {
+            name: 'Gone',
+            phone: '+1 919 555 0001',
+            opening_hours: 'Mo-Su 11:00-22:00',
+            'disused:amenity': 'restaurant',
+          },
+        },
+        {
+          ...base,
+          id: 2,
+          tags: {
+            name: 'Ended',
+            phone: '+1 919 555 0002',
+            opening_hours: 'Mo-Su 11:00-22:00',
+            end_date: '2025-07-22',
+          },
+        },
+        { ...base, id: 3, tags: { name: 'Off', phone: '+1 919 555 0003', opening_hours: 'off' } },
+        {
+          ...base,
+          id: 4,
+          tags: { name: 'Open', phone: '+1 919 555 0004', opening_hours: 'Mo-Su 11:00-22:00' },
+        },
+      ],
+    });
+    expect(venues.map((v) => v.name)).toEqual(['Open']);
+    expect(rejections.map((r) => r.reason)).toEqual(['closed', 'closed', 'closed']);
+  });
+
   it('keeps only elements with phone, hours, name, and location', () => {
     const { venues, rejections } = convertOverpass({
       elements: [

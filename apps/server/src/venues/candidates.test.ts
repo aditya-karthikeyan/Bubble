@@ -90,3 +90,21 @@ describe('CandidateIndex', () => {
     expect(set.excluded.filter((e) => e.reason === 'too_far').length).toBeLessThanOrEqual(3);
   });
 });
+
+describe('seed pruning', () => {
+  it('removes venues that left data/venues.json', async () => {
+    const { upsertVenues, pruneVenues, listVenues } = await import('./repo.js');
+    const { demoVenue } = await import('./demo-venue.js');
+    const stale = { ...demoVenue(), id: 'venue_osm_stale', name: 'Closed Place' };
+    upsertVenues(rt.db, [stale]);
+    expect(listVenues(rt.db).some((v) => v.id === 'venue_osm_stale')).toBe(true);
+    const removed = pruneVenues(
+      rt.db,
+      listVenues(rt.db)
+        .filter((v) => v.id !== 'venue_osm_stale')
+        .map((v) => v.id),
+    );
+    expect(removed).toBe(1);
+    expect(listVenues(rt.db).some((v) => v.id === 'venue_osm_stale')).toBe(false);
+  });
+});

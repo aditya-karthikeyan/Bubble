@@ -3,7 +3,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { eq } from 'drizzle-orm';
+import { eq, notInArray } from 'drizzle-orm';
 import { Venue as VenueSchema, type Venue } from '@bubbleworks/shared';
 import { z } from 'zod';
 import type { Db } from '../db/client.js';
@@ -42,6 +42,12 @@ export function upsertVenues(db: Db, list: Venue[]): number {
     }
   });
   return count;
+}
+
+/** Remove venues no longer in data/venues.json (closed or moved), so stale rows never reach the solver. */
+export function pruneVenues(db: Db, keepIds: string[]): number {
+  if (keepIds.length === 0) return 0;
+  return db.delete(venues).where(notInArray(venues.id, keepIds)).run().changes;
 }
 
 export function listVenues(db: Db): Venue[] {
