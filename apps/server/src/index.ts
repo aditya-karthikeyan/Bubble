@@ -30,7 +30,13 @@ async function main(): Promise<void> {
           }
         : {},
   });
-  const runtime = createRuntime(config, { log: app.fastify.log });
+  // Real calls run long: with CALLER_MODE=real the call timeout is 5 minutes (P4's measurement),
+  // in both normal and DEMO_MODE deadlines. Fake calls keep the configured 90 s / 60 s.
+  const realCalls = process.env['CALLER_MODE'] === 'real';
+  const runtime = createRuntime(config, {
+    log: app.fastify.log,
+    ...(realCalls ? { timers: { deadlines: { call_ms: 300_000 } } } : {}),
+  });
   pending.runtime = runtime;
   runtime.bus.setBroadcaster((token, event) => app.live.broadcast(token, event));
   runtime.timers.start();
