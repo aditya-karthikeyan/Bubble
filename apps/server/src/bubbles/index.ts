@@ -21,6 +21,7 @@ import {
   registerGoogleOAuthRoutes,
   type GoogleOAuthConfig,
 } from './google-oauth.js';
+import { HaikuReactionClassifier, RuleReactionClassifier } from './reactions.js';
 import { DbBubbleService, type BubbleServiceDeps } from './service.js';
 import { GoogleFreeBusySource, PhotonLocationSource, type LocationSource } from './signals.js';
 
@@ -78,6 +79,9 @@ export function createBubbles(options: CreateBubblesOptions): Bubbles {
     signupUrl: webBase ?? null,
     locations,
     freeBusy: google ? new GoogleFreeBusySource(google, tokens) : null,
+    reactions: env['ANTHROPIC_API_KEY']
+      ? new HaikuReactionClassifier({ apiKey: env['ANTHROPIC_API_KEY'] })
+      : new RuleReactionClassifier(),
     ...(options.onCrewChanged ? { onCrewChanged: options.onCrewChanged } : {}),
     ...(options.now ? { now: options.now } : {}),
     log,

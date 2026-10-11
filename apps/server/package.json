@@ -20,7 +20,8 @@
     "p2:phase2": "tsx --env-file-if-exists=../../.env scripts/p2-phase2.ts",
     "p3:phase2": "tsx --env-file-if-exists=../../.env scripts/p3/phase2.ts",
     "sim": "tsx --env-file-if-exists=../../.env scripts/sim.ts",
-    "p3:phase3": "tsx --env-file-if-exists=../../.env scripts/p3/phase3.ts"
+    "p3:phase3": "tsx --env-file-if-exists=../../.env scripts/p3/phase3.ts",
+    "p3:phase4": "tsx --env-file-if-exists=../../.env scripts/p3/phase4.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

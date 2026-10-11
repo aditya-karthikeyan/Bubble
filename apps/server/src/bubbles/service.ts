@@ -11,7 +11,7 @@
  * Privacy: a bubble only ever DMs its own person about their own facts. Crew invites and
  * crew updates carry names only. Logs carry ids and kinds, never message text or fact values.
  */
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
   idempotencyKey,
   type BubbleProfile,
@@ -31,6 +31,7 @@ import {
 import type { Db } from '../db/client.js';
 import {
   asks,
+  groupMembers,
   bubbleInbox,
   bubbleState,
   crewInvites,
@@ -38,6 +39,8 @@ import {
   planMembers,
   users,
   venues,
+  plans,
+  timers,
   votes,
   type BubblePending,
 } from '../db/schema.js';
@@ -53,6 +56,7 @@ import {
 } from './extract.js';
 import { describeFact, FactStore } from './facts.js';
 import { PassiveLearner, type LearnInput } from './learner.js';
+import { mightBeReaction, type ReactionClassifier } from './reactions.js';
 import {
   inQuietHours,
   parsePresenceCommand,
@@ -104,6 +108,8 @@ export interface BubbleServiceDeps {
   freeBusy?: FreeBusySource | null;
   /** Per-signal read budget; 300 ms in production. */
   signalBudgetMs?: number;
+  /** Post-dinner verdicts ("that place was mid"). Absent: reactions are ignored. */
+  reactions?: ReactionClassifier | null;
   now?: () => Date;
   log?: Logger;
 }
@@ -381,8 +387,8 @@ export class DbBubbleService implements BubbleService {
 
     if (!state.onboardingCompletedAt) {
       if (!state.onboardingStep) await this.startOnboarding(user.id, reply);
-      else if (state.onboardingStep === 'done') await this.finishOnboarding(user, reply);
-      else await this.answerOnboarding(user, state.onboardingStep as OnboardingStep, text, reply);
+      else if (isDone(state.onboardingStep)) await this.finishOnboarding(user, reply);
+      else await this.answerOnboarding(user, state.onboardingStep, text, reply);
       return true;
     }
 
@@ -399,6 +405,128 @@ export class DbBubbleService implements BubbleService {
   /** Feed any message the person wrote (DM or crew plan thread) to the background learner. */
   learn(input: LearnInput): void {
     this.learner.enqueue(input);
+    if (this.deps.reactions && mightBeReaction(input.text)) {
+      void this.reactTo(input).catch((err: unknown) =>
+        this.log.warn({ userId: input.userId, err: (err as Error).message }, 'reaction failed'),
+      );
+    }
+  }
+
+  /**
+   * A verdict on the last place they ate at, within 18 hours after the booking. Negative lowers
+   * that cuisine (a like loses 0.3 confidence and flips to avoid below 0.35) and drops the venue
+   * from favorites; positive saves the venue as a favorite and the cuisine as a like.
+   * Returns what changed, for tests and the demo.
+   */
+  async reactTo(input: LearnInput): Promise<string | null> {
+    const classifier = this.deps.reactions;
+    if (!classifier || !this.isOnboarded(input.userId)) return null;
+    const nowMs = this.now().getTime();
+    const recent = this.db
+      .select({ planId: plans.id, venueId: plans.chosenVenueId, startAt: plans.startAt })
+      .from(plans)
+      .innerJoin(planMembers, eq(planMembers.planId, plans.id))
+      .where(
+        and(
+          eq(planMembers.userId, input.userId),
+          inArray(planMembers.status, ['in', 'represented']),
+          inArray(plans.state, ['BOOKED', 'DAY_OF', 'CLOSED']),
+        ),
+      )
+      .orderBy(desc(plans.startAt))
+      .all()
+      .find((p) => {
+        const start = p.startAt ? Date.parse(p.startAt) : NaN;
+        return p.venueId && nowMs > start && nowMs - start < 18 * 3_600_000;
+      });
+    if (!recent?.venueId) return null;
+    const venue = this.db.select().from(venues).where(eq(venues.id, recent.venueId)).get();
+    if (!venue) return null;
+
+    const verdict = await classifier.classify(input.text, venue.name);
+    if (!verdict.about_place || verdict.sentiment === 'neutral') return null;
+    const base = {
+      userId: input.userId,
+      hard: false,
+      source: 'reaction' as const,
+      confirmed: false,
+      expiresAt: null,
+    };
+
+    if (verdict.sentiment === 'negative') {
+      const fav = this.facts
+        .active(input.userId)
+        .find((f) => f.type === 'favorite_venue' && f.value === venue.id);
+      if (fav) this.facts.delete([fav.id]);
+      const like = this.facts
+        .active(input.userId)
+        .find((f) => f.type === 'cuisine_like' && f.value === venue.cuisine);
+      if (like && like.confidence - 0.3 >= 0.35) {
+        this.facts.setConfidence(like.id, like.confidence - 0.3);
+      } else {
+        this.facts.record({
+          ...base,
+          type: 'cuisine_avoid',
+          value: venue.cuisine,
+          confidence: 0.4,
+        });
+      }
+      this.facts.record({
+        ...base,
+        type: 'other',
+        value: `avoid_venue:${venue.id}`,
+        confidence: 0.6,
+      });
+      this.log.info(
+        { userId: input.userId, venueId: venue.id },
+        'reaction: lowered venue and cuisine',
+      );
+      return `lowered ${venue.name} and ${venue.cuisine}`;
+    }
+    this.facts.record({ ...base, type: 'favorite_venue', value: venue.id, confidence: 0.6 });
+    const avoid = this.facts
+      .active(input.userId)
+      .find((f) => f.type === 'other' && f.value === `avoid_venue:${venue.id}`);
+    if (avoid) this.facts.delete([avoid.id]);
+    if (
+      !this.facts
+        .active(input.userId)
+        .some((f) => f.type === 'cuisine_avoid' && f.value === venue.cuisine)
+    ) {
+      this.facts.record({ ...base, type: 'cuisine_like', value: venue.cuisine, confidence: 0.5 });
+    }
+    this.log.info({ userId: input.userId, venueId: venue.id }, 'reaction: raised venue');
+    return `raised ${venue.name}`;
+  }
+
+  /** Late joiner wrap-up: short, then straight into the crew and the live plan. */
+  private async finishFast(user: User, reply: Reply): Promise<void> {
+    const known = this.summarize(user.id);
+    await reply(
+      `You're in ✨ ${known.length ? `I'll plan around this: ${known.join('; ')}. ` : ''}` +
+        "I'll ask about favorite spots and Venmo after tonight.",
+    );
+    this.log.info({ userId: user.id }, 'late joiner onboarded');
+    // Already a confirmed member: join the live plan now. Otherwise the crew invite comes next.
+    const active = this.activePlanFor(user.id);
+    if (active) {
+      const crew = await this.crews.crewByChatId(active.chatId);
+      const member = crew
+        ? this.db
+            .select({ c: groupMembers.confirmedAt })
+            .from(groupMembers)
+            .where(and(eq(groupMembers.groupId, crew.id), eq(groupMembers.userId, user.id)))
+            .get()
+        : undefined;
+      if (member?.c) {
+        await this.deps.onCrewChanged?.({
+          chatId: active.chatId,
+          userId: user.id,
+          change: 'joined',
+        });
+      }
+    }
+    await this.deliverNextInvite(user.id);
   }
 
   private async setPresence(
@@ -518,25 +646,50 @@ export class DbBubbleService implements BubbleService {
   private async startOnboarding(userId: string, reply: Reply): Promise<void> {
     const user = await this.crews.userById(userId);
     const nowIso = this.now().toISOString();
+    // Late joiner: a crew they belong to (or are invited to) is planning right now, so ask
+    // only what changes tonight's decision and let them join the live plan.
+    const fast = this.activePlanFor(userId) !== null;
+    const first: OnboardingStep = 'diet_allergy'; // first in both flows
     this.upsertState(userId, {
-      onboardingStep: ONBOARDING_STEPS[0],
+      onboardingStep: encodeStep(first, fast),
       onboardingStartedAt: nowIso,
     });
     // First message to a new person: no links, no media (Apple deliverability rule).
-    await reply(
-      `Hey ${user?.displayName ?? 'there'}, I'm your bubble 🫧 I plan food with your crew ` +
-        "so the group chat doesn't have to. Five quick questions, about a minute.\n\n" +
-        QUESTIONS.diet_allergy,
-    );
-    this.log.info({ userId }, 'onboarding started');
+    const intro = fast
+      ? `Hey ${user?.displayName ?? 'there'}, I'm your bubble 🫧 Your crew is planning food ` +
+        "right now, so three quick questions and you're in."
+      : `Hey ${user?.displayName ?? 'there'}, I'm your bubble 🫧 I plan food with your crew ` +
+        "so the group chat doesn't have to. Five quick questions, about a minute.";
+    await reply(`${intro}\n\n${question(first, fast)}`);
+    this.log.info({ userId, fast }, 'onboarding started');
+  }
+
+  /** The crew plan in flight (not yet locked) for any crew this person is in or invited to. */
+  activePlanFor(userId: string): { planId: string; chatId: string } | null {
+    const groupIds = this.db
+      .select({ g: groupMembers.groupId })
+      .from(groupMembers)
+      .where(eq(groupMembers.userId, userId))
+      .all()
+      .map((r) => r.g);
+    if (!groupIds.length) return null;
+    const row = this.db
+      .select({ planId: plans.id, chatId: plans.chatId })
+      .from(plans)
+      .where(and(inArray(plans.groupId, groupIds), inArray(plans.state, [...JOINABLE_STATES])))
+      .orderBy(desc(plans.createdAt))
+      .get();
+    return row ?? null;
   }
 
   private async answerOnboarding(
     user: User,
-    step: OnboardingStep,
+    raw: string,
     text: string,
     reply: Reply,
   ): Promise<void> {
+    const { step, fast } = decodeStep(raw);
+    const steps: readonly OnboardingStep[] = fast ? FAST_STEPS : ONBOARDING_STEPS;
     const extracted = isSkip(text) ? [] : await this.deps.extractor.extract(text, step);
     const saved = await this.saveExtracted(user.id, extracted, step, text);
 
@@ -546,8 +699,10 @@ export class DbBubbleService implements BubbleService {
     }
 
     const allergies = saved.filter((f) => f.type === 'allergy' && !f.confirmed);
-    const next = ONBOARDING_STEPS[ONBOARDING_STEPS.indexOf(step) + 1] ?? null;
-    this.upsertState(user.id, { onboardingStep: next ?? 'done' });
+    const next = steps[steps.indexOf(step) + 1] ?? null;
+    this.upsertState(user.id, {
+      onboardingStep: next ? encodeStep(next, fast) : fast ? 'fast:done' : 'done',
+    });
 
     if (allergies.length) {
       this.setPending(user.id, { kind: 'allergy_confirm', factIds: allergies.map((f) => f.id) });
@@ -564,20 +719,27 @@ export class DbBubbleService implements BubbleService {
   private async continueOnboarding(user: User, reply: Reply): Promise<void> {
     const state = this.state(user.id);
     if (state.onboardingCompletedAt) return;
-    const step = state.onboardingStep;
-    if (step && step !== 'done') {
-      await reply(QUESTIONS[step as OnboardingStep]);
+    const raw = state.onboardingStep;
+    if (raw && !isDone(raw)) {
+      const { step, fast } = decodeStep(raw);
+      await reply(question(step, fast));
       return;
     }
     await this.finishOnboarding(user, reply);
   }
 
   private async finishOnboarding(user: User, reply: Reply): Promise<void> {
-    const started = this.state(user.id).onboardingStartedAt;
+    const st = this.state(user.id);
+    const started = st.onboardingStartedAt;
+    const fast = st.onboardingStep?.startsWith('fast:') ?? false;
     this.upsertState(user.id, {
       onboardingStep: null,
       onboardingCompletedAt: this.now().toISOString(),
     });
+    if (fast) {
+      await this.finishFast(user, reply);
+      return;
+    }
     const known = this.summarize(user.id);
     const summary = known.length ? `Here's what I know: ${known.join('; ')}.` : '';
     const extras: string[] = [];
@@ -891,9 +1053,15 @@ export class DbBubbleService implements BubbleService {
       tx.delete(bubbleInbox).where(eq(bubbleInbox.userId, userId)).run();
       tx.delete(crewInvites).where(eq(crewInvites.invitedByUserId, userId)).run();
       // Cascades: facts, group_members, bubble_state, crew_invites (as invitee), google_tokens.
+      // DMs held for quiet hours carry text for this person.
+      tx.delete(timers)
+        .where(eq(timers.planId, `p3dm:${userId}`))
+        .run();
       tx.delete(users).where(eq(users.id, userId)).run();
     });
     this.facts.evict(userId);
+    this.learner.forget(userId);
+    this.locationCache.delete(userId);
     this.log.info({ userId, crews: crews.length }, 'forget me: user deleted');
     for (const c of crews) {
       await this.deps.onCrewChanged?.({ chatId: c.chatId, userId, change: 'left' });
@@ -1008,6 +1176,34 @@ export function isNo(text: string): boolean {
     /^\s*(n|no|nope|nah|wrong|not really|pass|i'?m out|out)\b[\s!.]*$/i.test(text) ||
     /^\s*👎/.test(text)
   );
+}
+
+/** Late joiners answer only what changes tonight's decision. */
+const FAST_STEPS = [
+  'diet_allergy',
+  'budget',
+  'neighborhood',
+] as const satisfies readonly OnboardingStep[];
+/** Plans a late joiner can still join (not yet locked). */
+const JOINABLE_STATES = ['DETECTED', 'GATHERING', 'DELIBERATING', 'DEADLOCK'] as const;
+
+function encodeStep(step: OnboardingStep, fast: boolean): string {
+  return fast ? `fast:${step}` : step;
+}
+
+function decodeStep(raw: string): { step: OnboardingStep; fast: boolean } {
+  const fast = raw.startsWith('fast:');
+  return { step: (fast ? raw.slice(5) : raw) as OnboardingStep, fast };
+}
+
+function isDone(raw: string): boolean {
+  return raw === 'done' || raw === 'fast:done';
+}
+
+/** The question for a step, numbered within its flow ("2/3" for late joiners). */
+function question(step: OnboardingStep, fast: boolean): string {
+  const steps: readonly OnboardingStep[] = fast ? FAST_STEPS : ONBOARDING_STEPS;
+  return `${steps.indexOf(step) + 1}/${steps.length} ${QUESTIONS[step].replace(/^\d\/\d /, '')}`;
 }
 
 const STOP_WORDS = new Set([

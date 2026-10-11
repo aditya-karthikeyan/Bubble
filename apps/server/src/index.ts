@@ -3,6 +3,7 @@ import { loadConfig } from './config.js';
 import { idempotencyKey } from '@bubbleworks/shared';
 import { FakeCaller, FakeMessaging } from '@bubbleworks/shared/fakes';
 import { createBubbles } from './bubbles/index.js';
+import { seedDemoBubbles } from './bubbles/seed.js';
 import { registerDevRoutes } from './dev/routes.js';
 import { Doers } from './doers/index.js';
 import { parseCommand } from './engine/intent.js';
@@ -46,6 +47,9 @@ async function main(): Promise<void> {
   runtime.setHardFacts((userId) => bubbles.service.getHardLimits(userId));
   bubbles.registerRoutes(app.fastify);
   bubbles.attachLearner();
+  if (runtime.seed) {
+    app.fastify.log.info({ ...seedDemoBubbles(runtime.db) }, 'demo bubbles seeded');
+  }
 
   // P1 engine. The caller is a fake until P4's ElevenLabs caller merges; doers are P3's.
   const engineRef: { engine: BubbleworksEngine | null } = { engine: null };
