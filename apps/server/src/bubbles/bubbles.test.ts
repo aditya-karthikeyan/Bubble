@@ -110,7 +110,7 @@ describe('DbBubbleService', () => {
       expect(done).toMatch(/^All set/);
       expect(done).toContain('https://example.test/oauth/google/start?u=');
       expect(done).toContain(
-        'tap my name at the top of this chat → Share My Location, or send a pin (+ → Location)',
+        'send me a pin here (+ → Location → Send My Current Location; "Share My Location" does not reach me)',
       );
       expect(done).toContain('Your crew never sees where you are.');
       expect(done).toContain("if you're running late I'll ask the restaurant to hold your table");

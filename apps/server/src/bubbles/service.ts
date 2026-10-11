@@ -1426,8 +1426,8 @@ export class DbBubbleService implements BubbleService {
     const cal = this.deps.calendarLink?.(user.id) ?? null;
     if (cal) extras.push(`Calendar (I only see busy or free, never what): ${cal}`);
     extras.push(
-      'Location: tap my name at the top of this chat → Share My Location, or send a pin ' +
-        '(+ → Location). I start plans near you, ' +
+      'Location: send me a pin here (+ → Location → Send My Current Location; ' +
+        '"Share My Location" does not reach me). I start plans near you, ' +
         "and if you're running late I'll ask the restaurant to hold your table. " +
         'Your crew never sees where you are.',
     );

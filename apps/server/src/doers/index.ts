@@ -453,7 +453,7 @@ export interface WatchReport {
  */
 export function lateNudge(venueName: string): string {
   return (
-    `Running late? Send me a location pin before you head out and I'll ask ${venueName} to ` +
+    `Running late? Send me a location pin (+ → Location → Send My Current Location) before you head out and I'll ask ${venueName} to ` +
     'hold the table. Totally optional; your crew never sees where you are.'
   );
 }
