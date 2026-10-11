@@ -11,12 +11,12 @@ One row per role. Update your row at the end of every phase.
 
 ## Checkpoints
 
-| Checkpoint                                                  | Hour | Result                                                                    |
-| ----------------------------------------------------------- | ---- | ------------------------------------------------------------------------- |
-| A: poll + headcount + link within 5 s, solver logs a winner | 9    | sim: bundle 21 ms, lock 34 ms after intent; real-line run with P2 pending |
-| B: real call ends in "Booked"                               | 15   |                                                                           |
-| C: edge cases and safety pass                               | 19   |                                                                           |
-| Final: five rehearsals, backups recorded                    | 23   |                                                                           |
+| Checkpoint                                                  | Hour | Result                                                                                                                                                  |
+| ----------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A: poll + headcount + link within 5 s, solver logs a winner | 9    | PASS 2026-10-11 01:38 UTC, 3 real phones: typing 1 ms, detect 7 ms, bundle 4.8 s after receipt, lock 62.7 s (60 s demo poll), Booked 82 s (fake caller) |
+| B: real call ends in "Booked"                               | 15   |                                                                                                                                                         |
+| C: edge cases and safety pass                               | 19   |                                                                                                                                                         |
+| Final: five rehearsals, backups recorded                    | 23   |                                                                                                                                                         |
 
 ## Deployments
 
