@@ -28,6 +28,7 @@ import type {
   PlanMemberStatus,
   PlanState,
   PollKind,
+  VenueStyle,
 } from '@bubbleworks/shared';
 
 export const users = sqliteTable('users', {
@@ -207,6 +208,8 @@ export const venues = sqliteTable('venues', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   cuisine: text('cuisine').notNull(),
+  cuisineTags: text('cuisine_tags', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  style: text('style').$type<VenueStyle>().notNull().default('sit_down'),
   dietTags: text('diet_tags', { mode: 'json' }).$type<string[]>().notNull(),
   accessibilityTags: text('accessibility_tags', { mode: 'json' }).$type<string[]>().notNull(),
   priceLevel: integer('price_level').notNull(),

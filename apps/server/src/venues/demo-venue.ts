@@ -17,6 +17,8 @@ export function demoVenue(phone: string = DEMO_VENUE_PHONE_PLACEHOLDER): Venue {
     id: DEMO_VENUE_ID,
     name: 'The Demo Table',
     cuisine: 'american',
+    cuisineTags: ['american'],
+    style: 'sit_down',
     dietTags: ['vegetarian', 'vegan', 'halal', 'gluten_free', 'peanut_free'],
     accessibilityTags: ['wheelchair', 'step_free'],
     priceLevel: 2,

@@ -64,3 +64,40 @@ describe('hard fact compatibility', () => {
     ).toBe(true);
   });
 });
+
+describe('no pork / no beef', () => {
+  const noPork: Fact = {
+    ...factsFor('user_ava').find((f) => f.type === 'diet')!,
+    userId: 'user_x',
+    value: 'no_pork',
+  };
+  const noBeef: Fact = { ...noPork, value: 'no_beef' };
+  it('fails hot dog, burger, bbq kitchens even with a veg option', () => {
+    const supDogs = venue({
+      cuisine: 'american',
+      cuisineTags: ['american', 'hot_dog'],
+      dietTags: ['vegetarian'],
+      style: 'fast_food',
+    });
+    expect(isCompatible(supDogs, [noPork])).toBe(false);
+    expect(isCompatible(supDogs, [noBeef])).toBe(false);
+    expect(isCompatible(venue({ cuisine: 'american', cuisineTags: ['burger'] }), [noBeef])).toBe(
+      false,
+    );
+    expect(isCompatible(venue({ cuisine: 'american', cuisineTags: ['burger'] }), [noPork])).toBe(
+      true,
+    );
+    expect(isCompatible(venue({ cuisine: 'american', cuisineTags: ['bbq'] }), [noPork])).toBe(
+      false,
+    );
+  });
+  it('passes kitchens that are not meat-centric', () => {
+    expect(
+      isCompatible(venue({ cuisine: 'american', cuisineTags: ['chicken'] }), [noPork, noBeef]),
+    ).toBe(true);
+    expect(isCompatible(venue({ cuisine: 'indian', dietTags: ['vegetarian'] }), [noBeef])).toBe(
+      true,
+    );
+    expect(isCompatible(venue({ cuisine: 'mexican' }), [noPork])).toBe(true);
+  });
+});

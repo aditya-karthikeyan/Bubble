@@ -3,6 +3,10 @@
     "id": "venue_demo",
     "name": "The Demo Table",
     "cuisine": "american",
+    "cuisineTags": [
+      "american"
+    ],
+    "style": "sit_down",
     "dietTags": [
       "vegetarian",
       "vegan",
@@ -73,6 +77,12 @@
     "id": "venue_osm_n11943143457",
     "name": "Bonchon Chicken",
     "cuisine": "american",
+    "cuisineTags": [
+      "chicken",
+      "korean",
+      "sushi"
+    ],
+    "style": "sit_down",
     "dietTags": [],
     "accessibilityTags": [],
     "priceLevel": 2,
@@ -134,6 +144,10 @@
     "id": "venue_osm_n12646554200",
     "name": "Wheat 麦茶",
     "cuisine": "chinese",
+    "cuisineTags": [
+      "chinese"
+    ],
+    "style": "sit_down",
     "dietTags": [],
     "accessibilityTags": [],
     "priceLevel": 2,
@@ -195,6 +209,10 @@
     "id": "venue_osm_n13256222785",
     "name": "Alpha Pie",
     "cuisine": "pizza",
+    "cuisineTags": [
+      "pizza"
+    ],
+    "style": "sit_down",
     "dietTags": [
       "vegetarian"
     ],
@@ -243,6 +261,8 @@
     "id": "venue_osm_n1512497927",
     "name": "Four Corners",
     "cuisine": "other",
+    "cuisineTags": [],
+    "style": "sit_down",
     "dietTags": [],
     "accessibilityTags": [],
     "priceLevel": 2,
@@ -304,6 +324,11 @@
     "id": "venue_osm_n1546998787",
     "name": "Sutton's Drug Store",
     "cuisine": "american",
+    "cuisineTags": [
+      "burger",
+      "breakfast"
+    ],
+    "style": "sit_down",
     "dietTags": [],
     "accessibilityTags": [],
     "priceLevel": 2,
@@ -365,6 +390,10 @@
     "id": "venue_osm_n2681997236",
     "name": "Al's Burger Shack",
     "cuisine": "american",
+    "cuisineTags": [
+      "burger"
+    ],
+    "style": "sit_down",
     "dietTags": [],
     "accessibilityTags": [],
     "priceLevel": 2,
@@ -416,6 +445,10 @@
     "id": "venue_osm_n2694104383",
     "name": "Italian Pizzeria III",
     "cuisine": "pizza",
+    "cuisineTags": [
+      "pizza"
+    ],
+    "style": "sit_down",
     "dietTags": [
       "vegetarian"
     ],
@@ -479,6 +512,10 @@
     "id": "venue_osm_n2763321659",
     "name": "Vimala's Curryblossom Cafe",
     "cuisine": "indian",
+    "cuisineTags": [
+      "indian"
+    ],
+    "style": "sit_down",
     "dietTags": [
       "vegan",
       "vegetarian"
@@ -541,6 +578,10 @@
     "id": "venue_osm_n2805273060",
     "name": "Moge Tea",
     "cuisine": "coffee",
+    "cuisineTags": [
+      "bubble_tea"
+    ],
+    "style": "sit_down",
     "dietTags": [
       "vegetarian"
     ],
@@ -604,6 +645,10 @@
     "id": "venue_osm_n3316380561",
     "name": "Hibachi & Company",
     "cuisine": "asian",
+    "cuisineTags": [
+      "asian"
+    ],
+    "style": "sit_down",
     "dietTags": [],
     "accessibilityTags": [],
     "priceLevel": 2,
@@ -665,6 +710,10 @@
     "id": "venue_osm_n3316380634",
     "name": "Raising Cane's",
     "cuisine": "american",
+    "cuisineTags": [
+      "chicken"
+    ],
+    "style": "fast_food",
     "dietTags": [],
     "accessibilityTags": [],
     "priceLevel": 1,
@@ -726,6 +775,10 @@
     "id": "venue_osm_n3316380638",
     "name": "Waffle House",
     "cuisine": "american",
+    "cuisineTags": [
+      "american"
+    ],
+    "style": "sit_down",
     "dietTags": [],
     "accessibilityTags": [],
     "priceLevel": 2,
@@ -787,6 +840,10 @@
     "id": "venue_osm_n4243856770",
     "name": "Cosmic Cantina",
     "cuisine": "mexican",
+    "cuisineTags": [
+      "mexican"
+    ],
+    "style": "sit_down",
     "dietTags": [
       "vegetarian"
     ],
@@ -853,6 +910,10 @@
     "id": "venue_osm_n5076295871",
     "name": "Starbucks",
     "cuisine": "coffee",
+    "cuisineTags": [
+      "coffee_shop"
+    ],
+    "style": "fast_food",
     "dietTags": [
       "vegan",
       "vegetarian"
@@ -920,6 +981,8 @@
     "id": "venue_osm_n536179106",
     "name": "Saladelia Cafe",
     "cuisine": "coffee",
+    "cuisineTags": [],
+    "style": "fast_food",
     "dietTags": [
       "vegetarian"
     ],
@@ -973,6 +1036,10 @@
     "id": "venue_osm_n564718036",
     "name": "Buns",
     "cuisine": "american",
+    "cuisineTags": [
+      "burger"
+    ],
+    "style": "sit_down",
     "dietTags": [],
     "accessibilityTags": [],
     "priceLevel": 2,
@@ -1034,6 +1101,10 @@
     "id": "venue_osm_n564718038",
     "name": "Starbucks",
     "cuisine": "coffee",
+    "cuisineTags": [
+      "coffee_shop"
+    ],
+    "style": "fast_food",
     "dietTags": [
       "vegetarian"
     ],
@@ -1097,6 +1168,8 @@
     "id": "venue_osm_n5731523887",
     "name": "Cat Tales Cat Café",
     "cuisine": "coffee",
+    "cuisineTags": [],
+    "style": "fast_food",
     "dietTags": [
       "vegetarian"
     ],
@@ -1155,6 +1228,10 @@
     "id": "venue_osm_n5731523903",
     "name": "McDonald's",
     "cuisine": "american",
+    "cuisineTags": [
+      "burger"
+    ],
+    "style": "fast_food",
     "dietTags": [],
     "accessibilityTags": [],
     "priceLevel": 1,
@@ -1216,6 +1293,10 @@
     "id": "venue_osm_n5731528569",
     "name": "Bandido's",
     "cuisine": "mexican",
+    "cuisineTags": [
+      "mexican"
+    ],
+    "style": "sit_down",
     "dietTags": [
       "vegetarian"
     ],
@@ -1277,6 +1358,10 @@
     "id": "venue_osm_n6279336658",
     "name": "Roots Natural Kitchen",
     "cuisine": "healthy",
+    "cuisineTags": [
+      "salad"
+    ],
+    "style": "sit_down",
     "dietTags": [
       "gluten_free",
       "vegan",
@@ -1345,6 +1430,8 @@
     "id": "venue_osm_n8083291362",
     "name": "Saladelia Cafe",
     "cuisine": "coffee",
+    "cuisineTags": [],
+    "style": "fast_food",
     "dietTags": [
       "gluten_free",
       "vegan",
@@ -1400,6 +1487,11 @@
     "id": "venue_osm_w324952854",
     "name": "Sup Dogs",
     "cuisine": "american",
+    "cuisineTags": [
+      "american",
+      "hot_dog"
+    ],
+    "style": "fast_food",
     "dietTags": [
       "vegetarian"
     ],
@@ -1463,6 +1555,11 @@
     "id": "venue_osm_w44343153",
     "name": "Panera Bread",
     "cuisine": "sandwich",
+    "cuisineTags": [
+      "sandwich",
+      "bakery"
+    ],
+    "style": "fast_food",
     "dietTags": [
       "vegetarian"
     ],
@@ -1526,6 +1623,10 @@
     "id": "venue_osm_w44343155",
     "name": "Chipotle",
     "cuisine": "mexican",
+    "cuisineTags": [
+      "mexican"
+    ],
+    "style": "fast_food",
     "dietTags": [
       "vegan",
       "vegetarian"

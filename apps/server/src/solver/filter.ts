@@ -80,6 +80,15 @@ export function filterCandidates(
   const infeasible: Infeasibility[] = [];
   for (const venue of venues) {
     const problems: Infeasibility[] = [];
+    const style = venue.style ?? 'sit_down';
+    if (ctx.style && style !== ctx.style) {
+      problems.push({
+        venueId: venue.id,
+        userId: null,
+        reason: 'style',
+        detail: `${style} but the table wants ${ctx.style}`,
+      });
+    }
     if (!fitsMeal(venue, ctx.meal)) {
       problems.push({
         venueId: venue.id,

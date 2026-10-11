@@ -6,7 +6,13 @@
  * Time: infer from free/busy over the candidate windows; ask only when two windows tie (and
  * since the bundle has no time poll yet, a tie falls back to the default and is logged).
  */
-import { SOLVER, type BusyInterval, type PollOption, type Venue } from '@bubbleworks/shared';
+import {
+  SOLVER,
+  type BusyInterval,
+  type PollOption,
+  type Venue,
+  type VenueStyle,
+} from '@bubbleworks/shared';
 import type { SolverContext, SolverMember } from '../solver/types.js';
 import { scoreAll } from '../solver/score.js';
 
@@ -91,6 +97,34 @@ export function decideCuisineQuestion(
     options,
     reason: unknown ? 'preferences unknown for some bubbles' : 'bubble preferences disagree',
     topCuisines,
+  };
+}
+
+export const STYLE_OPTIONS: PollOption[] = [
+  { key: 'sit_down', label: 'Sit-down' },
+  { key: 'fast_food', label: 'Fast food / takeout' },
+];
+
+export interface StyleDecision {
+  ask: boolean;
+  options: PollOption[];
+  reason: string;
+}
+
+/** Ask "sit-down or fast food?" only when the feasible venues include both and nobody said. */
+export function decideStyleQuestion(feasible: Venue[], named: VenueStyle | null): StyleDecision {
+  if (named) return { ask: false, options: [], reason: `style named in the message: ${named}` };
+  const styles = new Set(feasible.map((v) => v.style ?? 'sit_down'));
+  if (styles.size < 2)
+    return {
+      ask: false,
+      options: [],
+      reason: `every feasible venue is ${[...styles][0] ?? 'unknown'}`,
+    };
+  return {
+    ask: true,
+    options: STYLE_OPTIONS,
+    reason: 'feasible venues span sit-down and fast food',
   };
 }
 

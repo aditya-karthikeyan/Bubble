@@ -62,12 +62,29 @@ export function parseTime(text: string): number | null {
   return hour * 60 + minute;
 }
 
+export function parseStyle(text: string): PlanIntent['style'] {
+  if (
+    /\b(takeout|take-out|take out|fast food|quick bite|grab (something|food)|counter)\b/i.test(text)
+  )
+    return 'fast_food';
+  if (/\b(sit[- ]down|proper dinner|restaurant|reservation|nice dinner)\b/i.test(text))
+    return 'sit_down';
+  return null;
+}
+
 export function parseIntent(text: string, options: ParseIntentOptions): PlanIntent {
   const meal = MEALS.find(([re]) => re.test(text))?.[1] ?? 'dinner';
   const dayOffset = /\b(tomorrow|tmrw|tmr)\b/i.test(text) ? 1 : 0;
   const date = localDate(options.now, options.timezone, dayOffset);
   const cuisine = CUISINES.find(([re]) => re.test(text))?.[1] ?? null;
-  return { meal, date, startMinutes: parseTime(text), cuisine, rawText: text };
+  return {
+    meal,
+    date,
+    startMinutes: parseTime(text),
+    cuisine,
+    style: parseStyle(text),
+    rawText: text,
+  };
 }
 
 /** Plan commands typed in a DM. Null when the text is not a command. */
