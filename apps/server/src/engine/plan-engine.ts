@@ -70,6 +70,7 @@ import {
   cuisineOptions,
   decideCuisineQuestion,
   decideStartTime,
+  defaultStartFor,
   decideStyleQuestion,
   earliestStart,
   zonedInstant,
@@ -246,20 +247,26 @@ export class BubbleworksEngine implements PlanEngine {
     );
     const busy: Record<string, (typeof members)[number]['busy']> = {};
     for (const m of members) busy[m.userId] = m.busy;
-    let time = decideStartTime(intent.startMinutes, busy, intent.date, this.tz, this.planNow());
+    let time = decideStartTime(
+      intent.startMinutes,
+      busy,
+      intent.date,
+      this.tz,
+      this.planNow(),
+      intent.meal,
+    );
     let ctx = this.ctx(plan, time.startMinutes);
     let preview = solve({ venues: this.venuePool(), members, ctx });
-    // A window where nothing is open is not a better window. When calendars push dinner to a
+    // A window where nothing is open is not a better window. When calendars push the meal to a
     // time with no feasible place, fall back to the busiest-free window that does have one,
-    // closest to the usual dinner hour first.
+    // closest to the meal's usual hour first.
     if (preview.feasible.length === 0 && intent.startMinutes === null) {
+      const mealDefault = defaultStartFor(intent.meal);
       const windows = Object.entries(time.freeCounts)
         .map(([w, free]) => ({ w: Number(w), free }))
         .filter((x) => x.w !== time.startMinutes)
         .sort(
-          (a, b) =>
-            b.free - a.free ||
-            Math.abs(a.w - SOLVER.default_start_min) - Math.abs(b.w - SOLVER.default_start_min),
+          (a, b) => b.free - a.free || Math.abs(a.w - mealDefault) - Math.abs(b.w - mealDefault),
         );
       for (const { w } of windows) {
         const alt = this.ctx(plan, w);
@@ -1194,7 +1201,7 @@ export class BubbleworksEngine implements PlanEngine {
     );
     const startMinutes = plan.startAt
       ? this.minutesOf(plan.startAt)
-      : (plan.intent.startMinutes ?? SOLVER.default_start_min);
+      : (plan.intent.startMinutes ?? defaultStartFor(plan.intent.meal));
     const ctx = this.ctx(plan, startMinutes);
     const result = solve({
       venues: this.venuePool(),
@@ -1611,7 +1618,7 @@ export class BubbleworksEngine implements PlanEngine {
     );
     const startMinutes = plan.startAt
       ? this.minutesOf(plan.startAt)
-      : (plan.intent.startMinutes ?? SOLVER.default_start_min);
+      : (plan.intent.startMinutes ?? defaultStartFor(plan.intent.meal));
     const analysis = analyzeDeadlock(this.venuePool(), members, this.ctx(plan, startMinutes), {
       minStartMinutes: earliestStart(plan.intent.date, this.tz, this.planNow()),
     });
@@ -2043,7 +2050,7 @@ export class BubbleworksEngine implements PlanEngine {
     );
     const startMinutes = plan.startAt
       ? this.minutesOf(plan.startAt)
-      : (plan.intent.startMinutes ?? SOLVER.default_start_min);
+      : (plan.intent.startMinutes ?? defaultStartFor(plan.intent.meal));
     const base = { ...this.ctx(plan, startMinutes), cuisine: null };
     const vetoed = this.vetoed.get(plan.id) ?? new Set<string>();
     const venues = this.venuePool().filter((v) => !vetoed.has(v.id));
