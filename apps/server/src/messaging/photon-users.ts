@@ -32,7 +32,8 @@ export interface PhotonUsersOptions {
 export interface RegisterInput {
   firstName: string;
   lastName: string;
-  email: string;
+  /** Optional on Photon's side. */
+  email?: string | null;
   /** E.164. */
   phone: string;
 }
@@ -58,11 +59,14 @@ export class PhotonUsers {
     const res = await this.fetchImpl(this.url, {
       method: 'POST',
       headers: { authorization: this.auth, 'content-type': 'application/json' },
+      // Photon Pro users are "shared" (a number from the shared pool). Schema:
+      // https://photon.codes/docs/api-reference/users/create-user
       body: JSON.stringify({
+        type: 'shared',
+        phoneNumber: input.phone,
         firstName: input.firstName,
         lastName: input.lastName,
-        email: input.email,
-        phoneNumber: input.phone,
+        ...(input.email ? { email: input.email } : {}),
       }),
     });
     if (!res.ok) {
