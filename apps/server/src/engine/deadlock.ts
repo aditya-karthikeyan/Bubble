@@ -47,6 +47,8 @@ const BUDGET_STEPS = [1, 2, 3]
 const DISTANCE_STEPS = [1, 2]
   .map((n) => n * CONCESSION_STEPS.distance_step_min)
   .filter((v) => v <= CONCESSION_STEPS.distance_max_min);
+/** The breaker's largest distance concession, in walking minutes past SOLVER.travel_limit_min. */
+export const MAX_DISTANCE_SLACK_MIN = Math.max(...DISTANCE_STEPS);
 const TIME_DELTAS = [
   CONCESSION_STEPS.time_step_min,
   -CONCESSION_STEPS.time_step_min,
