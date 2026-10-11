@@ -1,0 +1,343 @@
+[
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.915Z",
+    "from": "IDLE",
+    "to": "DETECTED",
+    "reason": "intent: dinner 2026-10-10",
+    "seq": 1
+  },
+  {
+    "type": "bubble_joined",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.917Z",
+    "bubble": {
+      "userId": "user_ava",
+      "displayName": "Ava",
+      "status": "fits"
+    },
+    "seq": 2
+  },
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.921Z",
+    "from": "DETECTED",
+    "to": "GATHERING",
+    "reason": "bundle posted",
+    "seq": 3
+  },
+  {
+    "type": "bubble_joined",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.922Z",
+    "bubble": {
+      "userId": "user_chloe",
+      "displayName": "Chloe",
+      "status": "fits"
+    },
+    "seq": 4
+  },
+  {
+    "type": "bubble_left",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.922Z",
+    "userId": "user_ben",
+    "reason": "out",
+    "seq": 5
+  },
+  {
+    "type": "bubble_left",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.924Z",
+    "userId": "user_dev",
+    "reason": "out",
+    "seq": 6
+  },
+  {
+    "type": "bubble_left",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.924Z",
+    "userId": "user_eli",
+    "reason": "out",
+    "seq": 7
+  },
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.925Z",
+    "from": "GATHERING",
+    "to": "DELIBERATING",
+    "reason": "headcount and poll in",
+    "seq": 8
+  },
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.926Z",
+    "from": "DELIBERATING",
+    "to": "DEADLOCK",
+    "reason": "no venue fits everyone",
+    "seq": 9
+  },
+  {
+    "type": "private_ask_sent",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.928Z",
+    "askId": "ask_adb2877ae6f4496da953",
+    "seq": 10
+  },
+  {
+    "type": "private_ask_resolved",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.980Z",
+    "askId": "ask_adb2877ae6f4496da953",
+    "outcome": "accepted",
+    "seq": 11
+  },
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.981Z",
+    "from": "DEADLOCK",
+    "to": "DELIBERATING",
+    "reason": "rerun",
+    "seq": 12
+  },
+  {
+    "type": "candidate_added",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.982Z",
+    "venue": {
+      "venueId": "venue_osm_n3316380639",
+      "name": "[B]SKI'S The Wrap Redefined",
+      "cuisine": "sandwich"
+    },
+    "seq": 13
+  },
+  {
+    "type": "candidate_added",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.983Z",
+    "venue": {
+      "venueId": "venue_osm_w324952854",
+      "name": "Sup Dogs",
+      "cuisine": "american"
+    },
+    "seq": 14
+  },
+  {
+    "type": "candidate_added",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.983Z",
+    "venue": {
+      "venueId": "venue_osm_w44343153",
+      "name": "Panera Bread",
+      "cuisine": "sandwich"
+    },
+    "seq": 15
+  },
+  {
+    "type": "candidate_added",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.983Z",
+    "venue": {
+      "venueId": "venue_osm_w44343155",
+      "name": "Chipotle",
+      "cuisine": "mexican"
+    },
+    "seq": 16
+  },
+  {
+    "type": "round_complete",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.983Z",
+    "round": 1,
+    "scores": [
+      {
+        "userId": "user_ava",
+        "venueId": "venue_osm_n3316380639",
+        "score": 1
+      },
+      {
+        "userId": "user_ava",
+        "venueId": "venue_osm_w324952854",
+        "score": 0.75
+      },
+      {
+        "userId": "user_ava",
+        "venueId": "venue_osm_w44343153",
+        "score": 0.25
+      },
+      {
+        "userId": "user_ava",
+        "venueId": "venue_osm_w44343155",
+        "score": 0
+      },
+      {
+        "userId": "user_chloe",
+        "venueId": "venue_osm_n3316380639",
+        "score": 1
+      },
+      {
+        "userId": "user_chloe",
+        "venueId": "venue_osm_w324952854",
+        "score": 0.75
+      },
+      {
+        "userId": "user_chloe",
+        "venueId": "venue_osm_w44343153",
+        "score": 0.25
+      },
+      {
+        "userId": "user_chloe",
+        "venueId": "venue_osm_w44343155",
+        "score": 0
+      }
+    ],
+    "bubbles": [
+      {
+        "userId": "user_ava",
+        "displayName": "Ava",
+        "status": "fits"
+      },
+      {
+        "userId": "user_chloe",
+        "displayName": "Chloe",
+        "status": "fits"
+      }
+    ],
+    "leaderVenueId": "venue_osm_n3316380639",
+    "seq": 17
+  },
+  {
+    "type": "bubble_merged",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.984Z",
+    "userIds": ["user_ava", "user_chloe"],
+    "venueId": "venue_osm_n3316380639",
+    "seq": 18
+  },
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.984Z",
+    "from": "DELIBERATING",
+    "to": "LOCKED",
+    "reason": "winner [B]SKI'S The Wrap Redefined, backup Sup Dogs",
+    "seq": 19
+  },
+  {
+    "type": "plan_locked",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:50.985Z",
+    "venue": {
+      "venueId": "venue_osm_n3316380639",
+      "name": "[B]SKI'S The Wrap Redefined",
+      "cuisine": "sandwich"
+    },
+    "backup": {
+      "venueId": "venue_osm_w324952854",
+      "name": "Sup Dogs",
+      "cuisine": "american"
+    },
+    "startAt": "2026-10-10T23:00:00.000Z",
+    "partySize": 2,
+    "seq": 20
+  },
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:51.838Z",
+    "from": "LOCKED",
+    "to": "BOOKING",
+    "reason": "veto window passed",
+    "seq": 21
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:51.840Z",
+    "doer": "caller",
+    "state": "started",
+    "detail": "Calling [B]SKI'S The Wrap Redefined",
+    "seq": 22
+  },
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:52.445Z",
+    "from": "BOOKING",
+    "to": "BOOKED",
+    "reason": "call result: booked",
+    "seq": 23
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:52.447Z",
+    "doer": "caller",
+    "state": "done",
+    "detail": "Booked",
+    "seq": 24
+  },
+  {
+    "type": "booking_confirmed",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:52.448Z",
+    "bookingId": "booking_7bae70a1d49644cba98b",
+    "venue": {
+      "venueId": "venue_osm_n3316380639",
+      "name": "[B]SKI'S The Wrap Redefined",
+      "cuisine": "sandwich"
+    },
+    "startAt": "2026-10-10T23:00:00.000Z",
+    "partySize": 2,
+    "reservationName": "Ava",
+    "seq": 25
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:52.449Z",
+    "doer": "inviter",
+    "state": "started",
+    "seq": 26
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:52.450Z",
+    "doer": "inviter",
+    "state": "done",
+    "detail": "invited 5",
+    "seq": 27
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:52.450Z",
+    "doer": "splitter",
+    "state": "started",
+    "seq": 28
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:52.450Z",
+    "doer": "splitter",
+    "state": "done",
+    "detail": "split 5 ways",
+    "seq": 29
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_c33ce207f35c43589c06",
+    "at": "2026-10-11T00:57:52.451Z",
+    "doer": "watcher",
+    "state": "working",
+    "detail": "Watching for changes",
+    "seq": 30
+  }
+]

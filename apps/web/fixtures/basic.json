@@ -1,0 +1,397 @@
+[
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.647Z",
+    "from": "IDLE",
+    "to": "DETECTED",
+    "reason": "intent: dinner 2026-10-10",
+    "seq": 1
+  },
+  {
+    "type": "bubble_joined",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.650Z",
+    "bubble": {
+      "userId": "user_ava",
+      "displayName": "Ava",
+      "status": "fits"
+    },
+    "seq": 2
+  },
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.654Z",
+    "from": "DETECTED",
+    "to": "GATHERING",
+    "reason": "bundle posted",
+    "seq": 3
+  },
+  {
+    "type": "bubble_joined",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.655Z",
+    "bubble": {
+      "userId": "user_ben",
+      "displayName": "Ben",
+      "status": "fits"
+    },
+    "seq": 4
+  },
+  {
+    "type": "bubble_joined",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.656Z",
+    "bubble": {
+      "userId": "user_chloe",
+      "displayName": "Chloe",
+      "status": "fits"
+    },
+    "seq": 5
+  },
+  {
+    "type": "bubble_joined",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.657Z",
+    "bubble": {
+      "userId": "user_dev",
+      "displayName": "Dev",
+      "status": "fits"
+    },
+    "seq": 6
+  },
+  {
+    "type": "bubble_left",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.657Z",
+    "userId": "user_eli",
+    "reason": "out",
+    "seq": 7
+  },
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.661Z",
+    "from": "GATHERING",
+    "to": "DELIBERATING",
+    "reason": "headcount and poll in",
+    "seq": 8
+  },
+  {
+    "type": "candidate_added",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.662Z",
+    "venue": {
+      "venueId": "venue_demo",
+      "name": "The Demo Table",
+      "cuisine": "american"
+    },
+    "seq": 9
+  },
+  {
+    "type": "candidate_added",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.662Z",
+    "venue": {
+      "venueId": "venue_osm_n3316380639",
+      "name": "[B]SKI'S The Wrap Redefined",
+      "cuisine": "sandwich"
+    },
+    "seq": 10
+  },
+  {
+    "type": "candidate_added",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.663Z",
+    "venue": {
+      "venueId": "venue_osm_w324952854",
+      "name": "Sup Dogs",
+      "cuisine": "american"
+    },
+    "seq": 11
+  },
+  {
+    "type": "candidate_added",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.663Z",
+    "venue": {
+      "venueId": "venue_osm_w44343153",
+      "name": "Panera Bread",
+      "cuisine": "sandwich"
+    },
+    "seq": 12
+  },
+  {
+    "type": "candidate_added",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.663Z",
+    "venue": {
+      "venueId": "venue_osm_w44343155",
+      "name": "Chipotle",
+      "cuisine": "mexican"
+    },
+    "seq": 13
+  },
+  {
+    "type": "round_complete",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.663Z",
+    "round": 1,
+    "scores": [
+      {
+        "userId": "user_ava",
+        "venueId": "venue_demo",
+        "score": 1
+      },
+      {
+        "userId": "user_ava",
+        "venueId": "venue_osm_n3316380639",
+        "score": 0.08
+      },
+      {
+        "userId": "user_ava",
+        "venueId": "venue_osm_w324952854",
+        "score": 0.859
+      },
+      {
+        "userId": "user_ava",
+        "venueId": "venue_osm_w44343153",
+        "score": 0.02
+      },
+      {
+        "userId": "user_ava",
+        "venueId": "venue_osm_w44343155",
+        "score": 0
+      },
+      {
+        "userId": "user_ben",
+        "venueId": "venue_demo",
+        "score": 1
+      },
+      {
+        "userId": "user_ben",
+        "venueId": "venue_osm_n3316380639",
+        "score": 0.043
+      },
+      {
+        "userId": "user_ben",
+        "venueId": "venue_osm_w324952854",
+        "score": 0.892
+      },
+      {
+        "userId": "user_ben",
+        "venueId": "venue_osm_w44343153",
+        "score": 0.011
+      },
+      {
+        "userId": "user_ben",
+        "venueId": "venue_osm_w44343155",
+        "score": 0
+      },
+      {
+        "userId": "user_chloe",
+        "venueId": "venue_demo",
+        "score": 1
+      },
+      {
+        "userId": "user_chloe",
+        "venueId": "venue_osm_n3316380639",
+        "score": 0.082
+      },
+      {
+        "userId": "user_chloe",
+        "venueId": "venue_osm_w324952854",
+        "score": 0.878
+      },
+      {
+        "userId": "user_chloe",
+        "venueId": "venue_osm_w44343153",
+        "score": 0.02
+      },
+      {
+        "userId": "user_chloe",
+        "venueId": "venue_osm_w44343155",
+        "score": 0
+      },
+      {
+        "userId": "user_dev",
+        "venueId": "venue_demo",
+        "score": 1
+      },
+      {
+        "userId": "user_dev",
+        "venueId": "venue_osm_n3316380639",
+        "score": 0.086
+      },
+      {
+        "userId": "user_dev",
+        "venueId": "venue_osm_w324952854",
+        "score": 0.065
+      },
+      {
+        "userId": "user_dev",
+        "venueId": "venue_osm_w44343153",
+        "score": 0.022
+      },
+      {
+        "userId": "user_dev",
+        "venueId": "venue_osm_w44343155",
+        "score": 0
+      }
+    ],
+    "bubbles": [
+      {
+        "userId": "user_ava",
+        "displayName": "Ava",
+        "status": "fits"
+      },
+      {
+        "userId": "user_ben",
+        "displayName": "Ben",
+        "status": "fits"
+      },
+      {
+        "userId": "user_chloe",
+        "displayName": "Chloe",
+        "status": "fits"
+      },
+      {
+        "userId": "user_dev",
+        "displayName": "Dev",
+        "status": "fits"
+      }
+    ],
+    "leaderVenueId": "venue_demo",
+    "seq": 14
+  },
+  {
+    "type": "bubble_merged",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.664Z",
+    "userIds": ["user_ava", "user_ben", "user_chloe", "user_dev"],
+    "venueId": "venue_demo",
+    "seq": 15
+  },
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.664Z",
+    "from": "DELIBERATING",
+    "to": "LOCKED",
+    "reason": "winner The Demo Table, backup Sup Dogs",
+    "seq": 16
+  },
+  {
+    "type": "plan_locked",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:48.664Z",
+    "venue": {
+      "venueId": "venue_demo",
+      "name": "The Demo Table",
+      "cuisine": "american"
+    },
+    "backup": {
+      "venueId": "venue_osm_w324952854",
+      "name": "Sup Dogs",
+      "cuisine": "american"
+    },
+    "startAt": "2026-10-10T23:00:00.000Z",
+    "partySize": 4,
+    "seq": 17
+  },
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:49.518Z",
+    "from": "LOCKED",
+    "to": "BOOKING",
+    "reason": "veto window passed",
+    "seq": 18
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:49.520Z",
+    "doer": "caller",
+    "state": "started",
+    "detail": "Calling The Demo Table",
+    "seq": 19
+  },
+  {
+    "type": "plan_state_changed",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:50.125Z",
+    "from": "BOOKING",
+    "to": "BOOKED",
+    "reason": "call result: booked",
+    "seq": 20
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:50.127Z",
+    "doer": "caller",
+    "state": "done",
+    "detail": "Booked",
+    "seq": 21
+  },
+  {
+    "type": "booking_confirmed",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:50.128Z",
+    "bookingId": "booking_fab6c9a184a34011b722",
+    "venue": {
+      "venueId": "venue_demo",
+      "name": "The Demo Table",
+      "cuisine": "american"
+    },
+    "startAt": "2026-10-10T23:00:00.000Z",
+    "partySize": 4,
+    "reservationName": "Ava",
+    "seq": 22
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:50.129Z",
+    "doer": "inviter",
+    "state": "started",
+    "seq": 23
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:50.130Z",
+    "doer": "inviter",
+    "state": "done",
+    "detail": "invited 5",
+    "seq": 24
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:50.130Z",
+    "doer": "splitter",
+    "state": "started",
+    "seq": 25
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:50.130Z",
+    "doer": "splitter",
+    "state": "done",
+    "detail": "split 5 ways",
+    "seq": 26
+  },
+  {
+    "type": "doer_status",
+    "planId": "plan_fbabecfee1ba45898902",
+    "at": "2026-10-11T00:57:50.131Z",
+    "doer": "watcher",
+    "state": "working",
+    "detail": "Watching for changes",
+    "seq": 27
+  }
+]
