@@ -904,6 +904,18 @@ input:focus {
     inset 0 0 0 1px rgba(255, 255, 255, 0.45),
     inset 0 1px 3px rgba(0, 0, 0, 0.25);
 }
+/* The organizer's Watch live button: a green glow so it reads as live. */
+.task.live-task {
+  border-color: rgba(10, 60, 10, 0.6);
+  background:
+    radial-gradient(ellipse 60% 70% at 50% 100%, rgba(150, 255, 120, 0.55), rgba(150, 255, 120, 0)),
+    linear-gradient(
+      rgba(255, 255, 255, 0.3),
+      rgba(255, 255, 255, 0.1) 48%,
+      rgba(255, 255, 255, 0.04) 50%,
+      rgba(255, 255, 255, 0.14)
+    );
+}
 .task-play {
   border-left: 8px solid #fff;
   border-top: 5px solid transparent;
@@ -1901,6 +1913,28 @@ input:focus {
   }
 }
 @media (max-width: 420px) {
+  .taskbar {
+    padding-left: 56px;
+  }
+  .tasks {
+    gap: 3px;
+  }
+  .task {
+    gap: 5px;
+    padding: 0 8px;
+  }
+  .task .tiny-orb,
+  .task .task-play {
+    display: none;
+  }
+  .tray {
+    gap: 8px;
+    padding: 0 8px;
+  }
+  .clock {
+    min-width: 0;
+    white-space: nowrap;
+  }
   .crumbs .task-long,
   .privacy-label,
   .tray-label {
