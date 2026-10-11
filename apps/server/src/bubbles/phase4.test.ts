@@ -9,7 +9,7 @@ import { INTENT, testRuntime } from '../test-helpers.js';
 import { RuleExtractor } from './extract.js';
 import { RuleReactionClassifier } from './reactions.js';
 import { seedDemoBubbles } from './seed.js';
-import { DbBubbleService } from './service.js';
+import { DbBubbleService, FALLBACK_TEXT } from './service.js';
 
 const ALPHA_PIE = 'venue_osm_n13256222785'; // pizza, price level 2
 
@@ -367,8 +367,10 @@ describe('Phase 4', () => {
 
       let checked = 0;
       for (const s of messaging.sent) {
-        // Onboarding questions are fixed text with examples ("Like $20 or $30"), no one's data.
-        const fixedQuestion = (t: string) => /^(\d\/\d |Hey \w+, I'm your bubble)/.test(t);
+        // Onboarding questions and the fallback line are fixed text with examples ("Like $20 or
+        // $30", "like I'm vegetarian"), no one's data.
+        const fixedQuestion = (t: string) =>
+          t === FALLBACK_TEXT || /^(\d\/\d |Hey \w+, I'm your bubble)/.test(t);
         if (s.kind === 'private_text' && !fixedQuestion(s.input.text)) {
           for (const [owner, values] of Object.entries(secret)) {
             if (owner === s.input.userId) continue;

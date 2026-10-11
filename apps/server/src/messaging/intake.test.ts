@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
 import type {
   AskAnswerInput,
+  Group,
+  InboundPrivateMessage,
   CallResult,
   CommandInput,
   HeadcountInput,
@@ -10,7 +12,7 @@ import type {
   PlanEngine,
   VoteInput,
 } from '@bubbleworks/shared';
-import { DEMO_GROUP, FakeCrewDirectory, PERSONAS } from '@bubbleworks/shared/fakes';
+import { DEMO_GROUP, DEMO_MEMBERS, FakeCrewDirectory, PERSONAS } from '@bubbleworks/shared/fakes';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { silentLogger, type Logger } from '../events/bus.js';
 import { SpectrumMessaging } from './adapter.js';
@@ -71,15 +73,38 @@ class RecordingEngine implements PlanEngine {
   }
 }
 
+/** A second crew for Ava and Ben: "the boys". */
+const BOYS: Group = {
+  ...DEMO_GROUP,
+  id: 'group_boys',
+  name: 'the boys',
+  chatId: 'crew:group_boys',
+};
+const twoCrews = () =>
+  new FakeCrewDirectory(PERSONAS, [
+    { group: DEMO_GROUP, members: DEMO_MEMBERS },
+    {
+      group: BOYS,
+      members: [AVA, BEN].map((u) => ({
+        groupId: BOYS.id,
+        userId: u.id,
+        joinedAt: at,
+        confirmedAt: at,
+      })),
+    },
+  ]);
+
 async function setup(
   classifier = new StubClassifier(),
   isOnboarded?: (userId: string) => boolean,
   log: Logger = silentLogger,
+  /** Gives the intake a crew directory, so it asks which crew. */
+  directory?: FakeCrewDirectory,
 ) {
   const transport = new FakeTransport('imessage');
   const sqlite = new Database(':memory:');
   const bundles = new BundleStore(sqlite);
-  const crews = new FakeCrewDirectory();
+  const crews = directory ?? new FakeCrewDirectory();
   const port = new SpectrumMessaging({
     transport,
     crews,
@@ -99,13 +124,27 @@ async function setup(
     log,
     audit,
     ...(isOnboarded ? { isOnboarded } : {}),
+    ...(directory ? { crews: directory } : {}),
   });
   engine.intake = intake;
+  port.setPendingAnswer((userId) => intake.pendingAnswer(userId));
   intake.start();
+  const privates: InboundPrivateMessage[] = [];
+  port.onPrivateMessage(async (m) => {
+    privates.push(m);
+  });
   await port.start();
-  const text = (phone: string, body: string, id: string) =>
-    port.handleInbound({ kind: 'text', providerId: id, phone, text: body, at });
-  return { transport, bundles, port, engine, intake, classifier, text, audit };
+  const text = async (phone: string, body: string, id: string) => {
+    await port.handleInbound({ kind: 'text', providerId: id, phone, text: body, at });
+    await vi.runAllTimersAsync();
+  };
+  /** Private texts the bubble sent this person, in order. */
+  const dmsTo = (phone: string) =>
+    transport
+      .sends()
+      .filter((s) => s.chatId === `any;-;${phone}` && s.content.kind === 'text')
+      .map((s) => (s.content as { text: string }).text);
+  return { transport, bundles, port, engine, intake, classifier, text, audit, privates, dmsTo };
 }
 
 describe('bundle text', () => {
@@ -133,7 +172,7 @@ describe('PlanIntake', () => {
 
   it('stages the bundle: headcount first, poll once two are in', async () => {
     const { transport, engine, port, text } = await setup();
-    await text(AVA.handle, 'dinner today?', 'in_1');
+    await text(AVA.handle, 'thai dinner today?', 'in_1');
     await vi.runAllTimersAsync();
     // Typing went to Ava's DM before anything was sent.
     const typingOn = transport.calls.findIndex(
@@ -142,7 +181,7 @@ describe('PlanIntake', () => {
     expect(typingOn).toBeGreaterThanOrEqual(0);
     expect(typingOn).toBeLessThan(transport.calls.findIndex((c) => c.op === 'send'));
     expect(engine.intents).toEqual([
-      { chatId: CREW, userId: AVA.id, messageId: 'in_1', text: 'dinner today?', at },
+      { chatId: CREW, userId: AVA.id, messageId: 'in_1', text: 'thai dinner today?', at },
     ]);
 
     // Stage 1: only the headcount line. Ava (the organizer) already counts as in.
@@ -173,7 +212,7 @@ describe('PlanIntake', () => {
 
   it('turns a 👍 on any member copy of the headcount into handleHeadcount(in)', async () => {
     const { transport, engine, port, text } = await setup();
-    await text(AVA.handle, 'dinner today?', 'in_1');
+    await text(AVA.handle, 'thai dinner today?', 'in_1');
     await vi.runAllTimersAsync();
     const bensHeadcount = transport.sends().find((s) => s.chatId === `any;-;${BEN.handle}`)!;
     await port.handleInbound({
@@ -203,7 +242,7 @@ describe('PlanIntake', () => {
       engine.headcounts.push(input);
       order.push(`engine ${input.userId}`);
     };
-    await text(AVA.handle, 'dinner today?', 'in_1');
+    await text(AVA.handle, 'thai dinner today?', 'in_1');
     await vi.runAllTimersAsync();
     for (const who of [BEN, CHLOE]) {
       const copy = transport.sends().find((s) => s.chatId === `any;-;${who.handle}`)!;
@@ -235,7 +274,7 @@ describe('PlanIntake', () => {
       rsvp: { 'should be able to make it after 8': { stance: 'in', confidence: 0.9 } },
     });
     const { engine, text } = await setup(classifier);
-    await text(AVA.handle, 'dinner today?', 'in_1');
+    await text(AVA.handle, 'thai dinner today?', 'in_1');
     await vi.runAllTimersAsync();
     await text(BEN.handle, "can't tonight", 'in_2');
     await text(CHLOE.handle, 'should be able to make it after 8', 'in_3');
@@ -249,7 +288,7 @@ describe('PlanIntake', () => {
 
   it('forwards poll votes to handleVote with the plan id', async () => {
     const { transport, engine, port, text } = await setup();
-    await text(AVA.handle, 'dinner today?', 'in_1');
+    await text(AVA.handle, 'thai dinner today?', 'in_1');
     await vi.runAllTimersAsync();
     await text(BEN.handle, "I'm in", 'in_ben');
     await vi.runAllTimersAsync();
@@ -282,17 +321,19 @@ describe('PlanIntake', () => {
         },
       },
     });
-    const { engine, transport, text } = await setup(classifier);
+    const { engine, transport, text, privates } = await setup(classifier);
     await text(AVA.handle, 'so hungry', 'in_1');
     await vi.runAllTimersAsync();
     expect(classifier.calls).toEqual([{ kind: 'intent', text: 'so hungry' }]);
     expect(engine.intents).toHaveLength(0);
     expect(transport.sends()).toHaveLength(0);
+    // Not dropped: it goes on to the bubble, which answers it.
+    expect(privates.map((p) => p.text)).toEqual(['so hungry']);
   });
 
   it('falls back to rules when Haiku is unavailable', async () => {
     const { engine, text } = await setup(new StubClassifier());
-    await text(AVA.handle, 'grab food later?', 'in_1');
+    await text(AVA.handle, 'grab tacos later?', 'in_1');
     await vi.runAllTimersAsync();
     expect(engine.intents).toHaveLength(1);
   });
@@ -315,7 +356,7 @@ describe('PlanIntake', () => {
 
   it('routes wait and why-this-place during an open plan to the engine, and audits the pause', async () => {
     const { engine, audit, text } = await setup();
-    await text(AVA.handle, 'dinner today?', 'in_1');
+    await text(AVA.handle, 'thai dinner today?', 'in_1');
     await vi.runAllTimersAsync();
     await text(BEN.handle, 'wait', 'in_2');
     await text(CHLOE.handle, 'why this place?', 'in_3');
@@ -333,7 +374,7 @@ describe('PlanIntake', () => {
       rsvp: { 'what are we eating': { stance: 'in', confidence: 0.95 } },
     });
     const { engine, text } = await setup(classifier);
-    await text(AVA.handle, 'dinner today?', 'in_1');
+    await text(AVA.handle, 'thai dinner today?', 'in_1');
     await vi.runAllTimersAsync();
     await text(BEN.handle, 'what are we eating', 'in_2');
     await text(CHLOE.handle, 'is it far', 'in_3');
@@ -341,5 +382,151 @@ describe('PlanIntake', () => {
     expect(engine.headcounts).toHaveLength(0);
     expect(engine.commands.map((c) => [c.userId, c.command])).toEqual([[BEN.id, 'why']]);
     expect(classifier.calls.map((c) => c.text)).not.toContain('what are we eating');
+  });
+});
+
+describe('PlanIntake plan draft', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const CREWS_AND_CUISINE = /^Yeah fasho 🫧 Which crew, and what are we feeling\? You're in: /;
+  const CUISINE_ONLY = 'Fasho 🫧 What are we feeling? (indian, chinese, mexican… or say anything)';
+
+  it('asks which crew and what we are feeling in one question, then starts the plan', async () => {
+    const { engine, text, dmsTo } = await setup(
+      new StubClassifier(),
+      undefined,
+      silentLogger,
+      twoCrews(),
+    );
+    await text(AVA.handle, 'i want to eat food w my friends', 'in_1');
+    expect(engine.intents).toHaveLength(0);
+    expect(dmsTo(AVA.handle)).toEqual([
+      "Yeah fasho 🫧 Which crew, and what are we feeling? You're in: the usual suspects, the boys. " +
+        'Or say "new crew <name>" to make one. (like: the usual suspects, indian)',
+    ]);
+
+    await text(AVA.handle, 'the boys, indian', 'in_2');
+    expect(engine.intents).toHaveLength(1);
+    expect(engine.intents[0]).toMatchObject({ chatId: BOYS.chatId, userId: AVA.id });
+    expect(engine.intents[0]!.text).toContain('indian');
+    expect(engine.intents[0]!.text).toContain('i want to eat food w my friends');
+  });
+
+  it('asks a one-crew member which crew when the message does not name it', async () => {
+    const { engine, text, dmsTo } = await setup(
+      new StubClassifier(),
+      undefined,
+      silentLogger,
+      new FakeCrewDirectory(),
+    );
+    await text(AVA.handle, 'dinner tonight?', 'in_1');
+    expect(dmsTo(AVA.handle)).toHaveLength(1);
+    expect(dmsTo(AVA.handle)[0]).toMatch(CREWS_AND_CUISINE);
+    expect(dmsTo(AVA.handle)[0]).toContain("You're in: the usual suspects.");
+    expect(dmsTo(AVA.handle)[0]).toContain('new crew <name>');
+
+    await text(AVA.handle, '1, thai', 'in_2');
+    expect(engine.intents.map((i) => [i.chatId, i.text])).toEqual([
+      [CREW, 'dinner tonight? feeling thai'],
+    ]);
+  });
+
+  it('asks only the cuisine when the crew is named; "anything" keeps the original text', async () => {
+    const { engine, text, dmsTo } = await setup(
+      new StubClassifier(),
+      undefined,
+      silentLogger,
+      new FakeCrewDirectory(),
+    );
+    await text(AVA.handle, 'dinner with the usual suspects tonight?', 'in_1');
+    expect(dmsTo(AVA.handle)).toEqual([CUISINE_ONLY]);
+    await text(AVA.handle, 'anything', 'in_2');
+    expect(engine.intents.map((i) => [i.chatId, i.text])).toEqual([
+      [CREW, 'dinner with the usual suspects tonight?'],
+    ]);
+  });
+
+  it('re-asks once for what is still missing, then takes the only crew', async () => {
+    const { engine, text, dmsTo } = await setup(
+      new StubClassifier(),
+      undefined,
+      silentLogger,
+      new FakeCrewDirectory(),
+    );
+    await text(AVA.handle, 'dinner tonight?', 'in_1');
+    await text(AVA.handle, 'idk', 'in_2');
+    // "idk" settles the cuisine; the crew is asked once more on its own.
+    expect(dmsTo(AVA.handle)[1]).toBe('Which crew? 1) the usual suspects  Or "new crew <name>".');
+    await text(AVA.handle, 'whatever', 'in_3');
+    expect(engine.intents.map((i) => [i.chatId, i.text])).toEqual([[CREW, 'dinner tonight?']]);
+  });
+
+  it('never guesses between two crews: asks again, then lets the draft go', async () => {
+    const { engine, text, dmsTo } = await setup(
+      new StubClassifier(),
+      undefined,
+      silentLogger,
+      twoCrews(),
+    );
+    await text(AVA.handle, 'dinner tonight? thai', 'in_1');
+    expect(dmsTo(AVA.handle)).toEqual([
+      'Which crew? 1) the usual suspects  2) the boys  Or "new crew <name>".',
+    ]);
+    await text(AVA.handle, 'hmm', 'in_2');
+    await text(AVA.handle, 'not sure', 'in_3');
+    expect(dmsTo(AVA.handle)).toHaveLength(3);
+    expect(engine.intents).toHaveLength(0);
+    await text(AVA.handle, 'eh', 'in_4');
+    expect(dmsTo(AVA.handle)[3]).toMatch(/^No worries 🫧/);
+    expect(engine.intents).toHaveLength(0);
+  });
+
+  it('hands "new crew <name>" to the bubble and drops the draft', async () => {
+    const { engine, text, dmsTo, privates } = await setup(
+      new StubClassifier(),
+      undefined,
+      silentLogger,
+      twoCrews(),
+    );
+    await text(AVA.handle, 'i want to eat food w my friends', 'in_1');
+    await text(AVA.handle, 'new crew the lads', 'in_2');
+    expect(privates.map((p) => p.text)).toEqual(['new crew the lads']);
+    expect(dmsTo(AVA.handle).at(-1)).toBe("Once they've joined, tell me about dinner again.");
+    expect(engine.intents).toHaveLength(0);
+    // The draft is gone: a later reply is not taken as its answer.
+    await text(AVA.handle, 'the boys, indian', 'in_3');
+    expect(engine.intents).toHaveLength(0);
+  });
+
+  it('lets the draft expire after 10 minutes', async () => {
+    const { engine, text, dmsTo } = await setup(
+      new StubClassifier(),
+      undefined,
+      silentLogger,
+      twoCrews(),
+    );
+    await text(AVA.handle, 'i want to eat food w my friends', 'in_1');
+    expect(dmsTo(AVA.handle)).toHaveLength(1);
+    vi.advanceTimersByTime(10 * 60_000 + 1);
+    await text(AVA.handle, 'the boys, indian', 'in_2');
+    expect(engine.intents).toHaveLength(0);
+  });
+
+  it('skips the questions when a plan is already open in the crew', async () => {
+    const { engine, text, dmsTo } = await setup(
+      new StubClassifier(),
+      undefined,
+      silentLogger,
+      new FakeCrewDirectory(),
+    );
+    await text(AVA.handle, 'thai dinner with the usual suspects today?', 'in_1');
+    expect(engine.intents).toHaveLength(1);
+    await text(BEN.handle, 'dinner tonight?', 'in_2');
+    expect(engine.intents.map((i) => [i.userId, i.chatId])).toEqual([
+      [AVA.id, CREW],
+      [BEN.id, CREW],
+    ]);
+    expect(dmsTo(BEN.handle).some((t) => t.includes('Which crew'))).toBe(false);
   });
 });
