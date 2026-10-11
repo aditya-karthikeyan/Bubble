@@ -230,19 +230,23 @@ describe('Doers', () => {
         expect.objectContaining({ userId: 'user_chloe', planId: s.planId, bookingId: s.bookingId }),
       ]);
       const card = messaging.sent.filter((x) => x.kind === 'live_card').at(-1);
+      // The crew sees coarse status only; minutes and distance never leave the person.
       expect(card?.kind === 'live_card' && card.input.card.lines).toEqual([
         'Ava: here',
-        'Ben: ~7 min away',
-        expect.stringMatching(/^Chloe: ~\d+ min away$/),
+        'Ben: on the way',
+        'Chloe: running late',
         'Dev: no location',
       ]);
-      expect(
-        messaging.sent.some(
-          (x) =>
-            x.kind === 'group_text' &&
-            /^Chloe is about \d+ min behind\. Asking Alpha Pie/.test(x.input.text),
-        ),
-      ).toBe(true);
+      const crewTexts = messaging.sent.flatMap((x) =>
+        x.kind === 'group_text' ? [x.input.text] : [],
+      );
+      expect(crewTexts).toEqual([
+        "Someone's running a bit late. I'll ask Alpha Pie to hold the table.",
+      ]);
+      expect(dmsTo('user_chloe').at(-1)).toMatch(
+        /^Looks like you're about \d+ min out\. I'm asking Alpha Pie to hold the table for you\.$/,
+      );
+      expect(dmsTo('user_ava').join(' ')).not.toMatch(/min out|Chloe/);
 
       nowMs += 60_000;
       await doers.watchTick(s.bookingId, s.planId);
@@ -251,6 +255,30 @@ describe('Doers', () => {
 
       await doers.watcher.stop({ planId: s.planId });
       expect(rt.timers.get(`p3:watch:${s.planId}`)).toBeNull();
+    });
+
+    it('stays off for a booking whose start already passed (P2 real-phone run)', async () => {
+      // 20:53 New York, the caller booked 19:00: arming must not happen, and a stray tick stops.
+      nowMs = Date.parse('2026-10-11T00:53:00.000Z');
+      const s = booking(); // createdAt 20:53, start 19:30 the same evening
+      await doers.watcher.start(s);
+      expect(rt.timers.get(`p3:watch:${s.planId}`)).toBeNull();
+      fixes.set('user_chloe', { lat: ALPHA.lat + 0.12, lng: ALPHA.lng, capturedAt: null });
+      expect(await doers.watchTick(s.bookingId, s.planId)).toBeNull();
+      expect(late).toHaveLength(0);
+      expect(messaging.sent.some((x) => x.kind === 'group_text')).toBe(false);
+    });
+
+    it('ignores implausible lateness (hours away) instead of announcing it', async () => {
+      const s = booking();
+      nowMs = Date.parse('2026-10-10T23:25:00.000Z');
+      fixes.set('user_ben', { lat: ALPHA.lat + 1.5, lng: ALPHA.lng, capturedAt: null }); // ~165 km
+      bubbles.prefetchSignals(['user_ben']);
+      await new Promise((r) => setTimeout(r, 20));
+      const report = (await doers.watchTick(s.bookingId, s.planId))!;
+      expect(report.members.find((m) => m.userId === 'user_ben')!.minutesLate).toBeGreaterThan(120);
+      expect(late).toHaveLength(0);
+      expect(messaging.sent.some((x) => x.kind === 'group_text')).toBe(false);
     });
 
     it('estimates walking and driving times', () => {
