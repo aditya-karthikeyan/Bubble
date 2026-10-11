@@ -108,7 +108,8 @@ describe('LiveSurfaces', () => {
     expect(texts[0]!.chatId).toBe(CREW);
     expect(texts[0]!.text).toContain('Found a spot: Thai Basil, 7:30 PM, 4 people');
     expect(texts[0]!.text).toContain('veto');
-    expect(texts[0]!.text).toContain('https://bubbleworks.example/p/token');
+    expect(texts[0]!.text).not.toContain('https://bubbleworks.example/p/token');
+    expect(texts[0]!.text).not.toContain('Watch live');
     expect(images).toEqual([
       { chatId: CREW, name: 'booking.jpg', idempotencyKey: 'plan_1:ticket' },
     ]);
