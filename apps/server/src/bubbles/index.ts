@@ -77,6 +77,7 @@ export function createBubbles(options: CreateBubblesOptions): Bubbles {
     extractor,
     calendarLink: (userId) => (google ? calendarConnectUrl(google, userId) : null),
     signupUrl: webBase ?? null,
+    joinBaseUrl: env['SERVER_PUBLIC_URL']?.replace(/\/$/, '') ?? webBase ?? null,
     locations,
     freeBusy: google ? new GoogleFreeBusySource(google, tokens) : null,
     reactions: env['ANTHROPIC_API_KEY']

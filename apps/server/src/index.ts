@@ -5,6 +5,7 @@ import { FakeMessaging } from '@bubbleworks/shared/fakes';
 import { createBubbles } from './bubbles/index.js';
 import { createCaller, loadCallerConfig } from './caller/index.js';
 import { GooglePlacesSource } from './venues/places.js';
+import { joinPageHtml } from './web/join-page.js';
 import { seedDemoBubbles } from './bubbles/seed.js';
 import { registerDevRoutes } from './dev/routes.js';
 import { Doers } from './doers/index.js';
@@ -194,6 +195,14 @@ async function main(): Promise<void> {
   }
 
   /** The join page shows the crew's name before signup. Only the name leaves the server. */
+  /** The crew link people tap. Served here so it works even when the web app lags behind. */
+  app.fastify.get<{ Params: { code: string } }>('/join/:code', async (request, reply) => {
+    const crew = await runtime.crews.crewByJoinCode(request.params.code);
+    return reply
+      .type('text/html; charset=utf-8')
+      .send(joinPageHtml({ code: request.params.code, crewName: crew?.name ?? null }));
+  });
+
   app.fastify.get<{ Params: { code: string } }>('/api/crews/:code', async (request, reply) => {
     const crew = await runtime.crews.crewByJoinCode(request.params.code);
     if (!crew) return reply.code(404).send({ ok: false, error: 'no such crew' });
