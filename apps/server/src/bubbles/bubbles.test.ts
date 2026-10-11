@@ -71,13 +71,11 @@ describe('DbBubbleService', () => {
   const lastTo = (userId: string) => textsTo(userId).at(-1) ?? '';
 
   async function onboard(user: User, answers: string[] = []): Promise<void> {
-    const [diet = 'none', budget = '25', area = 'Franklin St', favs = 'skip', venmo = 'skip'] =
-      answers;
+    const [diet = 'none', budget = '25', favs = 'skip', venmo = 'skip'] = answers;
     await dm(user, 'hi');
     await dm(user, diet);
     if (/allerg/i.test(diet)) await dm(user, 'yes');
     await dm(user, budget);
-    await dm(user, area);
     await dm(user, favs);
     await dm(user, venmo);
   }
@@ -87,16 +85,15 @@ describe('DbBubbleService', () => {
       const zoe = await newUser('Zoe', '+19195550101');
       await dm(zoe, 'hey');
       expect(lastTo(zoe.id)).toMatch(/^Hey Zoe, I'm your bubble/);
-      expect(lastTo(zoe.id)).toMatch(/1\/5/);
+      expect(lastTo(zoe.id)).toMatch(/1\/4/);
       expect(lastTo(zoe.id)).not.toMatch(/https?:/); // no links in the first message
 
       await dm(zoe, "vegetarian, and I'm allergic to peanuts");
       expect(lastTo(zoe.id)).toMatch(/allergic to peanut\? \(yes\/no\)/);
       await dm(zoe, 'yes');
-      expect(lastTo(zoe.id)).toMatch(/2\/5/);
+      expect(lastTo(zoe.id)).toMatch(/2\/4/);
       await dm(zoe, '$20-30');
-      expect(lastTo(zoe.id)).toMatch(/3\/5/);
-      await dm(zoe, 'near Franklin St');
+      expect(lastTo(zoe.id)).toMatch(/3\/4/);
       await dm(zoe, 'Alpha Pie and that taco truck');
       await dm(zoe, '@zoe-eats');
 
@@ -111,7 +108,6 @@ describe('DbBubbleService', () => {
       expect(byType['diet']).toMatchObject({ value: 'vegetarian', hard: true, confirmed: true });
       expect(byType['allergy']).toMatchObject({ value: 'peanut', hard: true, confirmed: true });
       expect(byType['budget_max']).toMatchObject({ value: '30', hard: true });
-      expect(byType['neighborhood']?.value).toBe('near Franklin St');
       expect(byType['payment_handle']?.value).toBe('venmo:@zoe-eats');
       const venue = rt.db.query.venues.findFirst({
         where: (v, { eq: e }) => e(v.name, 'Alpha Pie'),
@@ -133,7 +129,7 @@ describe('DbBubbleService', () => {
       expect(lastTo(yan.id)).toBe('Just yes or no: is that allergy right?');
       await dm(yan, 'no');
       expect(textsTo(yan.id).at(-2)).toBe("Okay, I won't save it.");
-      expect(lastTo(yan.id)).toMatch(/2\/5/);
+      expect(lastTo(yan.id)).toMatch(/2\/4/);
       expect((await bubbles.getHardLimits(yan.id)).some((f) => f.type === 'allergy')).toBe(false);
     });
 
@@ -144,7 +140,7 @@ describe('DbBubbleService', () => {
       await dm(xi, 'whatever works');
       expect(lastTo(xi.id)).toBe('Just a number works, like 25. Or say skip.');
       await dm(xi, 'skip');
-      expect(lastTo(xi.id)).toMatch(/3\/5/);
+      expect(lastTo(xi.id)).toMatch(/3\/4/);
     });
 
     it('answers a redelivered message once', async () => {
@@ -243,11 +239,11 @@ describe('DbBubbleService', () => {
     const diets = async (id: string) =>
       (await bubbles.getHardLimits(id)).filter((f) => f.type === 'diet').map((f) => f.value);
 
-    it('"I messed up" at 2/5 re-asks 1/5, swaps the answer, and picks up at 2/5', async () => {
+    it('"I messed up" at 2/4 re-asks 1/4, swaps the answer, and picks up at 2/4', async () => {
       const vic = await newUser('Vic', '+19195550147');
       await dm(vic, 'hi');
       await dm(vic, 'vegetarian'); // meant vegan
-      expect(lastTo(vic.id)).toMatch(/2\/5/);
+      expect(lastTo(vic.id)).toMatch(/2\/4/);
       await dm(vic, 'wait i messed up');
       expect(lastTo(vic.id)).toMatch(
         /^No problem, let's redo that one\.\n\nAnything you don't eat/,
@@ -255,10 +251,10 @@ describe('DbBubbleService', () => {
       await dm(vic, 'vegan');
       const [updated, next] = textsTo(vic.id).slice(-2);
       expect(updated).toBe('Updated: you eat vegan.');
-      expect(next).toMatch(/^2\/5/);
+      expect(next).toMatch(/^2\/4/);
       expect(await diets(vic.id)).toEqual(['vegan']);
       await dm(vic, '30');
-      expect(lastTo(vic.id)).toMatch(/^3\/5/);
+      expect(lastTo(vic.id)).toMatch(/^3\/4/);
     });
 
     it('"oops I meant ..." redoes the last answer in one message', async () => {
@@ -267,7 +263,7 @@ describe('DbBubbleService', () => {
       await dm(wen, 'vegetarian');
       await dm(wen, 'oops I meant pescatarian');
       expect(textsTo(wen.id).at(-2)).toBe('Updated: you eat pescatarian.');
-      expect(lastTo(wen.id)).toMatch(/^2\/5/);
+      expect(lastTo(wen.id)).toMatch(/^2\/4/);
       expect(await diets(wen.id)).toEqual(['pescatarian']);
     });
 
@@ -276,7 +272,7 @@ describe('DbBubbleService', () => {
       await dm(xan, 'hi');
       await dm(xan, 'vegetarian', 'orig-1');
       await dm(xan, '25');
-      expect(lastTo(xan.id)).toMatch(/^3\/5/);
+      expect(lastTo(xan.id)).toMatch(/^3\/4/);
       expect(
         await bubbles.onPrivateMessage({
           messageId: 'orig-1:edit:1',
@@ -289,7 +285,7 @@ describe('DbBubbleService', () => {
       expect(textsTo(xan.id).at(-2)).toMatch(/^Saw your edit\. Updated: you eat vegan/);
       expect(lastTo(xan.id)).toMatch(/you're allergic to peanut\? \(yes\/no\)/);
       await dm(xan, 'yes');
-      expect(lastTo(xan.id)).toMatch(/^3\/5/); // still where they were
+      expect(lastTo(xan.id)).toMatch(/^3\/4/); // still where they were
       expect(await diets(xan.id)).toEqual(['vegan']);
     });
 
@@ -361,21 +357,21 @@ describe('DbBubbleService', () => {
         at: clock.toISOString(),
         location: { lat: 35.91, lng: -79.05 },
       });
-      expect(lastTo(tia.id)).toMatch(/Got your location[\s\S]*1\/5/);
+      expect(lastTo(tia.id)).toMatch(/Got your location[\s\S]*1\/4/);
     });
   });
 
   describe('opting out of splits', () => {
     it('"I don\'t want to split" at the Venmo question opts out (P2 real-phone run)', async () => {
       const pia = await newUser('Pia', '+19195550141');
-      await onboard(pia, ['none', '25', 'Franklin St', 'skip', "I don't want to split"]);
+      await onboard(pia, ['none', '25', 'skip', "I don't want to split"]);
       expect(bubbles.facts.current(pia.id, 'venmo_handle')?.value).toBe(NO_SPLIT);
       expect(textsTo(pia.id).join('\n')).toContain('you pay for yourself, no bill splits');
     });
 
-    it('takes any payment method at 5/5 and in DMs; a handle undoes an opt-out', async () => {
+    it('takes any payment method at 4/4 and in DMs; a handle undoes an opt-out', async () => {
       const uma = await newUser('Uma', '+19195550146');
-      await onboard(uma, ['none', '25', 'Franklin St', 'skip', '$umacash or 919-555-0177']);
+      await onboard(uma, ['none', '25', 'skip', '$umacash or 919-555-0177']);
       expect(
         bubbles
           .payHandles(uma.id)
@@ -397,7 +393,7 @@ describe('DbBubbleService', () => {
 
     it('works anytime after onboarding, and replaces a handle', async () => {
       const quinn = await newUser('Quinn', '+19195550142');
-      await onboard(quinn, ['none', '25', 'Franklin St', 'skip', '@quinn-q']);
+      await onboard(quinn, ['none', '25', 'skip', '@quinn-q']);
       expect(await dm(quinn, "I'll pay for myself, no venmo")).toEqual({ handled: true });
       expect(lastTo(quinn.id)).toMatch(/^Got it, you'll pay for yourself\./);
       expect(bubbles.facts.current(quinn.id, 'venmo_handle')?.value).toBe(NO_SPLIT);
@@ -420,7 +416,7 @@ describe('DbBubbleService', () => {
   describe('forget', () => {
     it('"forget that" deletes the most recent fact', async () => {
       const gus = await newUser('Gus', '+19195550151');
-      await onboard(gus, ['vegetarian', '25', 'Southpoint', 'skip', '@gus']);
+      await onboard(gus, ['vegetarian', '25', 'skip', '@gus']);
       await dm(gus, 'forget that');
       expect(lastTo(gus.id)).toBe('Done, I forgot that friends pay you on Venmo @gus.');
       expect(bubbles.facts.current(gus.id, 'venmo_handle')).toBeNull();

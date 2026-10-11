@@ -156,9 +156,9 @@ describe('DbBubbleService signals and learning', () => {
       )
       .at(-1) ?? '';
 
-  async function onboarded(name: string, phone: string, area = 'Franklin St'): Promise<User> {
+  async function onboarded(name: string, phone: string): Promise<User> {
     const u = await rt.crews.createUser({ displayName: name, handle: phone });
-    for (const t of ['hi', 'none', '30', area, 'skip', 'skip']) await dm(u, t);
+    for (const t of ['hi', 'none', '30', 'skip', 'skip']) await dm(u, t);
     expect(bubbles.isOnboarded(u.id)).toBe(true);
     return u;
   }
@@ -183,7 +183,18 @@ describe('DbBubbleService signals and learning', () => {
   });
 
   it('reads Find My within budget and falls back to the onboarding neighborhood', async () => {
-    const u = await onboarded('Quin', '+19195550202', 'Franklin St');
+    const u = await onboarded('Quin', '+19195550202');
+    // The area is no longer an onboarding question; a pin or a chat remark records it.
+    await bubbles.recordFact({
+      userId: u.id,
+      type: 'neighborhood',
+      value: 'Franklin St',
+      hard: false,
+      confidence: 0.8,
+      source: 'chat',
+      confirmed: true,
+      expiresAt: null,
+    });
     expect(await bubbles.getLocation(u.id)).toEqual({ lat: 35.9095, lng: -79.0469 });
 
     location = null; // not sharing

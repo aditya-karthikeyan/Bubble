@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { silentLogger } from '../events/bus.js';
 import { BundleStore, headcountText } from './bundle.js';
 import { walkMinutes } from './card-image.js';
-import { LiveSurfaces, MAX_EDITS } from './surfaces.js';
+import { LiveSurfaces } from './surfaces.js';
 
 const PLAN = 'plan_1';
 const CREW = DEMO_GROUP.chatId;
@@ -36,19 +36,22 @@ function setup(options: { createdAgoMs?: number } = {}) {
     organizerName: 'Pranav',
     meal: 'dinner',
     closesAt: at,
+    pageUrl: 'https://bubbleworks.example/p/token',
   });
-  const edits: Array<{ chatId: string; messageId: string; text: string }> = [];
+  const texts: Array<{ chatId: string; text: string; idempotencyKey: string }> = [];
   const images: Array<{ chatId: string; name: string; idempotencyKey: string }> = [];
   const rendered: unknown[] = [];
-  const links: string[] = [];
   let handler: ((e: PlanEvent) => void | Promise<void>) | null = null;
   const savedAt = Date.now();
   const surfaces = new LiveSurfaces({
     port: {
-      editMessage: async (input) => void edits.push(input),
-      sendRichLink: async (input) => {
-        links.push(input.url);
-        return { messageId: 'grp:link', deduplicated: false };
+      sendGroupText: async (input) => {
+        texts.push({
+          chatId: input.chatId,
+          text: input.text,
+          idempotencyKey: input.idempotencyKey,
+        });
+        return { messageId: 'grp:locked', deduplicated: false };
       },
       sendImage: async (input) => {
         images.push({
@@ -77,12 +80,12 @@ function setup(options: { createdAgoMs?: number } = {}) {
   surfaces.start();
   const emit = async (event: Record<string, unknown>) =>
     handler?.({ planId: PLAN, at, ...event } as unknown as PlanEvent);
-  return { edits, images, rendered, links, emit, bundles };
+  return { texts, images, rendered, emit, bundles };
 }
 
 describe('LiveSurfaces', () => {
-  it('edits the headcount line through the plan and sends one ticket at booking', async () => {
-    const { edits, images, rendered, emit } = setup();
+  it('sends one locked line and one ticket at booking, and never edits the headcount', async () => {
+    const { texts, images, rendered, emit } = setup();
     await emit({ type: 'plan_state_changed', from: 'GATHERING', to: 'DELIBERATING' });
     await emit({
       type: 'plan_locked',
@@ -101,15 +104,11 @@ describe('LiveSurfaces', () => {
       reservationName: 'Pranav',
     });
 
-    expect(edits.map((e) => e.text)).toEqual([
-      '🫧 Dinner · 4 in · finding the spot',
-      '🔒 Thai Basil · 7:30 PM · 4 people · say "veto" to change it',
-      '📞 Calling Thai Basil',
-      '✅ Booked Thai Basil · 7:30 PM · party of 4',
-    ]);
-    expect(
-      edits.every((e) => e.chatId === CREW && e.messageId === 'grp:plan_1:bundle:headcount'),
-    ).toBe(true);
+    expect(texts).toHaveLength(1);
+    expect(texts[0]!.chatId).toBe(CREW);
+    expect(texts[0]!.text).toContain('Found a spot: Thai Basil, 7:30 PM, 4 people');
+    expect(texts[0]!.text).toContain('veto');
+    expect(texts[0]!.text).toContain('https://bubbleworks.example/p/token');
     expect(images).toEqual([
       { chatId: CREW, name: 'booking.jpg', idempotencyKey: 'plan_1:ticket' },
     ]);
@@ -122,56 +121,20 @@ describe('LiveSurfaces', () => {
     });
   });
 
-  it(`stops editing after ${MAX_EDITS} edits (iMessage allows 5)`, async () => {
-    const { edits, emit } = setup();
-    for (let n = 0; n < 6; n++) {
-      await emit({
-        type: 'plan_locked',
-        venue: { venueId: VENUE.id, name: `Place ${n}`, cuisine: 'thai' },
-        backup: null,
-        startAt: '2026-10-10T23:30:00.000Z',
-        partySize: 4,
-      });
-    }
-    expect(edits).toHaveLength(MAX_EDITS);
-  });
-
-  it('stops editing once the line is older than the iMessage edit window, but still sends the ticket', async () => {
-    const { edits, images, emit } = setup({ createdAgoMs: 20 * 60_000 });
+  it('ignores plans it never sent a bundle for', async () => {
+    const { texts, images, emit } = setup();
     await emit({
-      type: 'booking_confirmed',
-      bookingId: 'b1',
+      planId: 'plan_other',
+      type: 'plan_locked',
       venue: { venueId: VENUE.id, name: VENUE.name, cuisine: 'thai' },
+      backup: null,
       startAt: '2026-10-10T23:30:00.000Z',
       partySize: 4,
-      reservationName: 'Pranav',
     });
-    expect(edits).toHaveLength(0);
-    expect(images).toHaveLength(1);
+    expect(texts).toHaveLength(0);
+    expect(images).toHaveLength(0);
   });
 
-  it('sends the live page link once, when deliberation starts', async () => {
-    const { links, emit, bundles } = setup();
-    const b = bundles.byPlan(PLAN)!;
-    bundles.save({ ...b, pageUrl: 'https://bubbleworks.example/p/token' });
-    await emit({ type: 'plan_state_changed', from: 'GATHERING', to: 'DELIBERATING' });
-    await emit({ type: 'plan_state_changed', from: 'DEADLOCK', to: 'DELIBERATING' });
-    expect(links).toEqual(['https://bubbleworks.example/p/token']);
-  });
-
-  it('ignores plans it never sent a bundle for', async () => {
-    const { edits, emit } = setup();
-    await emit({
-      type: 'plan_state_changed',
-      from: 'GATHERING',
-      to: 'DELIBERATING',
-      planId: 'plan_other',
-    });
-    expect(edits).toHaveLength(0);
-  });
-});
-
-describe('opt-out headcount', () => {
   it('tells people they are counted in unless they say out', () => {
     expect(
       headcountText({
