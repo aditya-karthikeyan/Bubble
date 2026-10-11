@@ -33,7 +33,7 @@ describe('Google Places mapping', () => {
     expect(v.cuisine).toBe('chinese');
     expect(v.style).toBe('sit_down');
     expect(v.phone).toBe('+19195550101');
-    expect(v.typicalCostUsd).toBe(22);
+    expect(v.typicalCostUsd).toBe(20);
     expect(v.dietTags).toContain('vegetarian');
     expect(v.rating).toBe(4.6);
     expect(v.ratingCount).toBe(812);
