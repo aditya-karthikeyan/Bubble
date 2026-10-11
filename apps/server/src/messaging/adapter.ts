@@ -1,5 +1,5 @@
 /**
- * SpectrumMessaging: the MessagingPort for crews over DMs (docs/CONTRACTS.md, "Crews over DMs").
+ * SpectrumMessaging: the MessagingPort for crews over DMs.
  *
  * Chat ids the adapter accepts:
  *   crew:<groupId>   a crew. Sends fan out to every reachable member's DM, one copy each.

@@ -2,7 +2,7 @@
  * pnpm p1:speed [runs]
  * Runs the basic flow N times with the fakes and reports the p50 and p95 of every timing mark
  * (ms since the intent message) plus the solver's own time. Real-line numbers come from P2's
- * timing logs and are pasted into docs/team-log/P1.md by hand.
+ * timing logs.
  */
 import { FakeBubbles, FakeCaller, FakeDoers, FakeMessaging } from '@bubbleworks/shared/fakes';
 import { loadConfig } from '../src/config.js';
@@ -147,7 +147,7 @@ async function main(): Promise<void> {
         ),
     )[0];
   console.log(
-    `\nslowest step by p50: ${slow}. Real-line numbers (P2 timing logs): paste into docs/team-log/P1.md.`,
+    `\nslowest step by p50: ${slow}. Real-line numbers come from the timing logs.`,
   );
 }
 

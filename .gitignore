@@ -24,6 +24,10 @@ data/*.db-*
 .vscode/
 *.swp
 
+# agent instruction files that tools regenerate (next dev writes apps/web/AGENTS.md)
+AGENTS.md
+CLAUDE.md
+
 # railway / vercel local state
 .railway/
 .vercel/

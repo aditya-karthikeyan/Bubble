@@ -232,7 +232,7 @@ export class GoogleFreeBusySource implements FreeBusySource {
 }
 
 // ---------------------------------------------------------------------------
-// Presence (Focus is not readable on Photon Pro; see docs/spikes/context.md)
+// Presence (Focus is not readable on Photon Pro)
 // ---------------------------------------------------------------------------
 
 export type PresenceCommand = 'focus' | 'sleep' | 'driving' | 'available';
