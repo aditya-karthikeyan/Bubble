@@ -50,6 +50,8 @@ export interface SpectrumMessagingOptions {
   crews: CrewDirectory;
   store: MessagingStore;
   log: Logger;
+  /** Landing page. A text from a phone we do not know gets this link (once per 10 minutes). */
+  signupUrl?: string | null;
   debounceMs: number;
   /** Spends one crew message from the member's plan budget. False when the budget is spent. */
   spendMessage?: (planId: string, userId: string) => boolean;
@@ -131,6 +133,7 @@ export class SpectrumMessaging implements MessagingPort {
   private readonly pollClosed: Array<(pollId: string) => Promise<unknown>> = [];
   /** Last time each person texted their bubble, for the quiet-hours override. */
   private readonly lastInbound = new Map<string, number>();
+  private readonly signupNudged = new Map<string, number>();
   /** Provider id -> the batch messageId it was delivered under, so an edit can name it. */
   private readonly deliveredAs = new Map<string, string>();
   private readonly rawText: Array<(userId: string, text: string, at: string) => boolean | void> =
@@ -359,6 +362,7 @@ export class SpectrumMessaging implements MessagingPort {
     const user = await this.o.crews.userByHandle(event.phone);
     if (!user) {
       this.o.log.warn({ kind: event.kind }, 'inbound from an unregistered phone dropped');
+      if (event.kind === 'text') await this.inviteToSignUp(event.phone);
       return;
     }
     this.lastInbound.set(user.id, Date.now());
@@ -585,6 +589,25 @@ export class SpectrumMessaging implements MessagingPort {
   }
 
   /** Terminal chats are named after the phone; iMessage DMs are "any;-;<phone>". */
+  /** Someone we do not know (or someone who said "forget me") texted: point them at signup. */
+  private async inviteToSignUp(phone: string): Promise<void> {
+    const url = this.o.signupUrl;
+    if (!url) return;
+    const now = Date.now();
+    if (now - (this.signupNudged.get(phone) ?? 0) < 10 * 60_000) return;
+    this.signupNudged.set(phone, now);
+    const chat = this.o.transport.provider === 'terminal' ? phone : `any;-;${phone}`;
+    try {
+      await this.o.transport.send(chat, {
+        kind: 'text',
+        text: `I don't have you yet 🫧 Sign up here and I'll be your bubble: ${url}`,
+      });
+      this.o.log.info({}, 'signup nudge sent to an unregistered phone');
+    } catch (err) {
+      this.o.log.warn({ err: (err as Error).message }, 'signup nudge failed');
+    }
+  }
+
   private providerChat(user: User): string {
     return this.o.transport.provider === 'terminal' ? user.handle : `any;-;${user.handle}`;
   }

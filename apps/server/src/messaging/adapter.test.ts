@@ -488,4 +488,23 @@ describe('inbound', () => {
     expect(inbox.private).toHaveLength(1);
     expect((await crews.userById(dee.id))?.onboardedAt).not.toBeNull();
   });
+
+  it('points an unknown phone at signup once, and stays quiet after that', async () => {
+    const { transport, messaging } = await setup({ signupUrl: 'https://bubbleworks.test' });
+    const at = new Date().toISOString();
+    for (const i of [1, 2]) {
+      await messaging.handleInbound({
+        kind: 'text',
+        providerId: `stranger_${i}`,
+        phone: '+19190000000',
+        text: 'forget me',
+        at,
+      });
+    }
+    const sends = transport.sends();
+    expect(sends).toHaveLength(1);
+    expect(sends[0]!.chatId).toBe('any;-;+19190000000');
+    expect(sends[0]!.content).toMatchObject({ kind: 'text' });
+    expect((sends[0]!.content as { text: string }).text).toContain('https://bubbleworks.test');
+  });
 });
