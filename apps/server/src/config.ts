@@ -9,6 +9,11 @@ const Env = z.object({
   WEB_PUBLIC_URL: z.url().optional(),
   DATABASE_PATH: z.string().default('./data/bubbleworks.db'),
   DEMO_MODE: z.stringbool().default(false),
+  /** With DEMO_MODE, plan start times as if it were this local time (HH:MM), e.g. 18:00. */
+  DEMO_PLAN_CLOCK: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM, e.g. 18:00')
+    .optional(),
   /** Upsert personas, the demo group, and venues at boot. Idempotent. */
   SEED_ON_BOOT: z.stringbool().default(true),
   /**

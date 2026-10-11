@@ -95,6 +95,11 @@ export interface EngineDeps {
   timezone?: string;
   log?: Logger;
   now?: () => Date;
+  /**
+   * Clock used only to decide start times (DEMO_PLAN_CLOCK): a demo at 11 PM still plans dinner
+   * as if it were early evening. Deadlines, timers, and events keep the real clock.
+   */
+  planningNow?: () => Date;
 }
 
 interface PollSpec {
@@ -117,6 +122,10 @@ export class BubbleworksEngine implements PlanEngine {
   private readonly closedPolls = new Set<string>();
   private readonly vetoed = new Map<string, Set<string>>();
   private readonly t0 = new Map<string, number>();
+
+  private planNow(): Date {
+    return this.deps.planningNow?.() ?? this.now();
+  }
 
   /** P2's PlanIntake is created from the engine, so it attaches after construction. */
   setIntake(intake: BundleRenderer | null): void {
@@ -204,7 +213,7 @@ export class BubbleworksEngine implements PlanEngine {
     );
     const busy: Record<string, (typeof members)[number]['busy']> = {};
     for (const m of members) busy[m.userId] = m.busy;
-    const time = decideStartTime(intent.startMinutes, busy, intent.date, this.tz, this.now());
+    const time = decideStartTime(intent.startMinutes, busy, intent.date, this.tz, this.planNow());
     const ctx = this.ctx(plan, time.startMinutes);
     const preview = solve({ venues: this.rt.venues(), members, ctx });
     const style = decideStyleQuestion(preview.feasible, intent.style ?? null);
@@ -1373,7 +1382,7 @@ export class BubbleworksEngine implements PlanEngine {
       members,
       ctx,
       {
-        minStartMinutes: earliestStart(plan.intent.date, this.tz, this.now()),
+        minStartMinutes: earliestStart(plan.intent.date, this.tz, this.planNow()),
       },
     );
     const picks = pickAsks(analysis);
@@ -1487,7 +1496,7 @@ export class BubbleworksEngine implements PlanEngine {
       ? this.minutesOf(plan.startAt)
       : (plan.intent.startMinutes ?? SOLVER.default_start_min);
     const analysis = analyzeDeadlock(this.rt.venues(), members, this.ctx(plan, startMinutes), {
-      minStartMinutes: earliestStart(plan.intent.date, this.tz, this.now()),
+      minStartMinutes: earliestStart(plan.intent.date, this.tz, this.planNow()),
     });
     await this.noFit(
       planId,
