@@ -29,6 +29,7 @@ import {
   type MessagingPort,
   type PlanEvent,
   type User,
+  type Venue,
 } from '@bubbleworks/shared';
 import { payLine } from '../bubbles/payments.js';
 import type { DbBubbleService } from '../bubbles/service.js';
@@ -124,10 +125,13 @@ export class Doers implements DoerPorts {
     const url = `${this.d.publicBaseUrl}/ics/${token}.ics`;
     const when = clock(s.startAt);
     const people = await this.attending(s);
+    const place = s.venue.address ?? s.venue.name;
+    const maps = mapsLink(s.venue);
     for (const u of people) {
       await this.dm(
         u,
-        `✅ Booked: ${s.venue.name}, ${when}, table for ${people.length} under ${s.reservationName}. ` +
+        `✅ Booked: ${s.venue.name}, ${when}, table for ${people.length} under ${s.reservationName}.\n` +
+          `📍 ${place} · ${maps}\n` +
           `Add it to your calendar: ${url}`,
         `${s.idempotencyKey}:${u.id}`,
       );
@@ -619,6 +623,12 @@ export function limitPhrase(f: { type: string; value: string }): string {
     default:
       return v; // diet, religious_diet
   }
+}
+
+/** A Google Maps search link: by address when known, else by coordinates. */
+export function mapsLink(venue: Pick<Venue, 'address' | 'location'>): string {
+  const query = venue.address ?? `${venue.location.lat},${venue.location.lng}`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
 function clock(iso: string): string {

@@ -7,6 +7,7 @@ import { createCaller, loadCallerConfig } from './caller/index.js';
 import { GooglePlacesSource } from './venues/places.js';
 import { joinPageHtml } from './web/join-page.js';
 import { loadTicketPage, ticketPageHtml } from './web/ticket-page.js';
+import { registerWatchRoute } from './web/watch-route.js';
 import { seedDemoBubbles } from './bubbles/seed.js';
 import { registerDevRoutes } from './dev/routes.js';
 import { Doers } from './doers/index.js';
@@ -247,6 +248,13 @@ async function main(): Promise<void> {
       request.log.warn({ err: String(err) }, 'signup rejected');
       return reply.code(400).send({ ok: false, error: 'invalid signup' });
     }
+  });
+
+  /** The organizer's private, stable link to the newest plan's live page. */
+  registerWatchRoute(app.fastify, {
+    secret: config.DEV_ROUTES_SECRET,
+    plans: runtime.plans,
+    webPublicUrl: config.WEB_PUBLIC_URL,
   });
 
   const active = runtime.plans.findAllActive();
