@@ -48,10 +48,13 @@ export function sizes(size: Size) {
   };
 }
 
-/** Space the overlay text leaves free. */
-function safeArea(size: Size, sheet: boolean) {
-  const top = size.h <= 650 && size.w > 760 ? 158 : 220;
-  const bottom = sheet ? 240 : 95;
+/**
+ * Space the window chrome leaves free: the plan window on top, the taskbar below, and the
+ * booking dialog above the taskbar once the plan settles.
+ */
+export function safeArea(size: Size, sheet: boolean) {
+  const top = size.h <= 650 && size.w > 760 ? 150 : size.w <= 760 ? 204 : 196;
+  const bottom = sheet ? 250 : 64;
   return { top, bottom: size.h - bottom, height: size.h - bottom - top };
 }
 
@@ -77,7 +80,7 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size, seed = 0)
   live.forEach((v) => {
     slot[v.venueId] = point(
       `venue:${v.venueId}`,
-      { x: size.w / 2, y: area.top + s.venue * 2.7 },
+      { x: size.w / 2, y: area.top + s.venue * 3.1 },
       Math.max(0, span / 2 - s.venue * 1.5),
       s.venue * 1.15,
     );

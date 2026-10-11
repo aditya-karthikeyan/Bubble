@@ -63,7 +63,7 @@ export function SignupForm() {
   if (state.kind === 'done') {
     return (
       <div className="signup-success" aria-live="polite">
-        <h2 style={{ margin: '0 0 4px', fontSize: 22 }}>Your bubble is ready</h2>
+        <h2 className="instruction">Your bubble is ready</h2>
         {state.bubbleNumber ? (
           <>
             <p className="lede">

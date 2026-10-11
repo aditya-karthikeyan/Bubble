@@ -1,9 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import { Arena } from './arena';
-import { Navigation } from '../../app/aero';
+import { AeroIcon, AeroWindow, Desktop, Taskbar } from '../../app/aero';
 import { usePlanFeed, type FeedStatus } from './use-plan-feed';
-import { PHASE_COPY, phaseOf } from './view-model';
+import { PHASE_COPY, phaseOf, type Phase } from './view-model';
 
 const STATUS_CHIP: Record<FeedStatus, string> = {
   connecting: 'Connecting',
@@ -15,136 +16,238 @@ const STATUS_CHIP: Record<FeedStatus, string> = {
   replay_done: 'Replay',
 };
 
+const STEPS: { long: string; short: string; phases: Phase[] }[] = [
+  { long: 'Gather', short: 'Gather', phases: ['gathering'] },
+  { long: 'Find a place', short: 'Find', phases: ['candidates', 'convergence', 'deadlock'] },
+  { long: 'Make it happen', short: 'Book', phases: ['locked'] },
+  { long: 'See you there', short: 'Done', phases: ['summary', 'complete'] },
+];
+
+const PHASE_ICON: Record<Phase, { kind: 'info' | 'ok' | 'warn'; glyph: string }> = {
+  gathering: { kind: 'info', glyph: 'i' },
+  candidates: { kind: 'info', glyph: 'i' },
+  convergence: { kind: 'info', glyph: 'i' },
+  deadlock: { kind: 'warn', glyph: '?' },
+  locked: { kind: 'ok', glyph: '✓' },
+  summary: { kind: 'ok', glyph: '✓' },
+  complete: { kind: 'ok', glyph: '✓' },
+  closed: { kind: 'warn', glyph: '!' },
+};
+
 function time(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
-export function PhaseBanner({
-  title,
-  line,
-  status,
-}: {
-  title: string;
-  line: string;
-  status: FeedStatus;
-}) {
+/** Explorer-style breadcrumb of the four plan steps, on the window's glass. */
+function Breadcrumb({ phase }: { phase: Phase }) {
+  const at = STEPS.findIndex((s) => s.phases.includes(phase));
   return (
-    <header className="hud-top">
-      <div className="hud-title">
-        <span className="mini-label">A LITTLE TEAMWORK, LIVE</span>
-        <h1>{title}</h1>
-        <p>{line}</p>
-      </div>
-      <span className={`chip chip-${status}`}>{STATUS_CHIP[status]}</span>
-    </header>
+    <div className="address-bar">
+      <ol className="crumbs" aria-label="Plan progress">
+        <li className="crumb-root" aria-hidden="true">
+          <span className="tiny-orb" />
+        </li>
+        {STEPS.map((s, i) => (
+          <li
+            key={s.long}
+            className={i === at ? 'current' : i < at ? 'past' : undefined}
+            aria-current={i === at ? 'step' : undefined}
+          >
+            <span className="task-long">{s.long}</span>
+            <span className="task-short">{s.short}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
-function Bokeh() {
+export function PhaseBanner({
+  phase,
+  bubbles,
+  minimized,
+  onMinimize,
+}: {
+  phase: Phase;
+  bubbles: number;
+  minimized: boolean;
+  onMinimize: () => void;
+}) {
+  const copy = PHASE_COPY[phase];
+  const icon = PHASE_ICON[phase];
   return (
-    <div className="bokeh" aria-hidden>
-      {Array.from({ length: 9 }, (_, i) => (
-        <span key={i} />
-      ))}
-    </div>
+    <AeroWindow
+      className="hud-top"
+      title="Bubbleworks · Live plan"
+      labelledBy="phase-title"
+      minimized={minimized}
+      onMinimize={onMinimize}
+      onClose={onMinimize}
+      bar={<Breadcrumb phase={phase} />}
+    >
+      <div className="dialog-main" aria-live="polite">
+        <AeroIcon kind={icon.kind}>{icon.glyph}</AeroIcon>
+        <div>
+          <h1 className="instruction" id="phase-title">
+            {copy.title}
+          </h1>
+          <p>{copy.line}</p>
+        </div>
+      </div>
+      <div className="status-bar">
+        <span>
+          {bubbles} {bubbles === 1 ? 'bubble' : 'bubbles'}
+        </span>
+        <span className="privacy-label">Your preferences stay private.</span>
+      </div>
+    </AeroWindow>
   );
 }
 
 export function LivePlan({ token, replay }: { token: string; replay: string | null }) {
   const { vm, status, restart, run } = usePlanFeed(token, replay);
+  const [hudMinimized, setHudMinimized] = useState(false);
+  const [dismissed, setDismissed] = useState<string | null>(null);
 
   if (status === 'expired') {
     return (
-      <main className="sky">
-        <div className="wrap">
-          <div className="glass expired">
-            <h1>This plan page has expired</h1>
-            <p className="lede">
-              Plan pages close two hours after the plan ends. Text your bubble to start a new one.
-            </p>
+      <main className="sky poster">
+        <Desktop />
+        <AeroWindow className="poster-window" title="Bubbleworks" controls="dialog">
+          <div className="dialog-main">
+            <AeroIcon kind="warn">!</AeroIcon>
+            <div>
+              <h1 className="instruction">This plan page has expired</h1>
+              <p>
+                Plan pages close two hours after the plan ends. Text your bubble to start a new one.
+              </p>
+            </div>
+          </div>
+          <div className="command-bar">
             <a className="button" href="/">
               Get your bubble
             </a>
           </div>
-        </div>
+        </AeroWindow>
+        <Taskbar />
       </main>
     );
   }
 
   const phase = phaseOf(vm);
-  const copy = PHASE_COPY[phase];
+  const sheet = vm.booking
+    ? 'booked'
+    : vm.locked
+      ? 'locked'
+      : status === 'replay_done'
+        ? 'done'
+        : null;
+  const sheetOpen = sheet !== null && sheet !== dismissed;
+  const again = () => {
+    setDismissed(null);
+    restart();
+  };
+  const bubbles = vm.bubbles.filter((b) => b.present).length;
+  const live = status === 'live' || status === 'replay' || status === 'replay_done';
   return (
     <main className="stage">
-      <Bokeh />
+      <Desktop />
       <Arena key={`${token}:${replay}:${run}`} vm={vm} phase={phase} />
-      <Navigation live />
-      <PhaseBanner title={copy.title} line={copy.line} status={status} />
+      <PhaseBanner
+        phase={phase}
+        bubbles={bubbles}
+        minimized={hudMinimized}
+        onMinimize={() => setHudMinimized(true)}
+      />
       {status === 'offline' && (
-        <p className="hud-alert">Can&apos;t reach Bubbleworks right now. Retrying…</p>
-      )}
-      {(vm.booking || vm.locked || status === 'replay_done') && (
-        <section className="hud-sheet glass" aria-live="polite">
-          {vm.booking ? (
-            <>
-              <h2>Booked</h2>
-              <p>
-                {vm.booking.venue.name} at {time(vm.booking.startAt)}, table for{' '}
-                {vm.booking.partySize} under {vm.booking.reservationName}.
-              </p>
-            </>
-          ) : vm.locked ? (
-            <p>
-              Going with {vm.locked.venue.name} at {time(vm.locked.startAt)} for{' '}
-              {vm.locked.partySize}
-              {vm.locked.backup ? `, backup ${vm.locked.backup.name}` : ''}.
-            </p>
-          ) : null}
-          {status === 'replay_done' && (
-            <button className="button" type="button" onClick={restart}>
-              Replay
-            </button>
-          )}
-        </section>
-      )}
-      <footer className="live-dock">
-        <ol className="live-progress" aria-label="Plan progress">
-          <li
-            className={phase === 'gathering' ? 'current' : ''}
-            aria-current={phase === 'gathering' ? 'step' : undefined}
-          >
-            Gather
-          </li>
-          <li
-            className={['candidates', 'convergence', 'deadlock'].includes(phase) ? 'current' : ''}
-            aria-current={
-              ['candidates', 'convergence', 'deadlock'].includes(phase) ? 'step' : undefined
-            }
-          >
-            Find a place
-          </li>
-          <li
-            className={phase === 'locked' ? 'current' : ''}
-            aria-current={phase === 'locked' ? 'step' : undefined}
-          >
-            Make it happen
-          </li>
-          <li
-            className={['summary', 'complete'].includes(phase) ? 'current' : ''}
-            aria-current={['summary', 'complete'].includes(phase) ? 'step' : undefined}
-          >
-            See you there
-          </li>
-        </ol>
-        <div className="live-info">
-          <strong>{vm.bubbles.filter((b) => b.present).length} bubbles</strong>
-          <span className="privacy-label"> · Your preferences stay private.</span>
+        <div className="balloon" role="status">
+          <strong>Connection lost</strong>
+          Can&apos;t reach Bubbleworks right now. Retrying…
         </div>
-        {replay && (
-          <button className="replay-control" type="button" onClick={restart}>
-            ↻ Restart demo
+      )}
+      {sheetOpen && (
+        <AeroWindow
+          key={sheet}
+          className="hud-sheet"
+          title={sheet === 'booked' ? 'Booked' : sheet === 'locked' ? 'Plan locked' : 'Replay'}
+          controls="dialog"
+          labelledBy="sheet-title"
+          onClose={() => setDismissed(sheet)}
+        >
+          <div className="dialog-main" aria-live="polite">
+            <AeroIcon kind={sheet === 'done' ? 'info' : 'ok'}>
+              {sheet === 'done' ? 'i' : '✓'}
+            </AeroIcon>
+            <div>
+              {vm.booking ? (
+                <>
+                  <h2 className="instruction" id="sheet-title">
+                    Booked
+                  </h2>
+                  <p>
+                    {vm.booking.venue.name} at {time(vm.booking.startAt)}, table for{' '}
+                    {vm.booking.partySize} under {vm.booking.reservationName}.
+                  </p>
+                </>
+              ) : vm.locked ? (
+                <>
+                  <h2 className="instruction" id="sheet-title">
+                    Going with {vm.locked.venue.name}
+                  </h2>
+                  <p>
+                    {time(vm.locked.startAt)} for {vm.locked.partySize}
+                    {vm.locked.backup ? `, backup ${vm.locked.backup.name}` : ''}.
+                  </p>
+                </>
+              ) : (
+                <h2 className="instruction" id="sheet-title">
+                  That&apos;s the whole plan.
+                </h2>
+              )}
+            </div>
+          </div>
+          {status === 'replay_done' && (
+            <div className="command-bar">
+              <button className="button" type="button" onClick={again}>
+                Replay
+              </button>
+            </div>
+          )}
+        </AeroWindow>
+      )}
+      <Taskbar
+        tray={
+          <span className={`tray-status tray-${status}`} title={STATUS_CHIP[status]}>
+            <span className={`status-dot${live ? '' : ' off'}`} />
+            <span className="tray-label">{STATUS_CHIP[status]}</span>
+          </span>
+        }
+      >
+        <button
+          type="button"
+          className={`task${hudMinimized ? '' : ' active'}`}
+          aria-pressed={!hudMinimized}
+          onClick={() => setHudMinimized((m) => !m)}
+        >
+          <span className="tiny-orb" aria-hidden="true" />
+          Live plan
+        </button>
+        {sheet && !sheetOpen && (
+          <button type="button" className="task" onClick={() => setDismissed(null)}>
+            <span className="task-check" aria-hidden="true">
+              ✓
+            </span>
+            {sheet === 'booked' ? 'Booked' : sheet === 'locked' ? 'Locked' : 'Replay'}
           </button>
         )}
-      </footer>
+        {replay && (
+          <button type="button" className="task" onClick={again}>
+            <span aria-hidden="true">↻</span>
+            <span className="task-long">Restart demo</span>
+            <span className="task-short">Restart</span>
+          </button>
+        )}
+      </Taskbar>
     </main>
   );
 }

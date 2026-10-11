@@ -1,4 +1,4 @@
-import { Atmosphere, Navigation } from './aero';
+import { AeroIcon, AeroWindow, Brand, Desktop, Taskbar } from './aero';
 import { QrCode } from './qr-code';
 import { SignupForm } from './signup-form';
 import { siteUrl } from './site';
@@ -9,10 +9,10 @@ export default function Home() {
   const url = siteUrl();
   return (
     <main className="sky home">
-      <Atmosphere />
-      <Navigation />
+      <Desktop />
       <div className="home-grid">
         <section className="hero">
+          <Brand />
           <div className="eyebrow">
             <span className="status-dot" /> A little less planning. A lot more living.
           </div>
@@ -28,18 +28,13 @@ export default function Home() {
             <br className="desktop-break" /> Turn “dinner tonight?” into “see you there.”
           </p>
           <a className="demo-link" href="/p/demo?replay=basic">
-            <span className="play-icon" aria-hidden="true">
-              ▶
-            </span>
+            <span className="play-icon" aria-hidden="true" />
             <span>
               See the bubbles in action<small>A little teamwork. A little magic.</small>
             </span>
-            <span aria-hidden="true">↗</span>
           </a>
           <div className="hero-scene" aria-hidden="true">
-            <div className="message-pill message-one">
-              dinner tonight? <span>↗</span>
-            </div>
+            <div className="message-pill message-one">dinner tonight?</div>
             <div className="hero-bubble">
               <span>
                 let&apos;s
@@ -54,20 +49,18 @@ export default function Home() {
             </div>
           </div>
         </section>
-        <section className="signup-window glass" id="get-started" aria-labelledby="signup-heading">
-          <div className="window-bar">
-            <span>
-              <span className="tiny-orb" /> YOUR LITTLE CORNER OF THE WORLD
-            </span>
-            <span className="window-dots" aria-hidden="true">
-              •••
-            </span>
-          </div>
+        <AeroWindow
+          className="signup-window"
+          id="get-started"
+          labelledBy="signup-heading"
+          title="Get your bubble"
+        >
           <div className="signup-inner">
             <div className="form-heading">
               <span className="form-orb" aria-hidden="true" />
-              <span className="mini-label">MADE FOR YOU. CONNECTED TO YOUR CREW.</span>
-              <h2 id="signup-heading">Meet your bubble.</h2>
+              <h2 className="instruction" id="signup-heading">
+                Meet your bubble.
+              </h2>
               <p>
                 A private agent that gets you.
                 <br />
@@ -76,53 +69,75 @@ export default function Home() {
             </div>
             <SignupForm />
           </div>
-          <div className="window-footer">
-            <span className="status-dot" /> A brighter way to make plans{' '}
-            <span aria-hidden="true">✧</span>
+          <div className="status-bar">
+            <span className="status-dot" /> A brighter way to make plans
           </div>
-        </section>
+        </AeroWindow>
       </div>
-      <section className="how-section glass" id="how-it-works" aria-labelledby="how-heading">
-        <div className="how-intro">
-          <span className="mini-label">LIFE OUTSIDE THE GROUP CHAT</span>
-          <h2 id="how-heading">
-            Less back-and-forth.
-            <br />
-            More being there.
-          </h2>
+      <AeroWindow
+        className="how-window"
+        id="how-it-works"
+        labelledBy="how-heading"
+        title="How it works"
+      >
+        <div className="dialog-main">
+          <AeroIcon>i</AeroIcon>
+          <div>
+            <span className="mini-label">Life outside the group chat</span>
+            <h2 className="instruction" id="how-heading">
+              Less back-and-forth. More being there.
+            </h2>
+          </div>
         </div>
-        <div className="how-step">
-          <span className="step-orb">01</span>
-          <h3>Make it yours</h3>
-          <p>
-            Get your bubble number. A few texts help it learn your tastes, budget, and boundaries.
-          </p>
+        <div className="mint how-steps">
+          <div className="how-step">
+            <span className="step-orb">1</span>
+            <h3>Make it yours</h3>
+            <p>
+              Get your bubble number. A few texts help it learn your tastes, budget, and boundaries.
+            </p>
+          </div>
+          <div className="how-step">
+            <span className="step-orb green">2</span>
+            <h3>Bring your people</h3>
+            <p>Your crew&apos;s bubbles find the places that work for everyone, together.</p>
+          </div>
+          <div className="how-step">
+            <span className="step-orb violet">3</span>
+            <h3>Go make a memory</h3>
+            <p>From picking a spot to booking the table, your bubbles handle the details.</p>
+          </div>
         </div>
-        <div className="how-step">
-          <span className="step-orb green">02</span>
-          <h3>Bring your people</h3>
-          <p>Your crew&apos;s bubbles find the places that work for everyone, together.</p>
-        </div>
-        <div className="how-step">
-          <span className="step-orb violet">03</span>
-          <h3>Go make a memory</h3>
-          <p>From picking a spot to booking the table, your bubbles handle the details.</p>
-        </div>
-      </section>
+      </AeroWindow>
       <footer className="home-footer">
         <p>
           Small bubbles. <strong>A world of possibilities.</strong>
         </p>
-        <a className="share-link" href="/qr">
+        <a className="gadget" href="/qr">
           <span className="mini-qr">
             <QrCode value={url} label="Scan to get your bubble" />
           </span>
           <span>
-            Better with your people.<small>Scan or tap to invite your crew ↗</small>
+            Better with your people.<small>Scan or tap to invite your crew</small>
           </span>
         </a>
-        <span className="footer-note">Made for real-life connections. ✦</span>
       </footer>
+      <Taskbar>
+        <a className="task" href="#get-started">
+          <span className="tiny-orb" aria-hidden="true" />
+          <span className="task-long">Get your bubble</span>
+          <span className="task-short">Sign up</span>
+        </a>
+        <a className="task" href="#how-it-works">
+          <span className="task-long">How it works</span>
+          <span className="task-short">How</span>
+        </a>
+        <a className="task" href="/p/demo?replay=basic">
+          <span className="task-play" aria-hidden="true" />
+          <span className="task-long">Watch the bubbles</span>
+          <span className="task-short">Demo</span>
+        </a>
+      </Taskbar>
     </main>
   );
 }

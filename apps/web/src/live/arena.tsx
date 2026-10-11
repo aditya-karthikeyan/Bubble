@@ -19,7 +19,7 @@ import {
   type SimulationNodeDatum,
 } from 'd3-force';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { computeLayout, type Layout, type Size, type Target } from './layout';
+import { computeLayout, safeArea, type Layout, type Size, type Target } from './layout';
 import { STATUS_LABEL, type Phase, type ViewModel } from './view-model';
 import {
   createDrift,
@@ -113,63 +113,62 @@ function useViewport(): Size | null {
   return size;
 }
 
-/** Glass shading shared by every orb: body gradient per hue, rim, specular highlight. */
+/** Hues per orb kind: highlight, body, and edge. */
+const HUES: Record<string, [string, string, string]> = {
+  fits: ['#e2f8ff', '#5cc9f3', '#1576c4'],
+  stretch: ['#fff4d8', '#f6b74e', '#c06d0e'],
+  firm: ['#ffe3dc', '#f07c69', '#b0392b'],
+  rep: ['#f0e9ff', '#a996ee', '#5b45b6'],
+  venue: ['#e4fff7', '#47d3b1', '#0e8a70'],
+  leader: ['#f4ffd9', '#9fe45c', '#2c9632'],
+  work: ['#e2f8ff', '#5cc9f3', '#1576c4'],
+  done: ['#e6ffea', '#52d38b', '#16894b'],
+  fail: ['#ffe2df', '#ee6b62', '#a72821'],
+  idle: ['#f5f9fc', '#c4d4df', '#7c92a3'],
+};
+
+/**
+ * Soap-bubble shading shared by every orb: a clear centre tinted toward the edge, light pooling
+ * at the bottom, a thin-film rainbow rim, and a glossy cap with a bright highlight.
+ */
 function GlassDefs() {
-  const hues: Record<string, [string, string, string]> = {
-    fits: ['#c9ecff', '#43a9f0', '#1468b8'],
-    stretch: ['#ffe9c2', '#f5ad45', '#c06a10'],
-    firm: ['#ffd4cc', '#ec6d5e', '#a8322a'],
-    rep: ['#e6dcff', '#9e8be6', '#5a45b0'],
-    venue: ['#d2fff1', '#3ccaa6', '#0e7f6a'],
-    leader: ['#e0ffe9', '#3bd27f', '#11804a'],
-    work: ['#c9ecff', '#43a9f0', '#1468b8'],
-    done: ['#dcffe8', '#36c278', '#147a45'],
-    fail: ['#ffd4d2', '#e45a55', '#9b2420'],
-    idle: ['#eef4f8', '#b9cad6', '#7f93a3'],
-  };
   return (
     <defs>
-      {Object.entries(hues).map(([k, [hi, mid, lo]]) => (
-        <radialGradient key={k} id={`g-${k}`} cx="38%" cy="32%" r="75%">
-          <stop offset="0%" stopColor={hi} stopOpacity="0.72" />
-          <stop offset="38%" stopColor={mid} stopOpacity="0.46" />
-          <stop offset="78%" stopColor={lo} stopOpacity="0.75" />
-          <stop offset="93%" stopColor={mid} stopOpacity="0.85" />
-          <stop offset="100%" stopColor="#edffff" stopOpacity="0.95" />
-        </radialGradient>
+      {Object.entries(HUES).map(([k, [hi, mid, lo]]) => (
+        <g key={k}>
+          <radialGradient id={`g-${k}`} cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor={hi} stopOpacity="0.12" />
+            <stop offset="55%" stopColor={mid} stopOpacity="0.2" />
+            <stop offset="80%" stopColor={mid} stopOpacity="0.46" />
+            <stop offset="94%" stopColor={lo} stopOpacity="0.72" />
+            <stop offset="100%" stopColor={hi} stopOpacity="0.95" />
+          </radialGradient>
+          <radialGradient id={`g-pool-${k}`} cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor={hi} stopOpacity="0.8" />
+            <stop offset="100%" stopColor={hi} stopOpacity="0" />
+          </radialGradient>
+        </g>
       ))}
-      <radialGradient id="g-shine" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
-        <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
-      </radialGradient>
-      <radialGradient id="g-inner" cx="50%" cy="50%" r="50%">
-        <stop offset="70%" stopColor="#ffffff" stopOpacity="0" />
-        <stop offset="100%" stopColor="#ffffff" stopOpacity="0.55" />
-      </radialGradient>
-      <radialGradient id="g-consensus" cx="45%" cy="38%" r="65%">
-        <stop offset="0%" stopColor="#ffffff" stopOpacity="0.32" />
-        <stop offset="80%" stopColor="#bfe8ff" stopOpacity="0.16" />
-        <stop offset="100%" stopColor="#ffffff" stopOpacity="0.5" />
-      </radialGradient>
-      <linearGradient id="g-rim" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
-        <stop offset="50%" stopColor="#9fe3ff" stopOpacity="0.6" />
-        <stop offset="100%" stopColor="#c7b8ff" stopOpacity="0.8" />
+      <linearGradient id="g-film" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stopColor="#9ff7ff" />
+        <stop offset="28%" stopColor="#d2ff8c" />
+        <stop offset="50%" stopColor="#fff2a6" />
+        <stop offset="72%" stopColor="#ffb6ee" />
+        <stop offset="100%" stopColor="#9fd8ff" />
       </linearGradient>
       <linearGradient id="g-cap" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stopColor="white" stopOpacity="0.95" />
-        <stop offset="100%" stopColor="white" stopOpacity="0.06" />
+        <stop offset="0%" stopColor="#fff" stopOpacity="0.9" />
+        <stop offset="100%" stopColor="#fff" stopOpacity="0.04" />
       </linearGradient>
-      <pattern
-        id="g-landscape"
-        patternUnits="objectBoundingBox"
-        width="1"
-        height="1"
-        viewBox="0 0 320 320"
-        preserveAspectRatio="xMidYMid slice"
-      >
-        <image href="/images/aero-world.webp" width="480" height="320" x="-80" />
-      </pattern>
+      <radialGradient id="g-check" cx="50%" cy="70%" r="65%">
+        <stop offset="0%" stopColor="#b8f58a" />
+        <stop offset="55%" stopColor="#3dbb4c" />
+        <stop offset="100%" stopColor="#1b7a2c" />
+      </radialGradient>
+      <radialGradient id="g-halo" cx="50%" cy="50%" r="50%">
+        <stop offset="55%" stopColor="#d8ff8a" stopOpacity="0.5" />
+        <stop offset="100%" stopColor="#d8ff8a" stopOpacity="0" />
+      </radialGradient>
     </defs>
   );
 }
@@ -178,28 +177,43 @@ function GlassDefs() {
 function Orb({ hue }: { hue: string }) {
   return (
     <>
-      <circle r={1.03} fill="#0b3550" opacity={0.13} cy={0.05} />
-      <circle r={1} fill="url(#g-landscape)" opacity={0.7} transform="rotate(180)" />
+      <circle r={1.04} fill="#03202e" opacity={0.14} cy={0.06} />
       <circle r={1} fill={`url(#g-${hue})`} />
-      <circle r={1} fill="url(#g-inner)" />
+      <ellipse cy={0.5} rx={0.62} ry={0.36} fill={`url(#g-pool-${hue})`} />
+      <circle r={0.955} fill="none" stroke="url(#g-film)" strokeWidth={0.07} opacity={0.6} />
+      <ellipse cy={-0.5} rx={0.68} ry={0.4} fill="url(#g-cap)" />
       <ellipse
-        cx={-0.08}
-        cy={-0.49}
-        rx={0.73}
-        ry={0.36}
-        fill="url(#g-cap)"
-        transform="rotate(-18)"
+        cx={-0.42}
+        cy={-0.44}
+        rx={0.15}
+        ry={0.08}
+        fill="#fff"
+        opacity={0.95}
+        transform="rotate(-40 -0.42 -0.44)"
       />
-      <ellipse cx={-0.32} cy={-0.42} rx={0.46} ry={0.3} fill="url(#g-shine)" />
-      <path
-        d="M -0.7 0.56 Q 0 1.08 0.7 0.56"
-        fill="none"
-        stroke="#c7fff3"
-        strokeWidth={0.035}
-        opacity={0.8}
-      />
-      <circle r={1} fill="none" stroke="url(#g-rim)" strokeWidth={0.035} />
+      <circle r={1} fill="none" stroke="#fff" strokeOpacity={0.85} strokeWidth={0.03} />
     </>
+  );
+}
+
+/** Four-point sparkle at radius 1.6, for the finale burst. */
+const SPARK =
+  'M0 -1.6C0.15 -0.3 0.3 -0.15 1.6 0C0.3 0.15 0.15 0.3 0 1.6C-0.15 0.3 -0.3 0.15 -1.6 0C-0.3 -0.15 -0.15 -0.3 0 -1.6Z';
+
+/** Fork and knife, so a venue never reads as a person. */
+function Cutlery() {
+  return (
+    <g
+      fill="none"
+      stroke="#fff"
+      strokeWidth={0.075}
+      strokeLinecap="round"
+      opacity={0.92}
+      transform="translate(0 -0.02)"
+    >
+      <path d="M -0.3 -0.4 V -0.18 M -0.2 -0.4 V -0.18 M -0.1 -0.4 V -0.18 M -0.3 -0.18 Q -0.3 -0.06 -0.2 -0.06 Q -0.1 -0.06 -0.1 -0.18 M -0.2 -0.06 V 0.38" />
+      <path d="M 0.16 0.38 V -0.4 C 0.32 -0.28 0.32 -0.04 0.16 0" />
+    </g>
   );
 }
 
@@ -244,9 +258,11 @@ export function VenueOrb({
 }) {
   return (
     <g>
+      {leader && <circle r={1.5} fill="url(#g-halo)" />}
       <Orb hue={leader ? 'leader' : 'venue'} />
       {!final && (
         <>
+          <Cutlery />
           <text className="orb-label" y={1.52} fontSize={0.3}>
             {clip(name, 18)}
           </text>
@@ -401,13 +417,9 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
         for (const n of s.nodes()) {
           const viewport = scene.current.size;
           const radius = n.r + 8;
-          const minY = viewport && viewport.h <= 650 && viewport.w > 760 ? 150 : 210;
-          const maxY = viewport
-            ? Math.max(
-                minY + radius,
-                viewport.h - (layoutRef.current?.doerOrigin ? 245 : 100) - radius,
-              )
-            : n.by;
+          const area = viewport ? safeArea(viewport, !!layoutRef.current?.doerOrigin) : null;
+          const minY = area ? area.top - 10 : 0;
+          const maxY = area ? Math.max(minY + radius, area.bottom + 5 - radius) : n.by;
           const destination = driftTarget(
             n.drift,
             now,
@@ -444,6 +456,19 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
                 n.absorbed = true;
                 into.r += into.rt * 0.12;
               }
+            }
+          }
+          if (area && viewport && !n.absorbInto && !n.swallowing && n.opt > 0) {
+            // Collisions can shove an orb past the edge or under the plan window; hold it in.
+            const m = n.r + 4;
+            const top = area.top - 6 + n.r;
+            if (n.x! < m || n.x! > viewport.w - m) {
+              n.x = Math.min(viewport.w - m, Math.max(m, n.x!));
+              n.vx = 0;
+            }
+            if (n.y! < top) {
+              n.y = top;
+              n.vy = 0;
             }
           }
           n.r += (n.rt - n.r) * 0.06;
@@ -483,13 +508,12 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
         const ending = finale.current;
         if (!ending) return;
         ending.elapsed += step;
-        const centreY = 210 + Math.max(0, current.size.h - 450) / 2;
+        // The finale sits centred in the space between the plan window and the booking dialog.
+        const room = safeArea(current.size, true);
+        const centreY = room.top + room.height / 2;
         ending.x += (current.size.w / 2 - ending.x) * 0.035;
         ending.y += (centreY - ending.y) * 0.035;
-        const maxRadius = Math.max(
-          40,
-          Math.min(current.size.w * 0.37, (current.size.h - 430) * 0.46, 190),
-        );
+        const maxRadius = Math.max(40, Math.min(current.size.w * 0.37, room.height * 0.46, 190));
         const frame = finaleFrame(
           ending.elapsed,
           Math.min(ending.initial, maxRadius * 0.65),
@@ -660,22 +684,27 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
           ),
         )}
       <g ref={burstEl} style={{ opacity: 0 }} aria-hidden="true">
-        {Array.from({ length: 18 }, (_, i) => (
-          <circle
-            key={i}
-            r={1}
-            fill={i % 3 === 0 ? '#b6f48d' : '#d3ffff'}
-            stroke="white"
-            strokeWidth={0.15}
-          />
-        ))}
+        {Array.from({ length: 18 }, (_, i) =>
+          i % 3 === 0 ? (
+            <g key={i}>
+              <path d={SPARK} fill="#e4ff9c" />
+            </g>
+          ) : (
+            <g key={i}>
+              <circle r={1} fill="url(#g-fits)" stroke="#fff" strokeWidth={0.14} />
+              <circle cx={-0.35} cy={-0.35} r={0.22} fill="#fff" />
+            </g>
+          ),
+        )}
       </g>
       <g ref={successEl} style={{ opacity: 0 }} aria-hidden="true">
+        <circle cy={-42} r={25} fill="url(#g-check)" stroke="#11622a" strokeWidth={1} />
+        <ellipse cy={-53} rx={18} ry={10} fill="url(#g-cap)" />
         <path
-          d="M -22 -30 L -6 -14 L 24 -48"
+          d="M -11 -42 L -3 -33 L 12 -51"
           fill="none"
-          stroke="#147959"
-          strokeWidth={7}
+          stroke="#fff"
+          strokeWidth={5.5}
           strokeLinecap="round"
           strokeLinejoin="round"
         />

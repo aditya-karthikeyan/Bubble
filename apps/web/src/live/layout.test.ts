@@ -1,7 +1,7 @@
 import { PlanEvent } from '@bubbleworks/shared';
 import { describe, expect, it } from 'vitest';
 import basic from '../../fixtures/basic.json';
-import { computeLayout, sizes, type Size } from './layout';
+import { computeLayout, safeArea, sizes, type Size } from './layout';
 import { phaseOf, reduceAll } from './view-model';
 
 const BASIC = basic.map((e) => PlanEvent.parse(e));
@@ -23,12 +23,12 @@ describe('arena layout', () => {
       computeLayout(candidates, 'convergence', LAPTOP, 456).venues,
     );
   });
-  it('keeps candidate bubbles clear of the navigation and phase panel', () => {
+  it('keeps candidate venues floating below the plan window', () => {
     const vm = reduceAll(upTo('round_complete'));
     for (const size of [PHONE, LAPTOP]) {
       const layout = computeLayout(vm, phaseOf(vm), size);
       for (const venue of Object.values(layout.venues)) {
-        expect(venue.y - venue.r - venue.wander).toBeGreaterThanOrEqual(200);
+        expect(venue.y - venue.r - venue.wander).toBeGreaterThanOrEqual(safeArea(size, false).top);
       }
     }
   });
