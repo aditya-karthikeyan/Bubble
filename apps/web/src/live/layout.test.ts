@@ -62,6 +62,23 @@ describe('arena layout', () => {
     expect(g.wander).toBeGreaterThan(l.wander * 5);
   });
 
+  it('keeps the crew a loose flock while it deliberates, nobody stranded alone', () => {
+    for (let i = 1; i <= BASIC.length; i++) {
+      const vm = reduceAll(BASIC.slice(0, i));
+      const phase = phaseOf(vm);
+      if (!['gathering', 'candidates', 'convergence'].includes(phase)) continue;
+      for (const size of [PHONE, LAPTOP]) {
+        const l = computeLayout(vm, phase, size);
+        const people = vm.bubbles.filter((b) => b.present).map((b) => l.bubbles[b.userId]!);
+        const mx = people.reduce((t, p) => t + p.x, 0) / people.length;
+        const my = people.reduce((t, p) => t + p.y, 0) / people.length;
+        for (const p of people) {
+          expect(Math.hypot(p.x - mx, p.y - my), `${size.w} ${phase}`).toBeLessThan(size.w * 0.32);
+        }
+      }
+    }
+  });
+
   it('pulls each bubble toward the venue it scores highest', () => {
     const planId = BASIC[0]!.planId;
     const at = BASIC[0]!.at;

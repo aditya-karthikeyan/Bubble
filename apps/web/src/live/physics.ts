@@ -20,6 +20,8 @@ export interface Body {
   mass: number;
   /** The body it is flying into right now; the two pass through each other. */
   into?: string;
+  /** How hard it was bumped this tick, in px; the arena turns it into a jiggle. */
+  hit?: number;
 }
 
 export interface Rect {
@@ -65,6 +67,8 @@ export function separate(bodies: Body[], share = 0.6) {
       a.y! -= ny * push * wa;
       b.x! += nx * push * wb;
       b.y! += ny * push * wb;
+      a.hit = (a.hit ?? 0) + push * wa;
+      b.hit = (b.hit ?? 0) + push * wb;
       const closing = ((b.vx ?? 0) - (a.vx ?? 0)) * nx + ((b.vy ?? 0) - (a.vy ?? 0)) * ny;
       if (closing < 0) {
         a.vx = (a.vx ?? 0) + nx * closing * wa;

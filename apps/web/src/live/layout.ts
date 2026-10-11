@@ -94,6 +94,9 @@ export function safeArea(size: Size, sheet: boolean) {
   return { left: 0, right: size.w, width: size.w, top, bottom, height: bottom - top };
 }
 
+/** How far each free bubble leans toward the rest of the crew. */
+const COHESION = 0.4;
+
 /** The doer ring around the hub: fixed angles and distances, so the group reads the same each time. */
 const TILT = [-0.22, 0.15, -0.1, 0.18];
 const SPREAD = [1, 1.08, 0.96, 1.04];
@@ -192,6 +195,7 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size, seed = 0)
   }
 
   const bubbles: Layout['bubbles'] = {};
+  const free: string[] = [];
   const roam = { x: area.width * 0.36, y: area.height * 0.3 };
   present.forEach((id) => {
     const home = point(id, centre, roam.x, roam.y);
@@ -240,7 +244,19 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size, seed = 0)
           ? s.bubble * 1.8
           : s.bubble * (pulled ? 0.7 : 1.4);
     bubbles[id] = { ...at, r: s.bubble, wander, opacity: 1 };
+    free.push(id);
   });
+  // Keep the crew a loose flock: each free bubble leans toward the others, so nobody's own
+  // favourite place strands them across the screen alone.
+  if (free.length > 1) {
+    const mx = free.reduce((t, id) => t + bubbles[id]!.x, 0) / free.length;
+    const my = free.reduce((t, id) => t + bubbles[id]!.y, 0) / free.length;
+    for (const id of free) {
+      const b = bubbles[id]!;
+      b.x += (mx - b.x) * COHESION;
+      b.y += (my - b.y) * COHESION;
+    }
+  }
   for (const b of vm.bubbles) {
     if (b.present) continue;
     // Out: float off the top and fade.
@@ -264,7 +280,7 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size, seed = 0)
       ? {
           ...centre,
           r: crewR,
-          wander: booked ? 0 : s.bubble * 0.15,
+          wander: booked ? 0 : s.bubble * 0.5,
           opacity: 1,
           members: merged,
           ...(booked && leaderId ? { absorb: { into: venueNode(leaderId), order: 0 } } : {}),

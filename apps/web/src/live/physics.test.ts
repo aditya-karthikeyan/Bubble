@@ -20,6 +20,9 @@ describe('bubble physics', () => {
     const b = body('b', 110, 100);
     for (let i = 0; i < 20; i++) separate([a, b]);
     expect(Math.hypot(b.x! - a.x!, b.y! - a.y!)).toBeGreaterThan(39);
+    // Each side records the bump, so it can jiggle.
+    expect(a.hit!).toBeGreaterThan(0);
+    expect(b.hit!).toBeGreaterThan(0);
     // The heavier one moves less.
     const big = body('big', 0, 0, { mass: 4000 });
     const small = body('small', 10, 0);

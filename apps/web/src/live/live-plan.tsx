@@ -5,8 +5,9 @@ import { Arena } from './arena';
 import { AeroIcon, AeroWindow, Desktop, Taskbar } from '../../app/aero';
 import { floatingWindows } from './layout';
 import type { Rect } from './physics';
+import { STEPS, stepOf, stepSummary } from './steps';
 import { usePlanFeed, type FeedStatus } from './use-plan-feed';
-import { PHASE_COPY, phaseOf, type Phase } from './view-model';
+import { PHASE_COPY, phaseOf, type Phase, type ViewModel } from './view-model';
 
 const STATUS_CHIP: Record<FeedStatus, string> = {
   connecting: 'Connecting',
@@ -17,13 +18,6 @@ const STATUS_CHIP: Record<FeedStatus, string> = {
   replay: 'Replay',
   replay_done: 'Replay',
 };
-
-const STEPS: { long: string; short: string; phases: Phase[] }[] = [
-  { long: 'Gather', short: 'Gather', phases: ['gathering'] },
-  { long: 'Find a place', short: 'Find', phases: ['candidates', 'convergence', 'deadlock'] },
-  { long: 'Make it happen', short: 'Book', phases: ['locked'] },
-  { long: 'See you there', short: 'Done', phases: ['summary', 'complete'] },
-];
 
 const PHASE_ICON: Record<Phase, { kind: 'info' | 'ok' | 'warn'; glyph: string }> = {
   gathering: { kind: 'info', glyph: 'i' },
@@ -40,7 +34,7 @@ type WindowId = 'plan' | 'locked' | 'booked' | 'done';
 const WINDOW_IDS: WindowId[] = ['plan', 'locked', 'booked', 'done'];
 /** Widths match the .floating rules in globals.css; heights are estimates for placement. */
 const WINDOW_SIZE: Record<WindowId, { w: number; h: number }> = {
-  plan: { w: 440, h: 190 },
+  plan: { w: 500, h: 190 },
   locked: { w: 400, h: 150 },
   booked: { w: 400, h: 200 },
   done: { w: 400, h: 150 },
@@ -79,23 +73,60 @@ function time(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
-/** Explorer-style breadcrumb of the four plan steps, on the window's glass. */
-function Breadcrumb({ phase }: { phase: Phase }) {
-  const at = STEPS.findIndex((s) => s.phases.includes(phase));
+/**
+ * Explorer-style address bar on the window's glass: round Back and Forward buttons and a
+ * breadcrumb of the four plan steps. Every step reached so far is clickable and opens that
+ * step's page; the current step (or the orb) goes back to the live view.
+ */
+function Breadcrumb({
+  at,
+  viewing,
+  onView,
+}: {
+  at: number;
+  viewing: number | null;
+  onView: (step: number | null) => void;
+}) {
+  const shown = viewing ?? at;
+  const go = (step: number) => onView(step >= at ? null : Math.max(0, step));
   return (
     <div className="address-bar">
-      <ol className="crumbs" aria-label="Plan progress">
-        <li className="crumb-root" aria-hidden="true">
-          <span className="tiny-orb" />
+      <div className="nav-buttons">
+        <button
+          type="button"
+          className="nav-back"
+          aria-label="Back"
+          disabled={shown <= 0}
+          onClick={() => go(shown - 1)}
+        />
+        <button
+          type="button"
+          className="nav-forward"
+          aria-label="Forward"
+          disabled={viewing === null}
+          onClick={() => go(shown + 1)}
+        />
+      </div>
+      <ol className="crumbs" aria-label="Plan steps">
+        <li className="crumb-root">
+          <button type="button" aria-label="Live view" onClick={() => onView(null)}>
+            <span className="tiny-orb" />
+          </button>
         </li>
         {STEPS.map((s, i) => (
           <li
             key={s.long}
-            className={i === at ? 'current' : i < at ? 'past' : undefined}
-            aria-current={i === at ? 'step' : undefined}
+            className={`${i === at ? 'current' : i < at ? 'past' : 'future'}${i === shown ? ' shown' : ''}`}
           >
-            <span className="task-long">{s.long}</span>
-            <span className="task-short">{s.short}</span>
+            <button
+              type="button"
+              disabled={i > at}
+              aria-current={i === shown ? 'page' : undefined}
+              onClick={() => go(i)}
+            >
+              <span className="task-long">{s.long}</span>
+              <span className="task-short">{s.short}</span>
+            </button>
           </li>
         ))}
       </ol>
@@ -104,6 +135,7 @@ function Breadcrumb({ phase }: { phase: Phase }) {
 }
 
 export function PhaseBanner({
+  vm,
   phase,
   bubbles,
   minimized,
@@ -112,6 +144,7 @@ export function PhaseBanner({
   style,
   onRect,
 }: {
+  vm: ViewModel;
   phase: Phase;
   bubbles: number;
   minimized: boolean;
@@ -120,8 +153,11 @@ export function PhaseBanner({
   style?: CSSProperties;
   onRect?: (rect: DOMRect | null) => void;
 }) {
+  const [viewing, setViewing] = useState<number | null>(null);
+  const at = stepOf(phase);
   const copy = PHASE_COPY[phase];
   const icon = PHASE_ICON[phase];
+  const page = viewing === null ? null : stepSummary(viewing, vm);
   return (
     <AeroWindow
       className={`hud-top popup${className ? ` ${className}` : ''}`}
@@ -132,17 +168,34 @@ export function PhaseBanner({
       minimized={minimized}
       onMinimize={onMinimize}
       onClose={onMinimize}
-      bar={<Breadcrumb phase={phase} />}
+      bar={<Breadcrumb at={at} viewing={viewing} onView={setViewing} />}
     >
-      <div className="dialog-main" aria-live="polite">
-        <AeroIcon kind={icon.kind}>{icon.glyph}</AeroIcon>
-        <div>
-          <h1 className="instruction" id="phase-title">
-            {copy.title}
-          </h1>
-          <p>{copy.line}</p>
+      {page ? (
+        <div className="dialog-main">
+          <AeroIcon>i</AeroIcon>
+          <div>
+            <h1 className="instruction" id="phase-title">
+              {page.title}
+            </h1>
+            {page.lines.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+            <button type="button" className="link-button" onClick={() => setViewing(null)}>
+              Back to live: {copy.title}
+            </button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="dialog-main" aria-live="polite">
+          <AeroIcon kind={icon.kind}>{icon.glyph}</AeroIcon>
+          <div>
+            <h1 className="instruction" id="phase-title">
+              {copy.title}
+            </h1>
+            <p>{copy.line}</p>
+          </div>
+        </div>
+      )}
       <div className="status-bar">
         <span>
           {bubbles} {bubbles === 1 ? 'bubble' : 'bubbles'}
@@ -251,6 +304,7 @@ export function LivePlan({ token, replay }: { token: string; replay: string | nu
         settled={settled}
       />
       <PhaseBanner
+        vm={vm}
         phase={phase}
         bubbles={bubbles}
         minimized={hudMinimized}

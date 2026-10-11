@@ -70,6 +70,13 @@ interface Node extends SimulationNodeDatum, Body {
   pop?: number;
   popAt?: number;
   popped?: boolean;
+  /** Soft body: how hard it is wobbling, its own wobble timing, and its eased velocity. */
+  jiggle: number;
+  phase: number;
+  svx: number;
+  svy: number;
+  /** Doer: it got its jiggle for splitting off. */
+  kicked?: boolean;
 }
 
 /** Stagger between bubbles taking off into the destination, and the pause before the first. */
@@ -95,6 +102,14 @@ const STATUS_HUE: Record<BubblePageStatus, string> = {
   stretching: 'stretch',
   holding_firm: 'firm',
   represented: 'rep',
+};
+
+/** What each page status means, for the hover tooltip. Never why: that stays private. */
+const STATUS_HELP: Record<BubblePageStatus, string> = {
+  fits: 'the leading place works for them',
+  stretching: 'a bit of a stretch for them, still inside their limits',
+  holding_firm: "this place doesn't work for them",
+  represented: "they're away; their bubble speaks for them",
 };
 
 const DOER_HUE: Record<DoerState, string> = {
@@ -203,11 +218,18 @@ function GlassDefs() {
 /** A glass orb drawn at radius 1; the parent scales it to the node's radius. */
 function Orb({ hue }: { hue: string }) {
   return (
-    <>
+    <g className="orb-body">
       <circle r={1.04} fill="#03202e" opacity={0.14} cy={0.06} />
       <circle r={1} fill={`url(#g-${hue})`} />
       <ellipse cy={0.5} rx={0.62} ry={0.36} fill={`url(#g-pool-${hue})`} />
-      <circle r={0.955} fill="none" stroke="url(#g-film)" strokeWidth={0.07} opacity={0.6} />
+      <circle
+        className="orb-film"
+        r={0.955}
+        fill="none"
+        stroke="url(#g-film)"
+        strokeWidth={0.075}
+        opacity={0.65}
+      />
       <ellipse cy={-0.5} rx={0.68} ry={0.4} fill="url(#g-cap)" />
       <ellipse
         cx={-0.42}
@@ -219,7 +241,7 @@ function Orb({ hue }: { hue: string }) {
         transform="rotate(-40 -0.42 -0.44)"
       />
       <circle r={1} fill="none" stroke="#fff" strokeOpacity={0.85} strokeWidth={0.03} />
-    </>
+    </g>
   );
 }
 
@@ -258,6 +280,7 @@ export function BubbleNode({
 }) {
   return (
     <g className={pulse ? 'pulse' : undefined}>
+      <title>{`${name}: ${STATUS_HELP[status]}`}</title>
       <Orb hue={STATUS_HUE[status]} />
       <text className="orb-name" y={0.12} fontSize={0.42}>
         {clip(name, 8)}
@@ -393,6 +416,10 @@ function syncNode(
       mass: 1,
       bornAt: now,
       drift: createDrift(random),
+      jiggle: 0.1,
+      phase: random() * Math.PI * 2,
+      svx: 0,
+      svy: 0,
     } as Node);
   n.bx = t.x;
   n.by = t.y;
@@ -510,6 +537,35 @@ export function Arena({
   const layoutRef = useRef<Layout | null>(null);
   const changedAt = useRef(0);
   const sim = useRef<Simulation<Node, undefined> | null>(null);
+  const parts = useRef(new Map<string, { body: Element | null; film: Element | null }>());
+
+  /**
+   * Jiggly soap bubbles: bumps and gulps set a bubble wobbling and it rings down like a soap
+   * film, it idles with a slow breathing wobble, it stretches a little along the way it is
+   * moving, and its rainbow film swirls. Only the orb deforms; labels stay put.
+   */
+  const wobble = (n: Node, el: SVGGElement, now: number) => {
+    let p = parts.current.get(n.id);
+    if (!p || !p.body?.isConnected) {
+      p = { body: el.querySelector('.orb-body'), film: el.querySelector('.orb-film') };
+      parts.current.set(n.id, p);
+    }
+    n.jiggle = Math.min(0.14, n.jiggle * 0.965 + (n.hit ?? 0) * 0.012);
+    n.hit = 0;
+    n.svx += ((n.vx ?? 0) - n.svx) * 0.15;
+    n.svy += ((n.vy ?? 0) - n.svy) * 0.15;
+    const t = now / 1000;
+    const stretch = Math.min(0.1, Math.hypot(n.svx, n.svy) * 0.06);
+    const heading = (Math.atan2(n.svy, n.svx) * 180) / Math.PI;
+    const w = Math.sin(t * 9 + n.phase) * n.jiggle + Math.sin(t * 1.7 + n.phase) * 0.022;
+    const axis = (n.phase * 57 + t * 25) % 360;
+    p.body?.setAttribute(
+      'transform',
+      `rotate(${heading.toFixed(1)}) scale(${(1 + stretch).toFixed(3)} ${(1 - stretch * 0.6).toFixed(3)}) ` +
+        `rotate(${(axis - heading).toFixed(1)}) scale(${(1 + w).toFixed(3)} ${(1 - w).toFixed(3)}) rotate(${(-axis).toFixed(1)})`,
+    );
+    p.film?.setAttribute('transform', `rotate(${((n.phase * 57 + t * 40) % 360).toFixed(1)})`);
+  };
 
   // One simulation for the page's lifetime; it idles warm so things keep floating.
   useEffect(() => {
@@ -573,6 +629,11 @@ export function Arena({
             // The crew bubble grows with each person it takes in.
             const inside = n.members.filter((id) => all.get(id)?.absorbed).length;
             n.swallowing = inside < n.members.length;
+            // It forms where the people are and floats to its place once everyone is in.
+            if (n.swallowing && !n.absorbInto && n.hx !== undefined) {
+              n.tx = n.hx;
+              n.ty = n.hy!;
+            }
             if (!n.absorbInto) n.rt = n.rFull! * (0.45 + 0.55 * (inside / n.members.length));
             else if (
               n.absorbAt !== undefined &&
@@ -596,6 +657,10 @@ export function Arena({
               n.r = n.rt * 0.3;
               hidden = true;
             }
+          }
+          if (!hidden && n.kind === 'doer' && !n.kicked) {
+            n.kicked = true;
+            n.jiggle = 0.12;
           }
           if (!hidden && n.pop !== undefined && !n.popped) {
             // Finished or ruled out: stay up long enough to read, then pop in turn.
@@ -636,6 +701,7 @@ export function Arena({
                 // Gulp: the destination swells a little with each bubble it takes in.
                 n.absorbed = true;
                 into.r += into.rt * 0.12;
+                into.jiggle = Math.min(0.14, into.jiggle + 0.08);
                 if (into.kind === 'crew') revealName(els.current.get(into.id), n.id);
               }
             }
@@ -676,6 +742,7 @@ export function Arena({
               `translate(${n.x!.toFixed(1)} ${n.y!.toFixed(1)}) scale(${n.r.toFixed(2)})`,
             );
             el.style.opacity = (n.popped ? 0 : n.op).toFixed(3);
+            if (!scene.current.reduced && n.op > 0.02) wobble(n, el, now);
           }
         }
 
@@ -841,14 +908,22 @@ export function Arena({
       );
     });
     if (layout.crew) {
-      const crew = syncNode(
-        nodes.current,
-        CREW,
-        'crew',
-        layout.crew,
-        spawn(layout.crew),
-        random.current,
-      );
+      const isNew = !nodes.current.has(CREW);
+      const members = layout.crew.members
+        .map((id) => nodes.current.get(id))
+        .filter((m): m is Node => m?.x !== undefined);
+      // Born where the people are, not at a fixed spot.
+      const born = members.length
+        ? {
+            x: members.reduce((t, m) => t + m.x!, 0) / members.length,
+            y: members.reduce((t, m) => t + m.y!, 0) / members.length,
+          }
+        : spawn(layout.crew);
+      const crew = syncNode(nodes.current, CREW, 'crew', layout.crew, born, random.current);
+      if (isNew) {
+        crew.hx = born.x;
+        crew.hy = born.y;
+      }
       crew.members = layout.crew.members;
       crew.rFull = layout.crew.r;
       next.set(CREW, crew);
