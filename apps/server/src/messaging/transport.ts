@@ -6,7 +6,7 @@
  * - imessage: Photon cloud iMessage (Pro shared pool). Holds the real line: LINE LOCK first.
  * - terminal: Spectrum's local TUI. It skips polls, rich links, and edits, so this transport
  *   renders them as text: numbered poll options (reply with a number to vote), links as
- *   "title\nurl", edits re-sent as a new line.
+ *   "title\nurl", edits re-sent as a new line, Mini App cards as "[card: caption — url]".
  */
 import { randomUUID } from 'node:crypto';
 import {
@@ -22,7 +22,11 @@ import {
   type Message,
   type Space,
 } from 'spectrum-ts';
-import { imessage } from 'spectrum-ts/providers/imessage';
+import {
+  customizedMiniApp,
+  imessage,
+  type CustomizedMiniAppLayout,
+} from 'spectrum-ts/providers/imessage';
 import { terminal } from 'spectrum-ts/providers/terminal';
 import { isLocationAttachment, normalize, parseCoordinates, type RawInbound } from './normalize.js';
 
@@ -30,7 +34,37 @@ export type OutContent =
   | { kind: 'text'; text: string; replyToMessageId?: string }
   | { kind: 'poll'; question: string; options: string[] }
   | { kind: 'link'; url: string; title: string }
-  | { kind: 'image'; data: Buffer; name: string; mimeType: string };
+  | { kind: 'image'; data: Buffer; name: string; mimeType: string }
+  | ({ kind: 'mini_app' } & MiniAppCard);
+
+/**
+ * A native iMessage Mini App card. Tapping it opens `url` inside Photon's Spectrum iMessage app.
+ * The layout is what the bubble shows; `summary` is the one-line fallback (notifications,
+ * conversation list, devices without the app).
+ */
+export interface MiniAppCard {
+  url: string;
+  caption: string;
+  subcaption?: string;
+  trailingCaption?: string;
+  trailingSubcaption?: string;
+  summary: string;
+  /** JPEG. */
+  image?: Buffer;
+  imageTitle?: string;
+  imageSubtitle?: string;
+}
+
+/**
+ * Spectrum's own iMessage extension: the card opens in it, so nobody installs anything of ours.
+ * Same identity spectrum-ts uses for its `app()` content; the App Store id points phones
+ * without the extension at it.
+ */
+const SPECTRUM_EXTENSION = {
+  teamId: 'P8XT6232SL',
+  extensionBundleId: 'codes.photon.Spectrum.MessagesExtension',
+  appStoreId: 6777616651,
+} as const;
 
 export interface Transport {
   readonly provider: 'imessage' | 'terminal';
@@ -271,6 +305,16 @@ export class SpectrumTransport implements Transport {
           ),
         };
       }
+      case 'mini_app': {
+        if (terminal) {
+          return {
+            messageId: this.remember(
+              await space.send(`[card: ${content.caption} — ${content.url}]`),
+            ),
+          };
+        }
+        return { messageId: this.remember(await space.send(miniAppContent(content))) };
+      }
     }
   }
 
@@ -298,4 +342,23 @@ export class SpectrumTransport implements Transport {
     await this.loop?.catch(() => undefined);
     this.app = null;
   }
+}
+
+/** The spectrum-ts customized mini app content for a card. Exported for tests. */
+export function miniAppContent(card: MiniAppCard): ReturnType<typeof customizedMiniApp> {
+  const layout: CustomizedMiniAppLayout = { caption: card.caption, summary: card.summary };
+  if (card.subcaption) layout.subcaption = card.subcaption;
+  if (card.trailingCaption) layout.trailingCaption = card.trailingCaption;
+  if (card.trailingSubcaption) layout.trailingSubcaption = card.trailingSubcaption;
+  if (card.imageTitle) layout.imageTitle = card.imageTitle;
+  if (card.imageSubtitle) layout.imageSubtitle = card.imageSubtitle;
+  // The layout schema wants a plain Uint8Array over an ArrayBuffer, not a pooled Buffer view.
+  if (card.image?.length) layout.image = new Uint8Array(card.image);
+  return customizedMiniApp({
+    appName: 'Bubbleworks',
+    ...SPECTRUM_EXTENSION,
+    url: card.url,
+    layout,
+    live: false,
+  });
 }

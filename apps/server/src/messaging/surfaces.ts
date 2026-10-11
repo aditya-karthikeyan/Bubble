@@ -7,12 +7,14 @@
  *   DELIBERATING      "🫧 Dinner tonight · 4 in · finding the spot"
  *   plan_locked       "🔒 Thai Basil · 7:30 PM · 4 people · say "veto" to change it"
  *   BOOKING           "📞 Calling Thai Basil"
- *   booking_confirmed "✅ Booked Thai Basil · 7:30 PM · party of 4"  + one ticket image
+ *   booking_confirmed one Mini App card: "Booked ✅ · Thai Basil · 7:30 PM · table for 4", the
+ *                     ticket JPEG as its image; tapping it opens the ticket page (/t/<token>)
  *
  * Edits are free against the message budget, which keeps the crew's DMs quiet. iMessage allows
  * edits for 15 minutes and 5 edits per message, so this stops at 4 edits or 14 minutes and the
- * engine's own lock and booked texts still carry the news. The ticket image counts against the
- * budget like any crew message and only shows group-level facts.
+ * engine's own lock and booked texts still carry the news. The ticket card counts against the
+ * budget like any crew message and only shows group-level facts. The card opens in Photon's
+ * Spectrum iMessage app, so nobody installs anything of ours.
  */
 import {
   idempotencyKey,
@@ -24,10 +26,13 @@ import {
 import type { Logger } from '../events/bus.js';
 import type { SpectrumMessaging } from './adapter.js';
 import type { BundleStore } from './bundle.js';
+import { signBookingToken } from '../doers/ics.js';
 import { renderTicket, walkMinutes, type TicketData } from './card-image.js';
 
 export interface LiveSurfacesOptions {
-  port: Pick<SpectrumMessaging, 'sendGroupText' | 'sendImage'>;
+  port: Pick<SpectrumMessaging, 'sendGroupText' | 'sendMiniApp'>;
+  /** The ticket page link: <publicBaseUrl>/t/<signed booking token>, same HMAC as the .ics link. */
+  ticketLinks: { publicBaseUrl: string; linkSecret: string };
   bundles: BundleStore;
   bus: {
     subscribe(planId: string, handler: (event: PlanEvent) => void | Promise<void>): () => void;
@@ -86,6 +91,7 @@ export class LiveSurfaces {
       case 'booking_confirmed': {
         if (!this.o.bundles.byPlan(event.planId)) return;
         await this.sendTicket(event.planId, {
+          bookingId: event.bookingId,
           venueId: event.venue.venueId,
           venueName: event.venue.name,
           cuisine: event.venue.cuisine,
@@ -102,6 +108,7 @@ export class LiveSurfaces {
   private async sendTicket(
     planId: string,
     booking: {
+      bookingId: string;
       venueId: string;
       venueName: string;
       cuisine: string;
@@ -127,15 +134,38 @@ export class LiveSurfaces {
       address: venue?.address ?? null,
       walkMinutes: walk,
       backupName: backup,
+    }).catch((err: unknown) => {
+      // The card still carries every fact without its picture.
+      this.o.log.warn(
+        { planId, err: String(err) },
+        'ticket render failed, card sent without image',
+      );
+      return null;
     });
-    await this.o.port.sendImage({
+    const { publicBaseUrl, linkSecret } = this.o.ticketLinks;
+    const url = `${publicBaseUrl.replace(/\/$/, '')}/t/${signBookingToken(booking.bookingId, linkSecret)}`;
+    const party = `table for ${booking.partySize}`;
+    await this.o.port.sendMiniApp({
       chatId: plan.chatId,
-      data: image,
-      name: 'booking.jpg',
-      mimeType: 'image/jpeg',
+      url,
+      caption: 'Booked ✅',
+      subcaption: booking.venueName,
+      trailingCaption: booking.timeText,
+      trailingSubcaption: party,
+      summary: `Booked ✅ ${booking.venueName}, ${booking.timeText}, ${party}`,
+      ...(image
+        ? {
+            image,
+            imageTitle: booking.venueName,
+            imageSubtitle: `${booking.timeText} · party of ${booking.partySize}`,
+          }
+        : {}),
       idempotencyKey: idempotencyKey(planId, 'ticket'),
     });
-    this.o.log.info({ planId, renderMs: this.now() - started, bytes: image.length }, 'ticket sent');
+    this.o.log.info(
+      { planId, renderMs: this.now() - started, bytes: image?.length ?? 0 },
+      'ticket card sent',
+    );
   }
 
   private clock(iso: string): string {

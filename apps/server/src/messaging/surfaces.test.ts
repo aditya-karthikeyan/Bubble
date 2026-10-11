@@ -4,6 +4,7 @@ import { DEMO_GROUP } from '@bubbleworks/shared/fakes';
 import { describe, expect, it } from 'vitest';
 import { silentLogger } from '../events/bus.js';
 import { BundleStore, headcountText } from './bundle.js';
+import { verifyBookingToken } from '../doers/ics.js';
 import { walkMinutes } from './card-image.js';
 import { LiveSurfaces } from './surfaces.js';
 
@@ -26,7 +27,12 @@ const VENUE: Venue = {
   isDemo: false,
 };
 
-function setup(options: { createdAgoMs?: number } = {}) {
+const SECRET = 'test-secret';
+type CardInput = Parameters<
+  ConstructorParameters<typeof LiveSurfaces>[0]['port']['sendMiniApp']
+>[0];
+
+function setup(options: { createdAgoMs?: number; renderFails?: boolean } = {}) {
   const bundles = new BundleStore(new Database(':memory:'));
   bundles.save({
     planId: PLAN,
@@ -39,7 +45,7 @@ function setup(options: { createdAgoMs?: number } = {}) {
     pageUrl: 'https://bubbleworks.example/p/token',
   });
   const texts: Array<{ chatId: string; text: string; idempotencyKey: string }> = [];
-  const images: Array<{ chatId: string; name: string; idempotencyKey: string }> = [];
+  const cards: CardInput[] = [];
   const rendered: unknown[] = [];
   let handler: ((e: PlanEvent) => void | Promise<void>) | null = null;
   const savedAt = Date.now();
@@ -53,15 +59,12 @@ function setup(options: { createdAgoMs?: number } = {}) {
         });
         return { messageId: 'grp:locked', deduplicated: false };
       },
-      sendImage: async (input) => {
-        images.push({
-          chatId: input.chatId,
-          name: input.name,
-          idempotencyKey: input.idempotencyKey,
-        });
+      sendMiniApp: async (input) => {
+        cards.push(input);
         return { messageId: 'grp:ticket', deduplicated: false };
       },
     },
+    ticketLinks: { publicBaseUrl: 'https://api.bubbleworks.example/', linkSecret: SECRET },
     bundles,
     bus: { subscribe: (_planId, h) => ((handler = h), () => (handler = null)) },
     plans: {
@@ -74,18 +77,19 @@ function setup(options: { createdAgoMs?: number } = {}) {
     now: () => savedAt + (options.createdAgoMs ?? 0),
     render: async (ticket) => {
       rendered.push(ticket);
+      if (options.renderFails) throw new Error('font missing');
       return Buffer.from('jpg');
     },
   });
   surfaces.start();
   const emit = async (event: Record<string, unknown>) =>
     handler?.({ planId: PLAN, at, ...event } as unknown as PlanEvent);
-  return { texts, images, rendered, emit, bundles };
+  return { texts, cards, rendered, emit, bundles };
 }
 
 describe('LiveSurfaces', () => {
-  it('sends one locked line and one ticket at booking, and never edits the headcount', async () => {
-    const { texts, images, rendered, emit } = setup();
+  it('sends one locked line and one ticket card at booking, and never edits the headcount', async () => {
+    const { texts, cards, rendered, emit } = setup();
     await emit({ type: 'plan_state_changed', from: 'GATHERING', to: 'DELIBERATING' });
     await emit({
       type: 'plan_locked',
@@ -110,9 +114,23 @@ describe('LiveSurfaces', () => {
     expect(texts[0]!.text).toContain('veto');
     expect(texts[0]!.text).not.toContain('https://bubbleworks.example/p/token');
     expect(texts[0]!.text).not.toContain('Watch live');
-    expect(images).toEqual([
-      { chatId: CREW, name: 'booking.jpg', idempotencyKey: 'plan_1:ticket' },
-    ]);
+    expect(cards).toHaveLength(1);
+    const card = cards[0]!;
+    expect(card).toMatchObject({
+      chatId: CREW,
+      caption: 'Booked ✅',
+      subcaption: 'Thai Basil',
+      trailingCaption: '7:30 PM',
+      trailingSubcaption: 'table for 4',
+      summary: 'Booked ✅ Thai Basil, 7:30 PM, table for 4',
+      imageTitle: 'Thai Basil',
+      imageSubtitle: '7:30 PM · party of 4',
+      idempotencyKey: 'plan_1:ticket',
+    });
+    expect(card.image?.toString()).toBe('jpg');
+    const match = /^https:\/\/api\.bubbleworks\.example\/t\/([^/]+)$/.exec(card.url);
+    expect(match).not.toBeNull();
+    expect(verifyBookingToken(match![1]!, SECRET)).toBe('b1');
     expect(rendered[0]).toMatchObject({
       status: 'Booked',
       venueName: 'Thai Basil',
@@ -122,8 +140,25 @@ describe('LiveSurfaces', () => {
     });
   });
 
+  it('sends the card without a picture when the ticket render fails', async () => {
+    const { cards, emit } = setup({ renderFails: true });
+    await emit({
+      type: 'booking_confirmed',
+      bookingId: 'b1',
+      venue: { venueId: VENUE.id, name: VENUE.name, cuisine: 'thai' },
+      startAt: '2026-10-10T23:30:00.000Z',
+      partySize: 4,
+      reservationName: 'Pranav',
+    });
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.caption).toBe('Booked ✅');
+    expect(cards[0]!.url).toContain('/t/');
+    expect(cards[0]!.image).toBeUndefined();
+    expect(cards[0]!.imageTitle).toBeUndefined();
+  });
+
   it('ignores plans it never sent a bundle for', async () => {
-    const { texts, images, emit } = setup();
+    const { texts, cards, emit } = setup();
     await emit({
       planId: 'plan_other',
       type: 'plan_locked',
@@ -133,7 +168,7 @@ describe('LiveSurfaces', () => {
       partySize: 4,
     });
     expect(texts).toHaveLength(0);
-    expect(images).toHaveLength(0);
+    expect(cards).toHaveLength(0);
   });
 
   it('tells people they are counted in unless they say out', () => {

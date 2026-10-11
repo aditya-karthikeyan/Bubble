@@ -6,6 +6,7 @@ import { createBubbles } from './bubbles/index.js';
 import { createCaller, loadCallerConfig } from './caller/index.js';
 import { GooglePlacesSource } from './venues/places.js';
 import { joinPageHtml } from './web/join-page.js';
+import { loadTicketPage, ticketPageHtml } from './web/ticket-page.js';
 import { registerWatchRoute } from './web/watch-route.js';
 import { seedDemoBubbles } from './bubbles/seed.js';
 import { registerDevRoutes } from './dev/routes.js';
@@ -48,8 +49,19 @@ async function main(): Promise<void> {
   // P2 messaging adapter. The terminal provider is Spectrum's local TUI, so it only starts
   // when there is a terminal to draw on; the real line starts only when SPECTRUM_PROVIDER=imessage
   // is set on the process holding the LINE LOCK. Signup works either way.
+  // Signed links (.ics, booked ticket page) share one base URL and one HMAC key.
+  const publicBase = (config.SERVER_PUBLIC_URL ?? `http://localhost:${config.PORT}`).replace(
+    /\/$/,
+    '',
+  );
+  const linkSecret =
+    process.env['GOOGLE_CLIENT_SECRET'] || process.env['SPECTRUM_PROJECT_SECRET'] || 'dev-only';
   const messagingConfig = loadMessagingConfig();
-  const messaging = createMessaging({ config: messagingConfig, runtime });
+  const messaging = createMessaging({
+    config: messagingConfig,
+    runtime,
+    links: { publicBaseUrl: publicBase, linkSecret },
+  });
   const startMessaging = messagingConfig.SPECTRUM_PROVIDER === 'imessage' || process.stdin.isTTY;
 
   // P3 bubbles: facts, onboarding, crews over DM, passive learning, calendar connect. They
@@ -78,10 +90,6 @@ async function main(): Promise<void> {
 
   // P3 doers: Inviter (.ics link), Splitter (Venmo, ledger), Watcher (ETAs, lateness), and the
   // private summary for represented members. Lateness asks the caller to hold the table.
-  const publicBase = (config.SERVER_PUBLIC_URL ?? `http://localhost:${config.PORT}`).replace(
-    /\/$/,
-    '',
-  );
   const doers = new Doers({
     db: runtime.db,
     crews: runtime.crews,
@@ -90,8 +98,7 @@ async function main(): Promise<void> {
     timers: runtime.timers,
     bus: runtime.bus,
     publicBaseUrl: publicBase,
-    linkSecret:
-      process.env['GOOGLE_CLIENT_SECRET'] || process.env['SPECTRUM_PROJECT_SECRET'] || 'dev-only',
+    linkSecret,
     onLate: async (n) => {
       const venue = runtime.venues().find((v) => v.id === n.venueId);
       if (!venue) return;
@@ -202,6 +209,24 @@ async function main(): Promise<void> {
     return reply
       .type('text/html; charset=utf-8')
       .send(joinPageHtml({ code: request.params.code, crewName: crew?.name ?? null }));
+  });
+
+  /** The booked ticket the Mini App card opens. The token is the signed .ics booking token. */
+  app.fastify.get<{ Params: { token: string } }>('/t/:token', async (request, reply) => {
+    const ticket = await loadTicketPage(
+      {
+        db: runtime.db,
+        plans: runtime.plans,
+        crews: runtime.crews,
+        publicBaseUrl: publicBase,
+        linkSecret,
+      },
+      request.params.token,
+    );
+    return reply
+      .code(ticket ? 200 : 404)
+      .type('text/html; charset=utf-8')
+      .send(ticketPageHtml(ticket));
   });
 
   app.fastify.get<{ Params: { code: string } }>('/api/crews/:code', async (request, reply) => {

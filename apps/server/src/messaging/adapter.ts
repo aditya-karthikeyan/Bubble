@@ -43,7 +43,7 @@ import type { Logger } from '../events/bus.js';
 import { Batcher, mergeBatch, type Batch } from './batcher.js';
 import type { RawInbound } from './normalize.js';
 import type { MessagingStore } from './store.js';
-import type { OutContent, Transport } from './transport.js';
+import type { MiniAppCard, OutContent, Transport } from './transport.js';
 
 export interface SpectrumMessagingOptions {
   transport: Transport;
@@ -246,6 +246,19 @@ export class SpectrumMessaging implements MessagingPort {
         name: input.name,
         mimeType: input.mimeType,
       }),
+    });
+  }
+
+  /** Native iMessage Mini App card to every member of a crew (or one dm: chat). Not part of MessagingPort. */
+  sendMiniApp(
+    input: MiniAppCard & { chatId: string; idempotencyKey: string },
+  ): Promise<SendResult> {
+    const { chatId, idempotencyKey: key, ...card } = input;
+    return this.fan({
+      chatId,
+      key,
+      planId: planIdFromKey(key),
+      content: () => ({ kind: 'mini_app', ...card }),
     });
   }
 
