@@ -180,11 +180,21 @@ export class SpectrumTransport implements Transport {
       const c = message.content as { type?: unknown; name?: unknown; mimeType?: unknown };
       // Read receipts and typing are expected noise.
       if (message.direction === 'inbound' && c?.type !== 'read' && c?.type !== 'typing') {
+        // For a "custom" balloon (a shared location, a contact card) log its shape, never any
+        // text, so the next kind can be read.
+        const shape =
+          c?.type === 'custom'
+            ? JSON.stringify(c, (k, v) =>
+                k === 'text' || k === 'body' || typeof v === 'function' ? undefined : v,
+              ).slice(0, 600)
+            : null;
         this.options.log?.(
           {
             type: typeof c?.type === 'string' ? c.type : typeof c,
             name: typeof c?.name === 'string' ? c.name : null,
             mimeType: typeof c?.mimeType === 'string' ? c.mimeType : null,
+            keys: c && typeof c === 'object' ? Object.keys(c) : [],
+            shape,
           },
           'inbound content not understood',
         );
