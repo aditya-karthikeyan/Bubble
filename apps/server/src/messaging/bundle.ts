@@ -43,6 +43,11 @@ export interface QuestionDecision {
    * it replaces cuisinePoll.
    */
   polls?: Array<{ pollId: string; question?: string; options: PollOption[] }>;
+  /**
+   * P1's style question ("Sit-down or fast food?", keys sit_down / fast_food). Asked before the
+   * cuisine poll; ignored when `polls` is given.
+   */
+  stylePoll?: { pollId: string; question?: string; options: PollOption[] } | null;
   headcount: {
     closesAt: IsoDateTime;
     timezone: string;
@@ -261,6 +266,12 @@ export class BundleStore {
   }
 }
 
+/** The questions to ask, in order: an explicit list, or style (if any) then cuisine (if any). */
+export function pollSequence(decision: QuestionDecision): PendingPoll[] {
+  if (decision.polls?.length) return decision.polls;
+  return [decision.stylePoll, decision.cuisinePoll].filter((p): p is PendingPoll => !!p);
+}
+
 /** "7:05" in the crew's timezone. */
 export function clockTime(iso: IsoDateTime, timezone: string): string {
   return new Intl.DateTimeFormat('en-US', {
@@ -297,6 +308,7 @@ export async function renderBundle(
 ): Promise<BundleResult> {
   const started = performance.now();
   const mode = options.mode ?? 'staged';
+  const sequence = pollSequence(decision);
 
   const headcount = await port.sendGroupText({
     chatId: decision.chatId,
@@ -308,15 +320,15 @@ export async function renderBundle(
     planId: decision.planId,
     chatId: decision.chatId,
     headcountMessageId: headcount.messageId,
-    pollId: (decision.polls?.[0] ?? decision.cuisinePoll)?.pollId ?? null,
+    pollId: sequence[0]?.pollId ?? null,
     organizerName: decision.organizerName,
     meal: decision.meal,
     closesAt: decision.headcount.closesAt,
-    pendingPolls: decision.polls ?? (decision.cuisinePoll ? [decision.cuisinePoll] : []),
+    pendingPolls: sequence,
     pageUrl: decision.pageUrl,
   });
   if (options.organizerUserId) store.markIn(decision.planId, options.organizerUserId, true);
-  for (const p of decision.polls ?? (decision.cuisinePoll ? [decision.cuisinePoll] : [])) {
+  for (const p of sequence) {
     store.registerPoll(p.pollId, decision.planId);
   }
 
@@ -359,7 +371,11 @@ async function sendPollAt(
     chatId: bundle.chatId,
     planId: bundle.planId,
     pollId: poll.pollId,
-    question: poll.question ?? 'What are we eating?',
+    question:
+      poll.question ??
+      (poll.options.some((o) => o.key === 'sit_down')
+        ? 'Sit-down or fast food?'
+        : 'What are we eating?'),
     options: poll.options,
     // The first poll keeps Phase 2's key, so a redeploy mid-plan does not resend it.
     idempotencyKey: index === 0 ? key(bundle.planId, 'poll') : key(bundle.planId, `poll${index}`),

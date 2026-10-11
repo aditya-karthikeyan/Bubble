@@ -261,4 +261,33 @@ describe('poll sequence', () => {
     await advancePolls(port, store, 'poll_cuisine');
     expect(polls).toEqual(['poll_style', 'poll_cuisine']);
   });
+
+  it("builds the sequence from P1's stylePoll then cuisinePoll", async () => {
+    const { pollSequence } = await import('./bundle.js');
+    const base = {
+      planId: PLAN,
+      chatId: CREW,
+      organizerName: 'Pranav',
+      meal: 'dinner' as const,
+      headcount: { closesAt: at, timezone: 'America/New_York' },
+      pageUrl: null,
+    };
+    const style = {
+      pollId: 'poll_style',
+      options: [
+        { key: 'sit_down', label: 'Sit-down' },
+        { key: 'fast_food', label: 'Fast food / takeout' },
+      ],
+    };
+    const cuisine = { pollId: 'poll_cuisine', options: [{ key: 'thai', label: 'Thai' }] };
+    expect(
+      pollSequence({ ...base, stylePoll: style, cuisinePoll: cuisine }).map((p) => p.pollId),
+    ).toEqual(['poll_style', 'poll_cuisine']);
+    expect(
+      pollSequence({ ...base, stylePoll: null, cuisinePoll: cuisine }).map((p) => p.pollId),
+    ).toEqual(['poll_cuisine']);
+    expect(
+      pollSequence({ ...base, stylePoll: style, cuisinePoll: null }).map((p) => p.pollId),
+    ).toEqual(['poll_style']);
+  });
 });
