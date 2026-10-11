@@ -5,6 +5,7 @@
  */
 import type { DoerKind } from '@bubbleworks/shared';
 import { DOER_KINDS, type Phase, type ViewModel } from './view-model';
+import { hashSeed, randomPoint, seededRandom } from './motion';
 
 export interface Size {
   w: number;
@@ -21,15 +22,26 @@ export interface Target extends Point {
   /** How far the node floats around its target, in px. */
   wander: number;
   opacity: number;
-  /** Booked: fly into this venue and get absorbed, in this order. */
-  absorb?: { venueId: string; order: number };
+  /** Fly into this node (`CREW` or `venueNode(id)`) and get absorbed, in this order. */
+  absorb?: { into: string; order: number };
+  /** Ruled out or finished: pop in place, after this many staggers. */
+  pop?: number;
 }
+
+/** Node ids the arena uses, so absorb targets can name them. */
+export const CREW = 'crew';
+export const venueNode = (venueId: string) => `v:${venueId}`;
 
 export interface Layout {
   venues: Record<string, Target & { leader: boolean; dim: boolean }>;
   bubbles: Record<string, Target>;
   /** Bubbles the consensus bubble wraps, and where it sits. */
   consensus: { members: string[]; at: Point; r: number; absorbing: boolean } | null;
+  /**
+   * Once the place is decided, everyone is absorbed into this one crew bubble, which carries
+   * their names (in absorb order). It is absorbed into the destination once booked.
+   */
+  crew: (Target & { members: string[] }) | null;
   doers: Partial<Record<DoerKind, Target>>;
   /** Where doers are born when they split off: the consensus centre. */
   doerOrigin: Point | null;
@@ -39,6 +51,15 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 /** Radii scale with the screen, within readable bounds. */
 export function sizes(size: Size) {
+  if (floatingWindows(size)) {
+    // Desktop: the windows float over the arena, so the bubbles get the whole screen.
+    const m = Math.min(size.w * 0.62, size.h);
+    return {
+      bubble: clamp(m / 15, 30, 64),
+      venue: clamp(m / 14, 32, 70),
+      doer: clamp(m / 14, 36, 66),
+    };
+  }
   const m = Math.min(size.w, size.h * 0.7);
   return {
     bubble: clamp(m / 13, 24, 40),
@@ -47,42 +68,87 @@ export function sizes(size: Size) {
   };
 }
 
-/** Space the overlay text leaves free. */
-function safeArea(size: Size, sheet: boolean) {
-  const top = 112;
-  const bottom = sheet ? 170 : 40;
-  return { top, bottom: size.h - bottom, height: size.h - bottom - top };
+/** A landscape phone: the windows stack in a column on the left instead (see globals.css). */
+export const sideWindows = (size: Size) => size.h <= 500 && size.w >= 640;
+/** Desktop: windows pop up anywhere and can be dragged; phones keep them docked. */
+export const floatingWindows = (size: Size) => size.w > 760 && size.h > 500;
+
+/**
+ * Space the window chrome leaves free: the plan window on top, the taskbar below, and the
+ * booking dialog above the taskbar once the plan settles. Below 760px tall (a phone with its
+ * browser toolbars showing, a short laptop) the windows go compact; see globals.css.
+ */
+export function safeArea(size: Size, sheet: boolean) {
+  if (floatingWindows(size)) {
+    const bottom = size.h - 58;
+    return { left: 0, right: size.w, width: size.w, top: 16, bottom, height: bottom - 16 };
+  }
+  if (sideWindows(size)) {
+    const left = 320;
+    const bottom = size.h - 58;
+    return { left, right: size.w, width: size.w - left, top: 12, bottom, height: bottom - 12 };
+  }
+  const short = size.h < 760;
+  const top = short ? (size.w <= 760 ? 164 : 150) : size.w <= 760 ? 204 : 196;
+  const bottom = size.h - (sheet ? (short ? 186 : 250) : 64);
+  return { left: 0, right: size.w, width: size.w, top, bottom, height: bottom - top };
 }
 
-/** Deterministic, organic-looking spread over a region (golden-angle spiral). */
-function spiral(i: number, n: number, c: Point, rx: number, ry: number): Point {
-  const golden = Math.PI * (3 - Math.sqrt(5));
-  const t = Math.sqrt((i + 0.5) / Math.max(n, 1));
-  return { x: c.x + Math.cos(i * golden) * rx * t, y: c.y + Math.sin(i * golden) * ry * t };
-}
+/** How far each free bubble leans toward the rest of the crew. */
+const COHESION = 0.4;
 
-export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
+/** The doer ring around the hub: fixed angles and distances, so the group reads the same each time. */
+const TILT = [-0.22, 0.15, -0.1, 0.18];
+const SPREAD = [1, 1.08, 0.96, 1.04];
+const ringAngle = (i: number) => -Math.PI / 3 + (i * Math.PI) / 2 + TILT[i]!;
+
+/** Random arrangements remain stable within a replay, even when members join or leave. */
+export function computeLayout(vm: ViewModel, phase: Phase, size: Size, seed = 0): Layout {
+  const point = (id: string, c: Point, rx: number, ry: number) =>
+    randomPoint(
+      { left: c.x - rx, right: c.x + rx, top: c.y - ry, bottom: c.y + ry },
+      seededRandom(hashSeed(id, seed)),
+    );
   const s = sizes(size);
   const complete = phase === 'complete';
   const booked = phase === 'summary' || complete;
   const settled = phase === 'locked' || booked;
   const area = safeArea(size, settled || phase === 'closed');
-  const span = Math.min(size.w * 0.84, 960);
-  const left = (size.w - span) / 2;
-  const centre: Point = { x: size.w / 2, y: area.top + area.height * (settled ? 0.58 : 0.6) };
+  const span = area.width * (floatingWindows(size) ? 0.8 : 0.84);
+  const cx = area.left + area.width / 2;
 
-  // Venues float across the top band in two staggered rows.
+  // Settled: a hub (the crew, then the destination once booked) with the doers in a ring around
+  // it. On short screens the whole group shrinks to fit between the windows.
+  const squash = 0.85;
+  const people = vm.bubbles.filter((b) => b.present).length;
+  const crewFull = clamp(s.bubble * (1.25 + 0.22 * people), s.bubble * 1.5, s.bubble * 2.6);
+  const hubFull = complete ? s.venue * 2.4 : booked ? s.venue * 1.7 : crewFull;
+  const reachFull = (booked ? s.venue * 1.7 : crewFull) + s.doer * 1.65;
+  const groupTop = settled && !booked ? area.top + s.venue * 3.2 : area.top;
+  const room = area.bottom - groupTop;
+  const ringExtent = (sign: number) =>
+    Math.max(...DOER_KINDS.map((_, i) => sign * Math.sin(ringAngle(i)) * SPREAD[i]! * squash));
+  const above = Math.max(hubFull, ringExtent(-1) * reachFull + s.doer * 1.1);
+  const below = Math.max(hubFull * (booked ? 2 : 1.4), ringExtent(1) * reachFull + s.doer * 1.6);
+  const fitK = settled ? clamp(room / (above + below), 0.55, 1) : 1;
+  const centre: Point = settled
+    ? { x: cx, y: groupTop + above * fitK + Math.max(0, room - (above + below) * fitK) / 2 }
+    : { x: cx, y: area.top + area.height * 0.6 };
+
+  // No rows or fixed slots: each venue has its own random anchor in the upper arena.
   const live = vm.venues;
   const leaderId = vm.locked?.venue.venueId ?? vm.merged?.venueId ?? vm.leaderVenueId;
   const slot: Record<string, Point> = {};
-  live.forEach((v, i) => {
-    const n = live.length;
-    slot[v.venueId] = {
-      x: n === 1 ? size.w / 2 : left + s.venue + (i * (span - 2 * s.venue)) / (n - 1),
-      y: area.top + s.venue + (i % 2 === 0 ? 0 : s.venue * 2.9),
-    };
+  live.forEach((v) => {
+    slot[v.venueId] = point(
+      `venue:${v.venueId}`,
+      { x: cx, y: area.top + s.venue * 3.1 },
+      Math.max(0, span / 2 - s.venue * 1.5),
+      s.venue * 1.15,
+    );
   });
   const venues: Layout['venues'] = {};
+  let popped = 0;
   for (const v of live) {
     const chosen = v.venueId === leaderId;
     const gone = v.eliminated || (settled && !chosen);
@@ -91,23 +157,23 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
       booked && chosen
         ? { ...centre }
         : settled && chosen
-          ? { x: size.w / 2, y: area.top + s.venue * 1.1 }
+          ? { x: cx, y: area.top + s.venue * 1.1 }
           : slot[v.venueId]!;
     venues[v.venueId] = {
       ...at,
-      y: gone ? -s.venue * 3 : at.y,
       r:
         complete && chosen
-          ? s.venue * 2.4
+          ? s.venue * 2.4 * fitK
           : booked && chosen
-            ? s.venue * 1.7
+            ? s.venue * 1.7 * fitK
             : chosen && (vm.merged || settled)
               ? s.venue * 1.25
               : s.venue,
-      wander: gone ? 0 : settled ? s.venue * 0.15 : s.venue * 0.35,
+      wander: gone ? 0 : settled ? s.venue * 0.15 : s.venue * 0.9,
       opacity: gone ? 0 : 1,
       leader: chosen,
       dim: gone,
+      ...(gone ? { pop: popped++ } : {}),
     };
   }
 
@@ -125,24 +191,30 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
   const consensusR = merged.length ? inside * (1.25 + Math.sqrt(merged.length) * 1.05) : 0;
   if (clusterAt) {
     // Keep the whole consensus bubble on screen, even under an edge venue.
-    clusterAt.x = clamp(clusterAt.x, consensusR + 8, size.w - consensusR - 8);
+    clusterAt.x = clamp(clusterAt.x, area.left + consensusR + 8, area.right - consensusR - 8);
   }
 
   const bubbles: Layout['bubbles'] = {};
-  const roam = { x: size.w * 0.36, y: area.height * 0.3 };
-  present.forEach((id, i) => {
-    const home = spiral(i, present.length, centre, roam.x, roam.y);
+  const free: string[] = [];
+  const roam = { x: area.width * 0.36, y: area.height * 0.3 };
+  present.forEach((id) => {
+    const home = point(id, centre, roam.x, roam.y);
     const k = merged.indexOf(id);
     if (k >= 0 && clusterAt) {
-      // Loose inside the consensus bubble: scattered starts, each drifting on its own orbit.
+      // Gather loosely: each person still chooses independent directions.
       const room = Math.max(0, consensusR - inside * 1.6);
-      const at = spiral(k, merged.length, clusterAt, room, room);
+      const angle = seededRandom(hashSeed(`angle:${id}`, seed))() * Math.PI * 2;
+      const radius = seededRandom(hashSeed(`radius:${id}`, seed))() * room;
+      const at = {
+        x: clusterAt.x + Math.cos(angle) * radius,
+        y: clusterAt.y + Math.sin(angle) * radius,
+      };
       bubbles[id] = {
         ...at,
         r: inside,
-        wander: booked ? 0 : room * 0.45,
+        wander: settled ? 0 : room * 0.45,
         opacity: 1,
-        ...(booked && leaderId ? { absorb: { venueId: leaderId, order: k } } : {}),
+        ...(settled ? { absorb: { into: CREW, order: k } } : {}),
       };
       return;
     }
@@ -172,12 +244,24 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
           ? s.bubble * 1.8
           : s.bubble * (pulled ? 0.7 : 1.4);
     bubbles[id] = { ...at, r: s.bubble, wander, opacity: 1 };
+    free.push(id);
   });
+  // Keep the crew a loose flock: each free bubble leans toward the others, so nobody's own
+  // favourite place strands them across the screen alone.
+  if (free.length > 1) {
+    const mx = free.reduce((t, id) => t + bubbles[id]!.x, 0) / free.length;
+    const my = free.reduce((t, id) => t + bubbles[id]!.y, 0) / free.length;
+    for (const id of free) {
+      const b = bubbles[id]!;
+      b.x += (mx - b.x) * COHESION;
+      b.y += (my - b.y) * COHESION;
+    }
+  }
   for (const b of vm.bubbles) {
     if (b.present) continue;
     // Out: float off the top and fade.
     bubbles[b.userId] = {
-      x: size.w / 2,
+      x: cx,
       y: -s.bubble * 4,
       r: s.bubble * 0.7,
       wander: 0,
@@ -187,38 +271,63 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
 
   const consensus =
     merged.length >= 2 && clusterAt
-      ? { members: merged, at: clusterAt, r: consensusR, absorbing: booked }
+      ? { members: merged, at: clusterAt, r: consensusR, absorbing: settled }
+      : null;
+
+  const crewR = crewFull * fitK;
+  const crew: Layout['crew'] =
+    settled && merged.length > 0
+      ? {
+          ...centre,
+          r: crewR,
+          wander: booked ? 0 : s.bubble * 0.5,
+          opacity: 1,
+          members: merged,
+          ...(booked && leaderId ? { absorb: { into: venueNode(leaderId), order: 0 } } : {}),
+        }
       : null;
 
   const doers: Layout['doers'] = {};
   if (settled) {
-    // Floating freely around the consensus bubble (locked) or the destination (booked): uneven
-    // angles and distances plus a wide orbit, so they never line up into a shape.
-    const ring = booked ? s.venue * 1.7 + s.doer * 2.1 : consensusR + s.doer * 1.9;
-    const tilt = [-0.35, 0.22, -0.12, 0.3];
-    const reach = [1.0, 1.22, 1.08, 1.3];
+    // A recognizable, loose helper group around the plan; positions do not randomize.
+    const reach = reachFull * fitK;
     DOER_KINDS.forEach((kind, i) => {
-      const a = -Math.PI / 3 + (i * Math.PI) / 2 + tilt[i]!;
+      const angle = ringAngle(i);
+      const at = {
+        x: centre.x + Math.cos(angle) * reach * SPREAD[i]!,
+        y: centre.y + Math.sin(angle) * reach * SPREAD[i]! * squash,
+      };
+      // A helper that finishes pops; whoever is still at it once the plan completes (the
+      // Watcher) goes into the destination with everything else.
+      const done = vm.doers[kind]?.state === 'done';
       doers[kind] = {
-        x: centre.x + Math.cos(a) * ring * reach[i]! * 1.15,
-        y: centre.y + Math.sin(a) * ring * reach[i]! * 0.9,
-        r: s.doer,
-        wander: complete ? 0 : s.doer * 0.75,
-        opacity: 1,
-        ...(complete && leaderId ? { absorb: { venueId: leaderId, order: i } } : {}),
+        ...at,
+        r: s.doer * fitK,
+        wander: complete ? 0 : s.doer * 0.12,
+        opacity: done ? 0 : 1,
+        ...(done
+          ? { pop: 0 }
+          : complete && leaderId
+            ? { absorb: { into: venueNode(leaderId), order: i } }
+            : {}),
       };
     });
   }
 
-  // Nothing visible ever targets past the screen edge.
+  // Nothing visible ever targets past the edge of the arena.
   const fit = (t: Target) => {
     if (t.opacity === 0) return;
     const m = t.r + t.wander + 4;
-    t.wander = Math.min(t.wander, Math.max(0, size.w / 2 - t.r - 8));
-    t.x = clamp(t.x, Math.min(m, size.w / 2), Math.max(size.w - m, size.w / 2));
+    t.wander = Math.min(t.wander, Math.max(0, area.width / 2 - t.r - 8));
+    t.x = clamp(t.x, Math.min(area.left + m, cx), Math.max(area.right - m, cx));
     t.y = clamp(t.y, t.r + 4, size.h - t.r - 4);
   };
-  [...Object.values(venues), ...Object.values(bubbles), ...Object.values(doers)].forEach(fit);
+  [
+    ...Object.values(venues),
+    ...Object.values(bubbles),
+    ...Object.values(doers),
+    ...(crew ? [crew] : []),
+  ].forEach(fit);
 
-  return { venues, bubbles, consensus, doers, doerOrigin: settled ? centre : null };
+  return { venues, bubbles, consensus, crew, doers, doerOrigin: settled ? centre : null };
 }

@@ -118,8 +118,8 @@ export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName
 
   if (state.kind === 'joined') {
     return (
-      <div className="glass" aria-live="polite">
-        <h2 style={{ margin: '0 0 4px', fontSize: 22 }}>You&apos;re in {state.crewName}</h2>
+      <div className="signup-success" aria-live="polite">
+        <h2 className="instruction">You&apos;re in {state.crewName}</h2>
         <p className="lede">
           Your bubble is texting you now. Anyone in the crew can text it &ldquo;dinner
           tonight?&rdquo; to start a plan.
@@ -130,8 +130,8 @@ export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName
 
   if (state.kind === 'done') {
     return (
-      <div className="glass" aria-live="polite">
-        <h2 style={{ margin: '0 0 4px', fontSize: 22 }}>
+      <div className="signup-success" aria-live="polite">
+        <h2 className="instruction">
           {state.crewName ? `You're in ${state.crewName}` : 'Your bubble is ready'}
         </h2>
         {state.bubbleNumber ? (
@@ -146,7 +146,7 @@ export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName
                 <p className="fine" style={{ textAlign: 'center' }}>
                   If nothing arrives in a minute, text your bubble.
                 </p>
-                <a className="button button-glass" href={state.smsLink}>
+                <a className="win-button wide" href={state.smsLink}>
                   Text your bubble
                 </a>
                 <p className="fine" style={{ textAlign: 'center' }}>
@@ -180,7 +180,7 @@ export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName
 
   if (crewCode && quick) {
     return (
-      <form className="glass" onSubmit={quickJoin} noValidate>
+      <form className="signup-form" onSubmit={quickJoin} noValidate>
         <label htmlFor="quick-phone">Your iPhone number</label>
         <input
           id="quick-phone"
@@ -196,7 +196,7 @@ export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName
           {state.kind === 'sending' ? 'Joining...' : `Join ${crewName ?? 'the crew'}`}
         </button>
         <button
-          className="button button-glass"
+          className="win-button wide"
           type="button"
           onClick={() => {
             setQuick(false);
@@ -210,18 +210,18 @@ export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName
   }
 
   return (
-    <form className="glass" onSubmit={submit} noValidate>
+    <form className="signup-form" onSubmit={submit} noValidate>
       <ol className="steps">
         <li>Sign up and get your own bubble number.</li>
         <li>Your bubble texts you. It learns what you eat, spend, and like.</li>
         <li>Tell it who your crew is. Then just text &ldquo;dinner tonight?&rdquo;</li>
       </ol>
-      <label htmlFor="name">Name</label>
+      <label htmlFor="name">Your name</label>
       <input
         id="name"
         name="name"
         autoComplete="name"
-        placeholder="Ava Chen"
+        placeholder="What should we call you?"
         maxLength={80}
         required
       />
@@ -231,7 +231,7 @@ export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName
         name="email"
         type="email"
         autoComplete="email"
-        placeholder="ava@example.com"
+        placeholder="you@example.com"
         required
       />
       <label htmlFor="phone">iPhone number</label>
@@ -247,11 +247,12 @@ export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName
       />
       {error}
       <button className="button" type="submit" disabled={state.kind === 'sending'}>
-        {state.kind === 'sending' ? 'Making your bubble...' : 'Get your bubble'}
+        {state.kind === 'sending' ? 'Making your bubble...' : 'Bring my bubble to life'}{' '}
+        <span aria-hidden="true">↗</span>
       </button>
       {crewCode && (
         <button
-          className="button button-glass"
+          className="win-button wide"
           type="button"
           onClick={() => {
             setQuick(true);
@@ -261,11 +262,14 @@ export function SignupForm({ crewCode, crewName }: { crewCode?: string; crewName
           Already have a bubble? Just your number
         </button>
       )}
-      <p className="fine">
-        Bubbleworks works over iMessage. Your details stay with your bubble: nobody in your crew
-        sees your budget, diet, or location. Text &ldquo;forget me&rdquo; any time to delete
-        everything.
-      </p>
+      <div className="privacy-note">
+        <span aria-hidden="true">♧</span>
+        <p>
+          Bubbleworks works over iMessage. Your details stay with your bubble: nobody in your crew
+          sees your budget, diet, or location. Text &ldquo;forget me&rdquo; any time to delete
+          everything.
+        </p>
+      </div>
     </form>
   );
 }

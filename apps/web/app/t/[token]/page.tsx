@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { AeroIcon, AeroWindow, Desktop, TaskButton, Taskbar } from '../../aero';
 import { SERVER_URL } from '../../site';
 
 export const dynamic = 'force-dynamic';
@@ -45,14 +46,29 @@ export async function generateMetadata({
 export default async function TicketPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const ticket = await loadTicket(token);
+  const title = ticket ? `Booked ✓ · ${ticket.venueName}` : 'Ticket not found';
   return (
-    <main className="sky ticket-sky">
-      <div className="bokeh" aria-hidden>
-        {Array.from({ length: 9 }, (_, i) => (
-          <span key={i} />
-        ))}
-      </div>
-      <div className="wrap">{ticket ? <Booked t={ticket} /> : <NotFound />}</div>
+    <main className="sky poster">
+      <Desktop />
+      <AeroWindow
+        className="poster-window ticket-window"
+        title={title}
+        labelledBy="ticket-heading"
+        id="ticket"
+        windowId="ticket"
+        closeHref="/"
+      >
+        {ticket ? <Booked t={ticket} /> : <NotFound />}
+      </AeroWindow>
+      <Taskbar>
+        <TaskButton windowId="ticket" href="#ticket" className="active">
+          <span className="task-check" aria-hidden="true">
+            ✓
+          </span>
+          <span className="task-long">{ticket ? ticket.venueName : 'Ticket'}</span>
+          <span className="task-short">Ticket</span>
+        </TaskButton>
+      </Taskbar>
     </main>
   );
 }
@@ -60,19 +76,21 @@ export default async function TicketPage({ params }: { params: Promise<{ token: 
 function Booked({ t }: { t: Ticket }) {
   return (
     <>
-      <header className="hero">
-        <div className="orb" aria-hidden />
-        <p className="ticket-pill">Booked ✓</p>
-        <h1>{t.venueName}</h1>
-        {t.address ? <p className="lede">{t.address}</p> : null}
-      </header>
-
-      <section className="glass ticket">
+      <div className="dialog-main">
+        <AeroIcon kind="ok">✓</AeroIcon>
+        <div>
+          <h1 className="instruction" id="ticket-heading">
+            {t.venueName}
+          </h1>
+          {t.address ? <p>{t.address}</p> : null}
+        </div>
+      </div>
+      <div className="ticket">
         <div className="ticket-when">
           <span className="ticket-time">{t.timeText}</span>
           <span className="ticket-party">Table for {t.partySize}</span>
         </div>
-        <div className="ticket-tear" aria-hidden />
+        <div className="ticket-tear" aria-hidden="true" />
         <dl className="ticket-rows">
           <div>
             <dt>Name</dt>
@@ -82,6 +100,12 @@ function Booked({ t }: { t: Ticket }) {
             <div>
               <dt>Confirmation</dt>
               <dd>{t.confirmationCode}</dd>
+            </div>
+          ) : null}
+          {t.backupName ? (
+            <div>
+              <dt>Backup spot</dt>
+              <dd>{t.backupName}</dd>
             </div>
           ) : null}
         </dl>
@@ -95,29 +119,42 @@ function Booked({ t }: { t: Ticket }) {
             </ul>
           </>
         ) : null}
-      </section>
-
-      <a className="button" href={t.mapsUrl}>
-        Open in Maps
-      </a>
-      <a className="button button-glass" href={t.icsUrl}>
-        Add to calendar
-      </a>
-      {t.backupName ? <p className="fine ticket-center">Backup spot: {t.backupName}</p> : null}
-      <p className="fine ticket-center">Booked by your bubbles.</p>
+      </div>
+      <div className="command-bar ticket-actions">
+        <a className="win-button" href={t.icsUrl}>
+          Add to calendar
+        </a>
+        <a className="button" href={t.mapsUrl}>
+          Open in Maps
+        </a>
+      </div>
+      <div className="status-bar">
+        <span>Booked by your bubbles.</span>
+      </div>
     </>
   );
 }
 
 function NotFound() {
   return (
-    <header className="hero">
-      <div className="orb" aria-hidden />
-      <h1>Ticket not found</h1>
-      <p className="lede">
-        That link doesn&apos;t match a booking anymore. The booked message in your chat has the
-        latest details.
-      </p>
-    </header>
+    <>
+      <div className="dialog-main">
+        <AeroIcon kind="warn">!</AeroIcon>
+        <div>
+          <h1 className="instruction" id="ticket-heading">
+            Ticket not found
+          </h1>
+          <p>
+            That link doesn&apos;t match a booking anymore. The booked message in your chat has the
+            latest details.
+          </p>
+        </div>
+      </div>
+      <div className="command-bar">
+        <a className="button" href="/">
+          Bubbleworks home
+        </a>
+      </div>
+    </>
   );
 }

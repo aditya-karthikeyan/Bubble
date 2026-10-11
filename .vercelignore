@@ -1,0 +1,9 @@
+# Keep secrets and local state out of Vercel uploads.
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+node_modules
+.next
