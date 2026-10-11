@@ -28,8 +28,12 @@
     "p2:e2e-seed": "tsx --env-file-if-exists=../../.env scripts/p2-e2e-seed.ts",
     "p3:phase4": "tsx --env-file-if-exists=../../.env scripts/p3/phase4.ts",
     "demo:reset": "tsx --env-file-if-exists=../../.env scripts/demo-reset.ts",
-    "p2:phase3": "tsx --env-file-if-exists=../../.env scripts/p2-phase3.ts",
-    "p3:smoke": "tsx --env-file-if-exists=../../.env scripts/p3/smoke.ts"
+    "p3:smoke": "tsx --env-file-if-exists=../../.env scripts/p3/smoke.ts",
+    "p4:agent": "tsx --env-file-if-exists=../../.env scripts/voice/agent.ts",
+    "p4:number": "tsx --env-file-if-exists=../../.env scripts/voice/number.ts",
+    "p4:testcall": "tsx --env-file-if-exists=../../.env scripts/voice/testcall.ts",
+    "p4:phase0": "tsx --env-file-if-exists=../../.env scripts/voice/phase0.ts",
+    "p4:calltest": "tsx --env-file-if-exists=../../.env scripts/voice/calltest.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
