@@ -57,4 +57,11 @@ export class FakeTransport implements Transport {
   sends(): Array<Extract<TransportCall, { op: 'send' }>> {
     return this.calls.filter((c): c is Extract<TransportCall, { op: 'send' }> => c.op === 'send');
   }
+
+  /** Mini App cards sent, in order (OutContent kind 'mini_app'). */
+  cards(): Array<{ chatId: string; card: Extract<OutContent, { kind: 'mini_app' }> }> {
+    return this.sends().flatMap((c) =>
+      c.content.kind === 'mini_app' ? [{ chatId: c.chatId, card: c.content }] : [],
+    );
+  }
 }

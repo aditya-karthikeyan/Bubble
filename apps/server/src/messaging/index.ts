@@ -6,7 +6,7 @@
  *   SPECTRUM_PROVIDER=imessage   the real Photon line: post a LINE LOCK first
  *
  * Server wiring (P1):
- *   const messaging = createMessaging({ config: loadMessagingConfig(), runtime });
+ *   const messaging = createMessaging({ config: loadMessagingConfig(), runtime, links });
  *   const intake = messaging.attachEngine(engine);   // engine: PlanEngine
  *   await messaging.start();
  *   // question policy: await intake.renderBundle(decision)
@@ -55,6 +55,11 @@ export interface Messaging {
 export interface CreateMessagingOptions {
   config: MessagingConfig;
   runtime: Pick<Runtime, 'handle' | 'crews' | 'plans' | 'log' | 'bus' | 'venues'>;
+  /**
+   * Server base URL and HMAC key for the booked ticket link (/t/<token>), the same pair the doers
+   * sign .ics links with. The server passes them; scripts fall back to the same env lookup.
+   */
+  links?: { publicBaseUrl: string; linkSecret: string };
   /** Test and sim override. */
   transport?: Transport;
   /** Test override; defaults to Haiku when ANTHROPIC_API_KEY is set. */
@@ -120,6 +125,11 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
     plans: runtime.plans,
     venues: () => runtime.venues(),
     crews: runtime.crews,
+    ticketLinks: options.links ?? {
+      publicBaseUrl: process.env['SERVER_PUBLIC_URL'] || 'http://localhost:3001',
+      linkSecret:
+        process.env['GOOGLE_CLIENT_SECRET'] || process.env['SPECTRUM_PROJECT_SECRET'] || 'dev-only',
+    },
     log,
   });
 

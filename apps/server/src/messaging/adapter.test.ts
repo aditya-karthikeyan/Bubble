@@ -279,6 +279,33 @@ describe('outbound', () => {
     expect(transport.sends().map((s) => s.chatId)).toEqual([`any;-;${BEN.handle}`]);
   });
 
+  it('sends a Mini App card to every member, once per key', async () => {
+    const { transport, messaging } = await setup();
+    const card = {
+      chatId: CREW,
+      url: 'https://api.example/t/tok',
+      caption: 'Booked ✅',
+      subcaption: 'Thai Basil',
+      summary: 'Booked ✅ Thai Basil, 7:30 PM, table for 2',
+      image: Buffer.from('jpg'),
+      idempotencyKey: 'plan_1:ticket',
+    };
+    const first = await messaging.sendMiniApp(card);
+    const again = await messaging.sendMiniApp(card);
+    expect(first).toEqual({ messageId: 'grp:plan_1:ticket', deduplicated: false });
+    expect(again.deduplicated).toBe(true);
+    const cards = transport.cards();
+    expect(cards.map((c) => c.chatId)).toEqual(PERSONAS.map((p) => `any;-;${p.handle}`));
+    expect(cards[0]!.card).toMatchObject({
+      kind: 'mini_app',
+      url: 'https://api.example/t/tok',
+      caption: 'Booked ✅',
+      subcaption: 'Thai Basil',
+    });
+    expect(cards[0]!.card).not.toHaveProperty('chatId');
+    expect(cards[0]!.card).not.toHaveProperty('idempotencyKey');
+  });
+
   it('makes rename and background no-ops', async () => {
     const { transport, messaging } = await setup();
     await messaging.renameGroup({ chatId: CREW, name: 'x' });
