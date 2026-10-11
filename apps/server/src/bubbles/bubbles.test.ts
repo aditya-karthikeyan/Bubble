@@ -239,6 +239,73 @@ describe('DbBubbleService', () => {
     });
   });
 
+  describe('fixing an onboarding answer', () => {
+    const diets = async (id: string) =>
+      (await bubbles.getHardLimits(id)).filter((f) => f.type === 'diet').map((f) => f.value);
+
+    it('"I messed up" at 2/5 re-asks 1/5, swaps the answer, and picks up at 2/5', async () => {
+      const vic = await newUser('Vic', '+19195550147');
+      await dm(vic, 'hi');
+      await dm(vic, 'vegetarian'); // meant vegan
+      expect(lastTo(vic.id)).toMatch(/2\/5/);
+      await dm(vic, 'wait i messed up');
+      expect(lastTo(vic.id)).toMatch(
+        /^No problem, let's redo that one\.\n\nAnything you don't eat/,
+      );
+      await dm(vic, 'vegan');
+      const [updated, next] = textsTo(vic.id).slice(-2);
+      expect(updated).toBe('Updated: you eat vegan.');
+      expect(next).toMatch(/^2\/5/);
+      expect(await diets(vic.id)).toEqual(['vegan']);
+      await dm(vic, '30');
+      expect(lastTo(vic.id)).toMatch(/^3\/5/);
+    });
+
+    it('"oops I meant ..." redoes the last answer in one message', async () => {
+      const wen = await newUser('Wen', '+19195550148');
+      await dm(wen, 'hi');
+      await dm(wen, 'vegetarian');
+      await dm(wen, 'oops I meant pescatarian');
+      expect(textsTo(wen.id).at(-2)).toBe('Updated: you eat pescatarian.');
+      expect(lastTo(wen.id)).toMatch(/^2\/5/);
+      expect(await diets(wen.id)).toEqual(['pescatarian']);
+    });
+
+    it('an edited message replaces the answer it gave', async () => {
+      const xan = await newUser('Xan', '+19195550149');
+      await dm(xan, 'hi');
+      await dm(xan, 'vegetarian', 'orig-1');
+      await dm(xan, '25');
+      expect(lastTo(xan.id)).toMatch(/^3\/5/);
+      expect(
+        await bubbles.onPrivateMessage({
+          messageId: 'orig-1:edit:1',
+          userId: xan.id,
+          text: 'vegan, allergic to peanuts',
+          at: clock.toISOString(),
+          editOf: 'orig-1',
+        }),
+      ).toEqual({ handled: true });
+      expect(textsTo(xan.id).at(-2)).toMatch(/^Saw your edit\. Updated: you eat vegan/);
+      expect(lastTo(xan.id)).toMatch(/you're allergic to peanut\? \(yes\/no\)/);
+      await dm(xan, 'yes');
+      expect(lastTo(xan.id)).toMatch(/^3\/5/); // still where they were
+      expect(await diets(xan.id)).toEqual(['vegan']);
+    });
+
+    it('"change my budget" works after onboarding too', async () => {
+      const yve = await newUser('Yve', '+19195550150');
+      await onboard(yve, ['none', '25']);
+      await dm(yve, 'change my budget');
+      expect(lastTo(yve.id)).toMatch(/Usual budget per person/);
+      await dm(yve, 'forty');
+      expect(lastTo(yve.id)).toBe('Just a number works, like 25. Or say skip.');
+      await dm(yve, '40');
+      expect(lastTo(yve.id)).toBe('Updated: your budget is up to $40 a person.');
+      expect(bubbles.facts.current(yve.id, 'budget_max')?.value).toBe('40');
+    });
+  });
+
   describe('no pork / no beef (P2 real-phone run)', () => {
     it('"no pork or beef" at the diet question saves two hard, confirmed facts', async () => {
       const raj = await newUser('Raj', '+19195550143');

@@ -1,0 +1,1 @@
+ALTER TABLE `bubble_state` ADD `answers` text;
