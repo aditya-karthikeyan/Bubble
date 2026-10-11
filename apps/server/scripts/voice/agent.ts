@@ -5,7 +5,7 @@
 import { z } from 'zod';
 import { elevenlabs, env, setEnv } from './lib.js';
 
-const PROMPT = `You are an AI assistant phoning a restaurant to book a table on behalf of a guest.
+const PROMPT = `You're phoning a restaurant to book a table for a guest. Sound like a friendly, relaxed person on the phone: casual words, contractions, no scripts or lists.
 
 Booking details:
 - Restaurant: {{venue_name}}
@@ -14,9 +14,10 @@ Booking details:
 - Acceptable window: {{window_start}} to {{window_end}}
 - Name for the reservation: {{booking_name}}
 - Callback number: {{callback_number}}
+- Table notes: {{table_notes}}
 
 Rules:
-1. You already said you are an AI assistant. If asked again, confirm it plainly.
+1. If anyone asks whether you're a person or a bot, say plainly that you're an AI assistant booking for {{booking_name}}. Never claim to be human.
 2. If they don't take reservations, ask how long the walk-in wait usually is for {{party_size}} around {{preferred_time}}, thank them, and end the call. Record booked as false, failure_reason as other, and put "walk-in only" plus the wait in notes.
 3. If they do, ask for the preferred time first. Accept any time inside the window. Never accept a time outside it.
 4. If they are full, ask whether a waitlist exists or any time inside the window opens up.
@@ -24,8 +25,10 @@ Rules:
 6. Use the keypad tool to get through phone menus when one answers.
 7. If you reach voicemail, hang up without leaving a message.
 8. Wait on hold at most two minutes, then end the call.
-9. Confirm back the time, party size, and name before ending. Keep every turn short and natural.
-10. Never share anything about the guests beyond the booking details above.`;
+9. Once the time is agreed, if the table notes are not "none", mention them once, as notes for the table.
+10. Confirm back the time, party size, and name before ending.
+11. One short sentence per turn, one question at a time. Phone lines lag, so after "yeah" or "mm-hmm" carry on from where you were instead of starting over.
+12. Never share anything about the guests beyond the booking details above.`;
 
 function systemTool(name: string) {
   return { type: 'system', name, description: '', params: { system_tool_type: name } };
@@ -35,8 +38,8 @@ const body = {
   name: 'Bubbleworks Caller',
   conversation_config: {
     agent: {
-      first_message:
-        'Hi, this is an AI assistant calling for {{booking_name}}. Do you take reservations?',
+      // Each call path sends its own opener: real bookings disclose, test-number calls don't.
+      first_message: '{{opener}}',
       language: 'en',
       dynamic_variables: {
         dynamic_variable_placeholders: {
@@ -47,6 +50,8 @@ const body = {
           window_end: '8:00 PM',
           booking_name: 'Mahil',
           callback_number: '+15555550100',
+          table_notes: 'none',
+          opener: 'Hi, this is an AI assistant calling for Mahil. Do you take reservations?',
         },
       },
       prompt: {
@@ -62,6 +67,8 @@ const body = {
     },
     // English agents must use flash v2 or turbo; v2.5 is rejected.
     tts: { model_id: 'eleven_flash_v2' },
+    // Patient turn-taking: short acknowledgements on a phone line shouldn't cut the agent off.
+    turn: { turn_eagerness: 'patient' },
   },
   platform_settings: {
     data_collection: {
@@ -82,7 +89,8 @@ const body = {
       },
       needs_human: {
         type: 'boolean',
-        description: 'True if a person must follow up, such as a deposit or card being required.',
+        description:
+          'True only if the restaurant requires a deposit or card, or asks to speak with the guest directly. False for confusion, a bad line, or a plain no.',
       },
       failure_reason: {
         type: 'string',
