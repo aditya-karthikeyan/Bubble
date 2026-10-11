@@ -700,4 +700,83 @@ describe('BubbleworksEngine', () => {
     expect(h.rt.plans.get(planId!)?.state).toBe('CLOSED');
     expect(h.events.some((e) => e.type === 'plan_closed' && e.reason === 'too_few')).toBe(true);
   });
+
+  describe('a far-away live location', () => {
+    it('plans from the group area instead of sinking the plan on distance', async () => {
+      // Chloe's last fix is in Durham, farther than any venue can be stretched to.
+      h.bubbles.setLocation('user_chloe', { lat: 35.994, lng: -78.8986 });
+      const { planId } = await h.engine.handleIntent({
+        chatId: CHAT,
+        userId: 'user_ava',
+        messageId: 'm1',
+        text: 'dinner tonight?',
+        at: h.at(),
+      });
+      for (const u of ['user_ben', 'user_chloe', 'user_dev'])
+        await h.engine.handleHeadcount({ planId: planId!, userId: u, in: true, at: h.at() });
+      await h.engine.handleHeadcount({
+        planId: planId!,
+        userId: 'user_eli',
+        in: false,
+        at: h.at(),
+      });
+      for (const sent of h.messaging.sent.filter((x) => x.kind === 'poll')) {
+        if (!('input' in sent)) continue;
+        for (const u of ['user_ava', 'user_ben', 'user_chloe', 'user_dev']) {
+          await h.engine.handleVote({
+            planId: planId!,
+            pollId: sent.input.pollId,
+            userId: u,
+            choices: [sent.input.options[0]!.key],
+            at: h.at(),
+          });
+        }
+      }
+      if (h.rt.plans.get(planId!)?.state === 'GATHERING') await h.advance(DEADLINES.poll_ms + 1);
+      expect(h.rt.plans.get(planId!)?.state).toBe('LOCKED');
+    });
+  });
+
+  describe('a named cuisine with nothing in range', () => {
+    it('still lets the breaker ask the one person who can give', async () => {
+      // Chloe at $10 blocks every venue, and the message names Thai, which no venue serves.
+      h.caller.dispose();
+      h.rt.close();
+      h = harness({
+        bubbles: new FakeBubbles(
+          undefined,
+          PERSONA_FACTS.map((f) =>
+            f.id === 'fact_chloe_budget'
+              ? { ...f, value: '10' }
+              : f.id === 'fact_ava_budget'
+                ? { ...f, value: '25' }
+                : f,
+          ),
+        ),
+      });
+      const { planId } = await h.engine.handleIntent({
+        chatId: CHAT,
+        userId: 'user_ava',
+        messageId: 'm1',
+        text: 'thai dinner?',
+        at: h.at(),
+      });
+      await h.engine.handleHeadcount({
+        planId: planId!,
+        userId: 'user_chloe',
+        in: true,
+        at: h.at(),
+      });
+      for (const u of ['user_ben', 'user_dev', 'user_eli'])
+        await h.engine.handleHeadcount({ planId: planId!, userId: u, in: false, at: h.at() });
+      if (h.rt.plans.get(planId!)?.state === 'GATHERING') await h.advance(DEADLINES.poll_ms + 1);
+      // The cuisine cannot be bought back with money, so the breaker looks past it and asks
+      // Chloe about her budget instead of closing the plan.
+      expect(h.rt.plans.get(planId!)?.state).toBe('DEADLOCK');
+      const asks = h.messaging.sent.filter((s) => s.kind === 'private_text');
+      expect(asks).toHaveLength(1);
+      expect('input' in asks[0]! ? asks[0]!.input.userId : '').toBe('user_chloe');
+      expect(h.rt.timers.pending(planId!).map((t) => t.kind)).toEqual(['ask_timeout']);
+    });
+  });
 });

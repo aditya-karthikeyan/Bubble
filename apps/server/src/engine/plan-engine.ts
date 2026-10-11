@@ -10,6 +10,7 @@
  *   no feasible venue -> DEADLOCK (Phase 3 breaker takes it from there)
  */
 import {
+  type GeoPoint,
   MIN_AGGREGATE_GROUP_SIZE,
   MIN_PARTY_SIZE,
   SOLVER,
@@ -48,8 +49,9 @@ import type { Runtime } from '../runtime.js';
 import { filterCandidates } from '../solver/filter.js';
 import { solve } from '../solver/rounds.js';
 import type { SolverContext, SolverMember } from '../solver/types.js';
+import { distanceM, walkMinutes } from '../venues/geo.js';
 import { dayOfWeek } from '../venues/hours.js';
-import { analyzeDeadlock, pickAsks } from './deadlock.js';
+import { MAX_DISTANCE_SLACK_MIN, analyzeDeadlock, pickAsks } from './deadlock.js';
 import { parseIntent } from './intent.js';
 import {
   cuisineSwitchAsk,
@@ -1148,9 +1150,26 @@ export class BubbleworksEngine implements PlanEngine {
       ctx,
       vetoedVenueIds: [...(this.vetoed.get(planId) ?? [])],
     });
+    const byReason: Record<string, number> = {};
+    const byMember: Record<string, Record<string, number>> = {};
+    for (const i of result.infeasible) {
+      byReason[i.reason] = (byReason[i.reason] ?? 0) + 1;
+      if (i.userId) {
+        const m = (byMember[i.userId] ??= {});
+        m[i.reason] = (m[i.reason] ?? 0) + 1;
+      }
+    }
     this.rt.plans.audit(planId, 'solver_run', {
       feasible: result.feasible.length,
       infeasible: result.infeasible.length,
+      byReason,
+      byMember,
+      ctx: {
+        startMinutes: ctx.startMinutes,
+        style: ctx.style ?? null,
+        cuisine: ctx.cuisine ?? null,
+        members: members.length,
+      },
       rounds: result.rounds.length,
       winner: result.winner?.id ?? null,
       backup: result.backup?.id ?? null,
@@ -1179,7 +1198,9 @@ export class BubbleworksEngine implements PlanEngine {
 
     if (!result.winner) {
       await this.rt.plans.transition(planId, 'DEADLOCK', { reason: 'no venue fits everyone' });
-      await this.breakDeadlock(planId, members, ctx);
+      // The voted cuisine was already handled above (voters asked, or nobody to ask). Budget and
+      // distance concessions cannot buy a cuisine back, so the breaker looks past it.
+      await this.breakDeadlock(planId, members, { ...ctx, cuisine: null });
       return;
     }
 
@@ -1609,7 +1630,11 @@ export class BubbleworksEngine implements PlanEngine {
         hardFacts: profile.facts.filter((f: Fact) => f.hard),
         softFacts: profile.facts.filter((f: Fact) => !f.hard),
         pollChoices: choices.get(userId) ?? [],
-        location: await this.deps.bubbles.getLocation(userId),
+        location: this.reachableLocation(
+          plan.id,
+          userId,
+          await this.deps.bubbles.getLocation(userId),
+        ),
         recentVenueIds: profile.recentVenueIds,
         recentCompromiseCount: profile.recentCompromiseCount,
         represented: represented.has(userId),
@@ -1618,6 +1643,27 @@ export class BubbleworksEngine implements PlanEngine {
       });
     }
     return out;
+  }
+
+  /**
+   * A live fix farther than every venue can be stretched to (a stale Find My point, someone still
+   * driving in) would sink the whole plan on distance. Plan from the group's area instead.
+   */
+  private reachableLocation(
+    planId: string,
+    userId: string,
+    location: GeoPoint | null,
+  ): GeoPoint | null {
+    if (!location) return null;
+    const venues = this.rt.venues();
+    if (venues.length === 0) return location;
+    const nearest = Math.min(...venues.map((v) => walkMinutes(distanceM(location, v.location))));
+    if (nearest <= SOLVER.travel_limit_min + MAX_DISTANCE_SLACK_MIN) return location;
+    this.log.info(
+      { planId, userId, nearestWalkMin: nearest },
+      'location out of reach of every venue, planning from the group area',
+    );
+    return null;
   }
 
   private ctx(plan: Plan, startMinutes: number): SolverContext {
@@ -1672,7 +1718,10 @@ export class BubbleworksEngine implements PlanEngine {
     if (filterCandidates(venues, members, ctx).feasible.length > 0) return false;
     const fallback = solve({ venues, members, ctx: { ...ctx, cuisine: null } }).winner;
     // Nothing fits even without the cuisine: the deadlock breaker takes it from here.
-    if (!fallback) return false;
+    if (!fallback) {
+      this.log.info({ planId: plan.id, cuisine }, 'nothing fits even without the voted cuisine');
+      return false;
+    }
 
     const label = cuisineLabel(cuisine);
     const spec = this.pollSpec(plan.id)?.cuisine;
