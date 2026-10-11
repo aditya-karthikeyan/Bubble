@@ -11,6 +11,18 @@ const PHONE: Size = { w: 390, h: 844 };
 const LAPTOP: Size = { w: 1440, h: 900 };
 
 describe('arena layout', () => {
+  it('randomizes every kind of bubble across runs and keeps targets stable within a run', () => {
+    const vm = reduceAll(upTo('plan_locked'));
+    const first = computeLayout(vm, 'locked', LAPTOP, 123);
+    expect(computeLayout(vm, 'locked', LAPTOP, 123)).toEqual(first);
+    const second = computeLayout(vm, 'locked', LAPTOP, 456);
+    expect(second.bubbles).not.toEqual(first.bubbles);
+    expect(second.doers).not.toEqual(first.doers);
+    const candidates = reduceAll(upTo('round_complete'));
+    expect(computeLayout(candidates, 'convergence', LAPTOP, 123).venues).not.toEqual(
+      computeLayout(candidates, 'convergence', LAPTOP, 456).venues,
+    );
+  });
   it('keeps candidate bubbles clear of the navigation and phase panel', () => {
     const vm = reduceAll(upTo('round_complete'));
     for (const size of [PHONE, LAPTOP]) {
@@ -75,11 +87,17 @@ describe('arena layout', () => {
       }),
     ]);
     const l = computeLayout(vm, 'convergence', LAPTOP);
-    expect(l.bubbles['a']!.x).toBeGreaterThan(LAPTOP.w / 2);
-    expect(l.bubbles['b']!.x).toBeLessThan(LAPTOP.w / 2);
+    const swapped = computeLayout(
+      { ...vm, scores: { a: vm.scores['b']!, b: vm.scores['a']! } },
+      'convergence',
+      LAPTOP,
+    );
+    const towardRight = l.venues['right']!.x - l.venues['left']!.x;
+    expect((l.bubbles['a']!.x - swapped.bubbles['a']!.x) * towardRight).toBeGreaterThan(0);
+    expect((l.bubbles['b']!.x - swapped.bubbles['b']!.x) * towardRight).toBeLessThan(0);
   });
 
-  it('wraps the merged crew in a consensus bubble, then splits four doers off it on lock', () => {
+  it('gathers the merged crew, then sends four doers out on lock', () => {
     const merged = reduceAll(upTo('bubble_merged'));
     const m = computeLayout(merged, 'convergence', PHONE);
     expect(m.consensus?.members).toEqual(['user_ava', 'user_ben', 'user_chloe', 'user_dev']);

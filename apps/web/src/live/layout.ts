@@ -5,6 +5,7 @@
  */
 import type { DoerKind } from '@bubbleworks/shared';
 import { DOER_KINDS, type Phase, type ViewModel } from './view-model';
+import { hashSeed, randomPoint, seededRandom } from './motion';
 
 export interface Size {
   w: number;
@@ -54,33 +55,32 @@ function safeArea(size: Size, sheet: boolean) {
   return { top, bottom: size.h - bottom, height: size.h - bottom - top };
 }
 
-/** Deterministic, organic-looking spread over a region (golden-angle spiral). */
-function spiral(i: number, n: number, c: Point, rx: number, ry: number): Point {
-  const golden = Math.PI * (3 - Math.sqrt(5));
-  const t = Math.sqrt((i + 0.5) / Math.max(n, 1));
-  return { x: c.x + Math.cos(i * golden) * rx * t, y: c.y + Math.sin(i * golden) * ry * t };
-}
-
-export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
+/** Random arrangements remain stable within a replay, even when members join or leave. */
+export function computeLayout(vm: ViewModel, phase: Phase, size: Size, seed = 0): Layout {
+  const point = (id: string, c: Point, rx: number, ry: number) =>
+    randomPoint(
+      { left: c.x - rx, right: c.x + rx, top: c.y - ry, bottom: c.y + ry },
+      seededRandom(hashSeed(id, seed)),
+    );
   const s = sizes(size);
   const complete = phase === 'complete';
   const booked = phase === 'summary' || complete;
   const settled = phase === 'locked' || booked;
   const area = safeArea(size, settled || phase === 'closed');
   const span = Math.min(size.w * 0.84, 960);
-  const left = (size.w - span) / 2;
   const centre: Point = { x: size.w / 2, y: area.top + area.height * (settled ? 0.58 : 0.6) };
 
-  // Venues float across the top band in two staggered rows.
+  // No rows or fixed slots: each venue has its own random anchor in the upper arena.
   const live = vm.venues;
   const leaderId = vm.locked?.venue.venueId ?? vm.merged?.venueId ?? vm.leaderVenueId;
   const slot: Record<string, Point> = {};
-  live.forEach((v, i) => {
-    const n = live.length;
-    slot[v.venueId] = {
-      x: n === 1 ? size.w / 2 : left + s.venue + (i * (span - 2 * s.venue)) / (n - 1),
-      y: area.top + s.venue + (i % 2 === 0 ? 0 : s.venue * 2.9),
-    };
+  live.forEach((v) => {
+    slot[v.venueId] = point(
+      `venue:${v.venueId}`,
+      { x: size.w / 2, y: area.top + s.venue * 2.7 },
+      Math.max(0, span / 2 - s.venue * 1.5),
+      s.venue * 1.15,
+    );
   });
   const venues: Layout['venues'] = {};
   for (const v of live) {
@@ -104,7 +104,7 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
             : chosen && (vm.merged || settled)
               ? s.venue * 1.25
               : s.venue,
-      wander: gone ? 0 : settled ? s.venue * 0.15 : s.venue * 0.35,
+      wander: gone ? 0 : settled ? s.venue * 0.15 : s.venue * 0.9,
       opacity: gone ? 0 : 1,
       leader: chosen,
       dim: gone,
@@ -130,13 +130,18 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
 
   const bubbles: Layout['bubbles'] = {};
   const roam = { x: size.w * 0.36, y: area.height * 0.3 };
-  present.forEach((id, i) => {
-    const home = spiral(i, present.length, centre, roam.x, roam.y);
+  present.forEach((id) => {
+    const home = point(id, centre, roam.x, roam.y);
     const k = merged.indexOf(id);
     if (k >= 0 && clusterAt) {
-      // Loose inside the consensus bubble: scattered starts, each drifting on its own orbit.
+      // Gather loosely: each person still chooses independent directions.
       const room = Math.max(0, consensusR - inside * 1.6);
-      const at = spiral(k, merged.length, clusterAt, room, room);
+      const angle = seededRandom(hashSeed(`angle:${id}`, seed))() * Math.PI * 2;
+      const radius = seededRandom(hashSeed(`radius:${id}`, seed))() * room;
+      const at = {
+        x: clusterAt.x + Math.cos(angle) * radius,
+        y: clusterAt.y + Math.sin(angle) * radius,
+      };
       bubbles[id] = {
         ...at,
         r: inside,
@@ -192,18 +197,26 @@ export function computeLayout(vm: ViewModel, phase: Phase, size: Size): Layout {
 
   const doers: Layout['doers'] = {};
   if (settled) {
-    // Floating freely around the consensus bubble (locked) or the destination (booked): uneven
-    // angles and distances plus a wide orbit, so they never line up into a shape.
-    const ring = booked ? s.venue * 1.7 + s.doer * 2.1 : consensusR + s.doer * 1.9;
-    const tilt = [-0.35, 0.22, -0.12, 0.3];
-    const reach = [1.0, 1.22, 1.08, 1.3];
+    // Independent destinations across the usable arena, never a surrounding ring.
     DOER_KINDS.forEach((kind, i) => {
-      const a = -Math.PI / 3 + (i * Math.PI) / 2 + tilt[i]!;
+      const random = seededRandom(hashSeed(`doer:${kind}`, seed));
+      const bounds = {
+        left: s.doer + 12,
+        right: size.w - s.doer - 12,
+        top: area.top + s.doer,
+        bottom: Math.max(area.top + s.doer, area.bottom - s.doer),
+      };
+      let at = randomPoint(bounds, random);
+      for (
+        let attempt = 0;
+        attempt < 20 && Math.hypot(at.x - centre.x, at.y - centre.y) < s.venue * 2.2;
+        attempt++
+      )
+        at = randomPoint(bounds, random);
       doers[kind] = {
-        x: centre.x + Math.cos(a) * ring * reach[i]! * 1.15,
-        y: centre.y + Math.sin(a) * ring * reach[i]! * 0.9,
+        ...at,
         r: s.doer,
-        wander: complete ? 0 : s.doer * 0.75,
+        wander: complete ? 0 : s.doer * 1.6,
         opacity: 1,
         ...(complete && leaderId ? { absorb: { venueId: leaderId, order: i } } : {}),
       };

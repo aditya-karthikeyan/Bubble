@@ -1347,3 +1347,18 @@ input:focus {
     display: none;
   }
 }
+
+.arena .success-title {
+  font-family: var(--display);
+  font-size: 38px;
+  fill: #125a50;
+  stroke: #f3ffff;
+  stroke-width: 5px;
+}
+.arena .success-sub {
+  font-size: 18px;
+  font-weight: 600;
+  fill: #24576b;
+  stroke: #f3ffff;
+  stroke-width: 4px;
+}

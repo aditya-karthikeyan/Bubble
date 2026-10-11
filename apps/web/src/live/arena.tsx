@@ -2,12 +2,12 @@
 
 /**
  * Full-screen deliberation arena. Every bubble, venue orb, and doer is a node in one d3-force
- * simulation that never fully cools: each node floats around its layout target on its own slow
- * orbit, with a radius (`wander`) that shrinks as the crew converges. React renders the node set
+ * simulation that never fully cools: each node picks independent random destinations, with
+ * a roaming radius (`wander`) that shrinks as the crew converges. React renders the node set
  * when the view model changes; positions, radii, and opacity update imperatively every frame, so
  * twenty-odd nodes stay at 60 fps on a phone.
  *
- * Visual components (BubbleNode, VenueOrb, ConsensusBubble, DoerBubble) draw at a unit radius and
+ * Visual components (BubbleNode, VenueOrb, DoerBubble) draw at a unit radius and
  * are scaled per frame, so a glass restyle only touches their markup.
  */
 import type { BubblePageStatus, DoerKind, DoerState } from '@bubbleworks/shared';
@@ -21,6 +21,15 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { computeLayout, type Layout, type Size, type Target } from './layout';
 import { STATUS_LABEL, type Phase, type ViewModel } from './view-model';
+import {
+  createDrift,
+  driftTarget,
+  finaleFrame,
+  randomPoint,
+  seededRandom,
+  type Drift,
+  type Random,
+} from './motion';
 
 interface Node extends SimulationNodeDatum {
   id: string;
@@ -34,11 +43,8 @@ interface Node extends SimulationNodeDatum {
   rt: number;
   op: number;
   opt: number;
-  /** Per-node orbit, so nothing floats in lockstep. */
-  fx1: number;
-  fy1: number;
-  px: number;
-  py: number;
+  /** Each bubble chooses new directions on its own irregular clock. */
+  drift: Drift;
   tx: number;
   ty: number;
   /** Booked: the venue node this bubble flies into, and when it takes off. */
@@ -81,12 +87,6 @@ const DOER_NAME: Record<DoerKind, string> = {
 
 function clip(s: string, n: number): string {
   return s.length <= n ? s : `${s.slice(0, n - 1)}…`;
-}
-
-function hash(id: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
-  return (h >>> 0) / 4294967295;
 }
 
 function useReducedMotion(): boolean {
@@ -238,24 +238,25 @@ export function VenueOrb({
   name: string;
   cuisine: string;
   leader: boolean;
-  /** The one bubble the plan ends as: time and party under the name, instead of the cuisine. */
+  /** Marks the confirmed destination for the success finale. */
   final: string | null;
 }) {
   return (
     <g>
-      {leader && (
-        <circle r={1.16} fill="none" stroke="#3bd27f" strokeWidth={0.07} className="halo" />
-      )}
       <Orb hue={leader ? 'leader' : 'venue'} />
-      <text className="orb-label" y={1.52} fontSize={0.3}>
-        {clip(name, 18)}
-      </text>
-      <text className="orb-sub" y={1.86} fontSize={0.24}>
-        {final ?? cuisine}
-      </text>
+      {!final && (
+        <>
+          <text className="orb-label" y={1.52} fontSize={0.3}>
+            {clip(name, 18)}
+          </text>
+          <text className="orb-sub" y={1.86} fontSize={0.24}>
+            {cuisine}
+          </text>
+        </>
+      )}
       {final && (
         <text className="orb-name" y={0.06} fontSize={0.2}>
-          Plan complete
+          Success!
         </text>
       )}
     </g>
@@ -286,25 +287,14 @@ export function DoerBubble({
   );
 }
 
-/** Drawn at radius 1; positioned and scaled every frame around its members. */
-export function ConsensusBubble() {
-  return (
-    <>
-      <circle r={1} fill="url(#g-consensus)" />
-      <circle r={1} fill="none" stroke="url(#g-rim)" strokeWidth={0.025} />
-      <ellipse cx={-0.38} cy={-0.5} rx={0.32} ry={0.16} fill="url(#g-shine)" opacity={0.7} />
-    </>
-  );
-}
-
 function syncNode(
   map: Map<string, Node>,
   id: string,
   kind: Node['kind'],
   t: Target,
   spawn: { x: number; y: number },
+  random: Random,
 ): Node {
-  const seed = hash(id);
   const n =
     map.get(id) ??
     ({
@@ -314,10 +304,7 @@ function syncNode(
       y: spawn.y,
       r: t.r * 0.4,
       op: 0,
-      fx1: 0.00018 + seed * 0.00022,
-      fy1: 0.00014 + ((seed * 7) % 1) * 0.0002,
-      px: seed * Math.PI * 2,
-      py: ((seed * 13) % 1) * Math.PI * 2,
+      drift: createDrift(random),
     } as Node);
   n.bx = t.x;
   n.by = t.y;
@@ -372,21 +359,27 @@ function seek(): Force<Node, undefined> {
 export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
   const size = useViewport();
   const reduced = useReducedMotion();
+  const [seed] = useState(() => Math.floor(Math.random() * 4294967296));
+  const random = useRef(seededRandom(seed));
   const layout: Layout | null = useMemo(
-    () => (size ? computeLayout(vm, phase, size) : null),
-    [vm, phase, size],
+    () => (size ? computeLayout(vm, phase, size, seed) : null),
+    [vm, phase, size, seed],
   );
 
   const nodes = useRef(new Map<string, Node>());
   const els = useRef(new Map<string, SVGGElement>());
-  const consensusEl = useRef<SVGGElement | null>(null);
-  const consensusState = useRef({ x: 0, y: 0, r: 0, op: 0 });
+  const burstEl = useRef<SVGGElement | null>(null);
+  const successEl = useRef<SVGGElement | null>(null);
+  const scene = useRef({ phase, size, reduced });
+  const finale = useRef<{ elapsed: number; initial: number; x: number; y: number } | null>(null);
   const layoutRef = useRef<Layout | null>(null);
   const sim = useRef<Simulation<Node, undefined> | null>(null);
 
   // One simulation for the page's lifetime; it idles warm so things keep floating.
   useEffect(() => {
     const collide = forceCollide<Node>(collideRadius).strength(0.7).iterations(2);
+    let previousTick = performance.now();
+    let completeSince: number | null = null;
     const s = forceSimulation<Node>([])
       .alphaDecay(0.01)
       .alphaTarget(0.12)
@@ -397,13 +390,36 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
         const now = performance.now();
 
         for (const n of s.nodes()) {
-          // Each node orbits its target slowly: two sines at their own frequencies.
-          n.tx = n.bx + Math.sin(now * n.fx1 + n.px) * n.wander;
-          n.ty = n.by + Math.cos(now * n.fy1 + n.py) * n.wander * 0.8;
+          const viewport = scene.current.size;
+          const radius = n.r + 8;
+          const minY = viewport && viewport.h <= 650 && viewport.w > 760 ? 150 : 210;
+          const maxY = viewport
+            ? Math.max(
+                minY + radius,
+                viewport.h - (layoutRef.current?.doerOrigin ? 245 : 100) - radius,
+              )
+            : n.by;
+          const destination = driftTarget(
+            n.drift,
+            now,
+            {
+              left: Math.max(radius, n.bx - n.wander),
+              right: Math.min((viewport?.w ?? n.bx) - radius, n.bx + n.wander),
+              top: Math.max(minY + radius, n.by - n.wander),
+              bottom: Math.min(maxY, n.by + n.wander),
+            },
+            random.current,
+          );
+          n.tx = scene.current.reduced ? n.bx : destination.x;
+          n.ty = scene.current.reduced ? n.by : destination.y;
+          if (n.opt === 0 && !n.absorbInto) {
+            n.tx = n.bx;
+            n.ty = n.by;
+          }
           const into = n.absorbInto ? nodes.current.get(n.absorbInto) : undefined;
           if (into && n.absorbAt !== undefined) {
             if (now < n.absorbAt) {
-              // Wait in the consensus bubble for its turn.
+              // Wait near its own gathering position for its turn.
               n.tx = n.hx!;
               n.ty = n.hy!;
             } else {
@@ -434,49 +450,82 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
         }
         // forceCollide caches radii; refresh them as nodes grow, shrink, and take off.
         collide.radius(collideRadius);
-        // The consensus bubble wraps its members wherever they actually are.
-        const c = layoutRef.current?.consensus;
-        const cs = consensusState.current;
-        if (c) {
-          let x = 0;
-          let y = 0;
-          const members = c.members
-            .map((id) => nodes.current.get(id))
-            .filter((n): n is Node => !!n);
-          for (const m of members) {
-            x += m.x!;
-            y += m.y!;
-          }
-          if (members.length) {
-            x /= members.length;
-            y /= members.length;
-            let reach = 0;
-            for (const m of members) reach = Math.max(reach, Math.hypot(m.x! - x, m.y! - y) + m.r);
-            const k = cs.op < 0.01 ? 1 : 0.12;
-            cs.x += (x - cs.x) * k;
-            cs.y += (y - cs.y) * k;
-            cs.r += ((c.absorbing ? reach + 10 : Math.max(reach + 10, c.r)) - cs.r) * 0.08;
-          }
-          // While absorbing, it dissolves with its members.
-          const target =
-            c.absorbing && members.length
-              ? members.reduce((t, m) => t + m.op, 0) / members.length
-              : 1;
-          cs.op += (target - cs.op) * 0.05;
-        } else {
-          cs.op += (0 - cs.op) * 0.08;
+        // Let the crew finish gathering before the one-shot inflate-and-pop finale.
+        const current = scene.current;
+        const step = Math.min(50, now - previousTick);
+        previousTick = now;
+        if (current.phase !== 'complete') {
+          completeSince = null;
+          finale.current = null;
+          if (burstEl.current) burstEl.current.style.opacity = '0';
+          if (successEl.current) successEl.current.style.opacity = '0';
+          return;
         }
-        const ce = consensusEl.current;
-        if (ce) {
-          ce.setAttribute(
+        completeSince ??= now;
+        const winner = s.nodes().find((n) => n.kind === 'venue' && n.swallowing);
+        if (!winner || !current.size) return;
+        const gathering = s.nodes().filter((n) => n.absorbInto === winner.id);
+        if (
+          !finale.current &&
+          (current.reduced || gathering.every((n) => n.absorbed) || now - completeSince > 8000)
+        ) {
+          finale.current = { elapsed: 0, initial: winner.r, x: winner.x!, y: winner.y! };
+        }
+        const ending = finale.current;
+        if (!ending) return;
+        ending.elapsed += step;
+        const centreY = 210 + Math.max(0, current.size.h - 450) / 2;
+        ending.x += (current.size.w / 2 - ending.x) * 0.035;
+        ending.y += (centreY - ending.y) * 0.035;
+        const maxRadius = Math.max(
+          40,
+          Math.min(current.size.w * 0.37, (current.size.h - 430) * 0.46, 190),
+        );
+        const frame = finaleFrame(
+          ending.elapsed,
+          Math.min(ending.initial, maxRadius * 0.65),
+          maxRadius,
+          current.reduced,
+        );
+        const hero = els.current.get(winner.id);
+        if (hero) {
+          hero.setAttribute(
             'transform',
-            `translate(${cs.x.toFixed(1)} ${cs.y.toFixed(1)}) scale(${Math.max(cs.r, 1).toFixed(1)})`,
+            `translate(${ending.x} ${ending.y}) scale(${frame.radius})`,
           );
-          ce.style.opacity = cs.op.toFixed(3);
+          hero.style.opacity = String(frame.bubbleOpacity);
+        }
+        for (const member of gathering) {
+          member.op = 0;
+          member.opt = 0;
+          const el = els.current.get(member.id);
+          if (el) el.style.opacity = '0';
+        }
+        const burst = burstEl.current;
+        if (burst) {
+          burst.setAttribute('transform', `translate(${ending.x} ${ending.y})`);
+          burst.style.opacity = String(frame.burstOpacity);
+          Array.from(burst.children).forEach((particle, i) => {
+            const angle = (i / 18) * Math.PI * 2 + (i % 3) * 0.14;
+            const distance = maxRadius * (0.65 + frame.burstProgress * (0.65 + (i % 4) * 0.12));
+            particle.setAttribute(
+              'transform',
+              `translate(${Math.cos(angle) * distance} ${Math.sin(angle) * distance}) scale(${(1 - frame.burstProgress * 0.8) * (3 + (i % 4))})`,
+            );
+          });
+        }
+        const success = successEl.current;
+        if (success) {
+          success.setAttribute('transform', `translate(${ending.x} ${ending.y})`);
+          success.style.opacity = String(frame.successOpacity);
         }
       });
     sim.current = s;
-    const onVisible = () => (document.hidden ? s.stop() : s.restart());
+    const onVisible = () => {
+      previousTick = performance.now();
+      if (document.hidden || scene.current.reduced) s.stop();
+      else s.restart();
+    };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
@@ -489,18 +538,25 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
     const s = sim.current;
     if (!s || !layout || !size) return;
     layoutRef.current = layout;
+    scene.current = { phase, size, reduced };
     const next = new Map<string, Node>();
-    const bottom = { x: size.w / 2, y: size.h + 60 };
+    const spawn = () =>
+      randomPoint(
+        { left: 35, right: size.w - 35, top: 225, bottom: Math.max(225, size.h - 120) },
+        random.current,
+      );
     for (const [id, t] of Object.entries(layout.venues)) {
-      next.set(`v:${id}`, syncNode(nodes.current, `v:${id}`, 'venue', t, { x: t.x, y: -60 }));
+      next.set(`v:${id}`, syncNode(nodes.current, `v:${id}`, 'venue', t, spawn(), random.current));
     }
     for (const [id, t] of Object.entries(layout.bubbles)) {
-      const spawn = { x: t.x + (hash(id) - 0.5) * size.w * 0.4, y: bottom.y };
-      next.set(id, syncNode(nodes.current, id, 'bubble', t, spawn));
+      next.set(id, syncNode(nodes.current, id, 'bubble', t, spawn(), random.current));
     }
     for (const [kind, t] of Object.entries(layout.doers)) {
       const origin = layout.doerOrigin ?? { x: t.x, y: t.y };
-      next.set(`d:${kind}`, syncNode(nodes.current, `d:${kind}`, 'doer', t, origin));
+      next.set(
+        `d:${kind}`,
+        syncNode(nodes.current, `d:${kind}`, 'doer', t, origin, random.current),
+      );
     }
     // Whatever is being absorbed, the destination must yield its collisions to take it in.
     const swallower = [...Object.values(layout.bubbles), ...Object.values(layout.doers)].find(
@@ -527,7 +583,7 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
       s.nodes(list);
       s.alpha(Math.max(s.alpha(), 0.5)).restart();
     }
-  }, [layout, size, reduced]);
+  }, [layout, size, reduced, phase]);
 
   if (!size || !layout) return <svg className="arena" />;
 
@@ -549,7 +605,9 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
       height={size.h}
       viewBox={`0 0 ${size.w} ${size.h}`}
       role="img"
-      aria-label="Bubbles deliberating"
+      aria-label={
+        phase === 'complete' ? 'Success! Your dinner plan is ready.' : 'Bubbles deliberating'
+      }
     >
       <GlassDefs />
       {vm.venues.map((v) =>
@@ -569,9 +627,6 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
             )
           : null,
       )}
-      <g ref={consensusEl} style={{ opacity: 0 }}>
-        <ConsensusBubble />
-      </g>
       {vm.bubbles.map((b) =>
         layout.bubbles[b.userId]
           ? group(
@@ -598,6 +653,33 @@ export function Arena({ vm, phase }: { vm: ViewModel; phase: Phase }) {
             />,
           ),
         )}
+      <g ref={burstEl} style={{ opacity: 0 }} aria-hidden="true">
+        {Array.from({ length: 18 }, (_, i) => (
+          <circle
+            key={i}
+            r={1}
+            fill={i % 3 === 0 ? '#b6f48d' : '#d3ffff'}
+            stroke="white"
+            strokeWidth={0.15}
+          />
+        ))}
+      </g>
+      <g ref={successEl} style={{ opacity: 0 }} aria-hidden="true">
+        <path
+          d="M -22 -30 L -6 -14 L 24 -48"
+          fill="none"
+          stroke="#147959"
+          strokeWidth={7}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <text className="success-title" y={12}>
+          Success!
+        </text>
+        <text className="success-sub" y={43}>
+          See you there.
+        </text>
+      </g>
     </svg>
   );
 }

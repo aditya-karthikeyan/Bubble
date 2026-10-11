@@ -51,7 +51,7 @@ function Bokeh() {
 }
 
 export function LivePlan({ token, replay }: { token: string; replay: string | null }) {
-  const { vm, status, restart } = usePlanFeed(token, replay);
+  const { vm, status, restart, run } = usePlanFeed(token, replay);
 
   if (status === 'expired') {
     return (
@@ -76,7 +76,7 @@ export function LivePlan({ token, replay }: { token: string; replay: string | nu
   return (
     <main className="stage">
       <Bokeh />
-      <Arena vm={vm} phase={phase} />
+      <Arena key={`${token}:${replay}:${run}`} vm={vm} phase={phase} />
       <Navigation live />
       <PhaseBanner title={copy.title} line={copy.line} status={status} />
       {status === 'offline' && (

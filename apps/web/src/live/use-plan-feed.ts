@@ -151,5 +151,5 @@ export function usePlanFeed(token: string, replay: string | null) {
     };
   }, [token, replay, run, enqueue]);
 
-  return { vm, status, restart };
+  return { vm, status, restart, run };
 }
