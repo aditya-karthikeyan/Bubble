@@ -36,7 +36,9 @@
     "p1:edge": "pnpm --filter @bubbleworks/server edge",
     "p1:speed": "pnpm --filter @bubbleworks/server speed",
     "p3:phase4": "pnpm --filter @bubbleworks/server p3:phase4",
-    "demo:reset": "pnpm --filter @bubbleworks/server demo:reset"
+    "demo:reset": "pnpm --filter @bubbleworks/server demo:reset",
+    "p2:phase3": "pnpm --filter @bubbleworks/server p2:phase3",
+    "p3:smoke": "pnpm --filter @bubbleworks/server p3:smoke"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
