@@ -47,6 +47,8 @@ export interface PlanIntakeOptions {
   audit?: AuditLog;
   /** staged (default): headcount first, poll once enough are in, link at deliberation. */
   bundleMode?: BundleMode;
+  /** False while someone is still onboarding: "Chipotle and Cava" answers a question, so no typing. */
+  isOnboarded?: (userId: string) => boolean;
 }
 
 interface Marks {
@@ -135,6 +137,7 @@ export class PlanIntake {
     if (detection.level === 'none') return false;
     // "I'm in" is an RSVP, not a plan; "down for dinner tonight?" names a meal, so it is a plan.
     if (detection.meal === null && parseRsvp(text) !== 'unclear') return false;
+    if (this.o.isOnboarded && !this.o.isOnboarded(userId)) return false;
     marks.typingAt = Date.now();
     void this.o.port.setTyping({ chatId: dmChatId(userId), typing: true });
     this.o.log.info({ userId, mark: 't_typing', ms: marks.typingAt - receivedAt }, 'timing');
