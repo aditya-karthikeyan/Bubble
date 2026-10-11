@@ -1,13 +1,19 @@
-import { LiveFeed } from './live-feed';
+import type { Metadata } from 'next';
+import { LivePlan } from '../../../src/live/live-plan';
 
-export default async function PlanPage({ params }: { params: Promise<{ token: string }> }) {
+export const metadata: Metadata = {
+  title: 'Live plan · Bubbleworks',
+  description: 'Watch the bubbles plan dinner, live.',
+};
+
+export default async function PlanPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ token: string }>;
+  searchParams: Promise<{ replay?: string }>;
+}) {
   const { token } = await params;
-  return (
-    <main className="sky">
-      <div className="wrap">
-        <h1 style={{ fontSize: 22 }}>Live plan</h1>
-        <LiveFeed token={token} />
-      </div>
-    </main>
-  );
+  const { replay } = await searchParams;
+  return <LivePlan token={token} replay={replay ?? null} />;
 }
