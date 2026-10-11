@@ -246,6 +246,15 @@ function endOfLocalDay(now: Date, addDays: number, timeZone: string): Date {
   return new Date(target.getTime() + (asUtc.getTime() - asLocal.getTime()));
 }
 
+/** "I don't want to split", "no venmo", "I'll pay for myself": opting out of bill splits. */
+export function isNoSplit(text: string): boolean {
+  const t = text.toLowerCase().replace(/[’`]/g, "'");
+  return (
+    /\b(don'?t|do not|won'?t|never|not|no|rather not)\b[^.?!]{0,25}\b(split\w*|venmo)\b/.test(t) ||
+    /\bpay(ing)? (for )?(myself|my own|on my own)\b/.test(t)
+  );
+}
+
 export function isSkip(text: string): boolean {
   return /^\s*(skip|none|nope|no|n\/a|na|nothing|pass|nah|-)\s*[.!]*\s*$/i.test(text);
 }

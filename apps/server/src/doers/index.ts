@@ -5,7 +5,8 @@
  * - Inviter DMs each attending member a short .ics link (/ics/<signed>.ics).
  * - Splitter estimates per-person cost from the price level, picks the payer (attending member
  *   with a Venmo handle and the fewest "paid" ledger rows in this crew), DMs everyone else a
- *   Venmo pay link, and records the payer in the ledger.
+ *   Venmo pay link, and records the payer in the ledger. Counter-service venues (price level 1)
+ *   get no split, and anyone who said they don't split is left off the bill.
  * - Watcher wakes 45 minutes before the booking and every 60 s after: reads Find My, estimates
  *   ETAs, updates the live card, and reports anyone 15+ minutes late (once per member).
  * - Representation: when a plan locks, each represented member gets a private summary with a
@@ -28,6 +29,7 @@ import {
   type PlanEvent,
   type User,
 } from '@bubbleworks/shared';
+import { NO_SPLIT } from '../bubbles/facts.js';
 import type { DbBubbleService } from '../bubbles/service.js';
 import type { Db } from '../db/client.js';
 import {
@@ -48,6 +50,8 @@ import { LedgerWriter } from './ledger.js';
 
 /** Per-person estimate by venue price level, USD (role prompt: 1 = 15, 2 = 30, 3 = 55). */
 export const COST_BY_PRICE_LEVEL: Record<number, number> = { 1: 15, 2: 30, 3: 55, 4: 85 };
+/** At or below this price level (OSM fast_food / cafe) the Splitter stays quiet. */
+export const COUNTER_SERVICE_MAX_PRICE_LEVEL = 1;
 export const WATCH_LEAD_MS = 45 * 60_000;
 export const WATCH_EVERY_MS = 60_000;
 export const LATE_AFTER_MIN = 15;
@@ -172,14 +176,32 @@ export class Doers implements DoerPorts {
   // -- Splitter --------------------------------------------------------------
 
   private async split(s: BookingSummary & { idempotencyKey: string }): Promise<DoerResult> {
+    // Counter service (fast food, cafes: price level 1 from OSM) means everyone pays at the
+    // register, so there is nothing to split and nobody gets a message.
+    if (s.venue.priceLevel <= COUNTER_SERVICE_MAX_PRICE_LEVEL) {
+      this.log.info({ planId: s.planId, venue: s.venue.name }, 'split skipped: counter service');
+      return { ok: true, detail: 'Counter service, everyone pays for themselves' };
+    }
     const each = COST_BY_PRICE_LEVEL[s.venue.priceLevel] ?? s.venue.typicalCostUsd;
     const groupId = this.groupIdOf(s.planId);
-    const people = await this.attending(s);
+    const attending = await this.attending(s);
+    // Anyone who said they don't split pays for themselves: off the bill, no messages.
+    const handleOf = (u: User) => this.d.bubbles.facts.current(u.id, 'venmo_handle')?.value ?? null;
+    const people = attending.filter((u) => handleOf(u) !== NO_SPLIT);
+    if (people.length < 2) {
+      // A re-split that drops to one person on the bill: nobody is fronting anything now.
+      this.d.db
+        .delete(ledger)
+        .where(eq(ledger.id, `ledger_paid_${s.bookingId}`))
+        .run();
+      this.log.info(
+        { planId: s.planId, attending: attending.length, onBill: people.length },
+        'split skipped: fewer than 2 on the bill',
+      );
+      return { ok: true, detail: 'No split, everyone pays for themselves' };
+    }
     const withHandle = people
-      .map((u) => ({
-        u,
-        handle: this.d.bubbles.facts.current(u.id, 'venmo_handle')?.value ?? null,
-      }))
+      .map((u) => ({ u, handle: handleOf(u) }))
       .filter((x): x is { u: User; handle: string } => x.handle !== null);
     if (!withHandle.length) {
       return { ok: false, detail: 'Nobody has a Venmo handle yet' };
@@ -227,8 +249,10 @@ export class Doers implements DoerPorts {
     // A rerun after someone dropped (the engine re-splits on a table change): anyone on the
     // last split who is no longer attending is told they are off the bill.
     const nowIds = new Set(people.map((u) => u.id));
+    const stillComing = new Set(attending.map((u) => u.id));
     for (const id of prior?.userIds ?? []) {
-      if (nowIds.has(id)) continue;
+      // Someone still coming who opted out already got "ignore any link" from their bubble.
+      if (nowIds.has(id) || stillComing.has(id)) continue;
       const gone = await this.d.crews.userById(id);
       if (!gone) continue;
       await this.dm(

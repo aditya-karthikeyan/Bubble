@@ -47,6 +47,7 @@ import {
 import { silentLogger, type Logger } from '../events/bus.js';
 import {
   HARD_FACT_TYPES,
+  isNoSplit,
   isSkip,
   resolveUntil,
   splitList,
@@ -54,7 +55,7 @@ import {
   type ExtractHint,
   type FactExtractor,
 } from './extract.js';
-import { describeFact, FactStore } from './facts.js';
+import { describeFact, FactStore, NO_SPLIT } from './facts.js';
 import { PassiveLearner, type LearnInput } from './learner.js';
 import { mightBeReaction, type ReactionClassifier } from './reactions.js';
 import {
@@ -397,6 +398,14 @@ export class DbBubbleService implements BubbleService {
       await this.declareCrew(user, crewNames, reply);
       return true;
     }
+    if (text.length <= 80 && isNoSplit(text)) {
+      this.recordNoSplit(user.id, 'chat');
+      await reply(
+        "Got it, you'll pay for yourself. No split or Venmo messages for you, and ignore any " +
+          'link I already sent. Send your Venmo handle anytime to split again.',
+      );
+      return true;
+    }
     // Not for the bubble: the engine gets it, and the learner reads it in the background.
     this.learn({ messageId: m.messageId, userId: user.id, text, at: m.at });
     return false;
@@ -690,7 +699,9 @@ export class DbBubbleService implements BubbleService {
   ): Promise<void> {
     const { step, fast } = decodeStep(raw);
     const steps: readonly OnboardingStep[] = fast ? FAST_STEPS : ONBOARDING_STEPS;
-    const extracted = isSkip(text) ? [] : await this.deps.extractor.extract(text, step);
+    const noSplit = step === 'venmo' && isNoSplit(text);
+    if (noSplit) this.recordNoSplit(user.id, 'onboarding');
+    const extracted = isSkip(text) || noSplit ? [] : await this.deps.extractor.extract(text, step);
     const saved = await this.saveExtracted(user.id, extracted, step, text);
 
     if (step === 'budget' && !isSkip(text) && !saved.some((f) => f.type === 'budget_max')) {
@@ -817,6 +828,21 @@ export class DbBubbleService implements BubbleService {
       );
     }
     return out;
+  }
+
+  /** Opts out of bill splits. Replaces any Venmo handle (single-valued). */
+  private recordNoSplit(userId: string, source: 'onboarding' | 'chat'): void {
+    this.facts.record({
+      userId,
+      type: 'venmo_handle',
+      value: NO_SPLIT,
+      hard: false,
+      confidence: 1,
+      source,
+      confirmed: true,
+      expiresAt: null,
+    });
+    this.log.info({ userId, source }, 'opted out of splits');
   }
 
   private matchVenue(name: string): string | null {
