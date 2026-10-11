@@ -23,14 +23,11 @@ import {
 } from '@bubbleworks/shared';
 import type { Logger } from '../events/bus.js';
 import type { SpectrumMessaging } from './adapter.js';
-import { sendLiveLink, type BundleStore } from './bundle.js';
+import type { BundleStore } from './bundle.js';
 import { renderTicket, walkMinutes, type TicketData } from './card-image.js';
 
-export const MAX_EDITS = 4;
-export const EDIT_WINDOW_MS = 14 * 60_000;
-
 export interface LiveSurfacesOptions {
-  port: Pick<SpectrumMessaging, 'editMessage' | 'sendImage' | 'sendRichLink'>;
+  port: Pick<SpectrumMessaging, 'sendGroupText' | 'sendImage'>;
   bundles: BundleStore;
   bus: {
     subscribe(planId: string, handler: (event: PlanEvent) => void | Promise<void>): () => void;
@@ -44,16 +41,7 @@ export interface LiveSurfacesOptions {
   render?: (ticket: TicketData) => Promise<Buffer>;
 }
 
-interface PlanView {
-  edits: number;
-  lastText: string | null;
-  venueName: string | null;
-  timeText: string | null;
-  partySize: number | null;
-}
-
 export class LiveSurfaces {
-  private readonly views = new Map<string, PlanView>();
   private readonly timezone: string;
   private readonly now: () => number;
   private unsubscribe: (() => void) | null = null;
@@ -80,74 +68,36 @@ export class LiveSurfaces {
   }
 
   async onEvent(event: PlanEvent): Promise<void> {
-    const view = this.view(event.planId);
     switch (event.type) {
-      case 'plan_state_changed': {
-        if (event.to === 'DELIBERATING') {
-          const bundle = this.o.bundles.byPlan(event.planId);
-          const meal = bundle?.meal ? capitalize(bundle.meal) : 'Plan';
-          const n = this.o.plans.inCount(event.planId);
-          await this.edit(event.planId, `🫧 ${meal} · ${n} in · finding the spot`);
-          // Stage 3 of the bundle: now there is something to watch.
-          await sendLiveLink(this.o.port, this.o.bundles, event.planId);
-        } else if (event.to === 'BOOKING' && view.venueName) {
-          await this.edit(event.planId, `📞 Calling ${view.venueName}`);
-        }
-        return;
-      }
       case 'plan_locked': {
-        view.venueName = event.venue.name;
-        view.timeText = this.clock(event.startAt);
-        view.partySize = event.partySize;
-        await this.edit(
-          event.planId,
-          `🔒 ${event.venue.name} · ${view.timeText} · ${event.partySize} people · say "veto" to change it`,
-        );
+        const timeText = this.clock(event.startAt);
+        const bundle = this.o.bundles.byPlan(event.planId);
+        if (!bundle) return;
+        const live = bundle.pageUrl ? ` Watch live: ${bundle.pageUrl}` : '';
+        await this.o.port.sendGroupText({
+          chatId: bundle.chatId,
+          text:
+            `🔒 Found a spot: ${event.venue.name}, ${timeText}, ${event.partySize} people. ` +
+            `Calling to book now. Say "veto" in the next minute to change it.${live}`,
+          idempotencyKey: idempotencyKey(event.planId, 'surface', 'locked', event.venue.venueId),
+        });
+        this.o.log.info({ planId: event.planId, venue: event.venue.name }, 'locked line sent');
         return;
       }
       case 'booking_confirmed': {
-        const timeText = this.clock(event.startAt);
-        await this.edit(
-          event.planId,
-          `✅ Booked ${event.venue.name} · ${timeText} · party of ${event.partySize}`,
-        );
+        if (!this.o.bundles.byPlan(event.planId)) return;
         await this.sendTicket(event.planId, {
           venueId: event.venue.venueId,
           venueName: event.venue.name,
           cuisine: event.venue.cuisine,
-          timeText,
+          timeText: this.clock(event.startAt),
           partySize: event.partySize,
         });
         return;
       }
-      case 'plan_closed':
-        this.views.delete(event.planId);
-        return;
       default:
         return;
     }
-  }
-
-  private async edit(planId: string, text: string): Promise<void> {
-    const view = this.view(planId);
-    const bundle = this.o.bundles.byPlan(planId);
-    if (!bundle || view.lastText === text) return;
-    const age = bundle.createdAt ? this.now() - Date.parse(bundle.createdAt) : 0;
-    if (view.edits >= MAX_EDITS || age > EDIT_WINDOW_MS) {
-      this.o.log.info(
-        { planId, edits: view.edits, ageMs: age },
-        'live card frozen (iMessage edit limits)',
-      );
-      return;
-    }
-    view.edits += 1;
-    view.lastText = text;
-    await this.o.port.editMessage({
-      chatId: bundle.chatId,
-      messageId: bundle.headcountMessageId,
-      text,
-    });
-    this.o.log.info({ planId, edit: view.edits }, 'live card updated');
   }
 
   private async sendTicket(
@@ -189,15 +139,6 @@ export class LiveSurfaces {
     this.o.log.info({ planId, renderMs: this.now() - started, bytes: image.length }, 'ticket sent');
   }
 
-  private view(planId: string): PlanView {
-    let view = this.views.get(planId);
-    if (!view) {
-      view = { edits: 0, lastText: null, venueName: null, timeText: null, partySize: null };
-      this.views.set(planId, view);
-    }
-    return view;
-  }
-
   private clock(iso: string): string {
     return new Intl.DateTimeFormat('en-US', {
       hour: 'numeric',
@@ -205,8 +146,4 @@ export class LiveSurfaces {
       timeZone: this.timezone,
     }).format(new Date(iso));
   }
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }

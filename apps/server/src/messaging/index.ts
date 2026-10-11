@@ -91,6 +91,7 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
     crews: runtime.crews,
     store: new MessagingStore(runtime.handle.sqlite),
     log,
+    signupUrl: process.env['WEB_PUBLIC_URL']?.replace(/\/$/, '') ?? null,
     debounceMs: config.MESSAGING_DEBOUNCE_MS,
     announcePollClose: config.MESSAGING_ANNOUNCE_POLL_CLOSE,
     // P1's PlanStore owns the per-member budget. Keys whose prefix is not a plan spend nothing.
@@ -164,8 +165,10 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
         log,
         audit,
         bundleMode: config.MESSAGING_BUNDLE_MODE,
+        crews: runtime.crews,
         ...(attachOptions.isOnboarded ? { isOnboarded: attachOptions.isOnboarded } : {}),
       });
+      port.setCrewPick((userId, text) => intake!.crewPick(userId, text));
       intake.start();
       return intake;
     },

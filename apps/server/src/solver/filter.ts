@@ -52,7 +52,8 @@ export function memberInfeasibilities(
     });
   }
   const minutes = travelMinutes(member, venue, ctx);
-  if (minutes !== null && minutes > SOLVER.travel_limit_min + travelSlack) {
+  const limit = ctx.travelLimitMin ?? SOLVER.travel_limit_min;
+  if (minutes !== null && minutes > limit + travelSlack) {
     out.push({
       venueId: venue.id,
       userId: member.userId,
@@ -72,9 +73,9 @@ export function fitsMeal(venue: Venue, meal: SolverContext['meal']): boolean {
 }
 
 /**
- * Filters candidates. When nothing fits both the decided style and the decided cuisine, the
- * style gives way (the cuisine vote is the more specific one). The cuisine never silently gives
- * way: the engine asks the people who voted for it first.
+ * Filters candidates. Strict first; when nothing fits with the decided style applied, the style
+ * gives way, whether or not a cuisine is also decided (the style is a soft table preference). The
+ * cuisine never silently gives way: the engine asks the people who voted for it first.
  */
 export function filterCandidates(
   venues: Venue[],
@@ -82,11 +83,12 @@ export function filterCandidates(
   ctx: SolverContext,
 ): { feasible: Venue[]; infeasible: Infeasibility[] } {
   const strict = filterStrict(venues, members, ctx);
-  if (strict.feasible.length || !ctx.cuisine || !ctx.style) return strict;
+  if (strict.feasible.length || !ctx.style) return strict;
   return filterStrict(venues, members, { ...ctx, style: null });
 }
 
-function filterStrict(
+/** Filters with every decided preference applied as given; nothing gives way. */
+export function filterStrict(
   venues: Venue[],
   members: SolverMember[],
   ctx: SolverContext,
@@ -110,6 +112,19 @@ function filterStrict(
         userId: null,
         reason: 'cuisine',
         detail: `${venue.cuisine} but the table voted ${ctx.cuisine}`,
+      });
+    }
+    if (
+      venue.rating !== null &&
+      venue.rating !== undefined &&
+      (venue.ratingCount ?? 0) >= SOLVER.min_rating_reviews &&
+      venue.rating < SOLVER.min_rating
+    ) {
+      problems.push({
+        venueId: venue.id,
+        userId: null,
+        reason: 'rating',
+        detail: `${venue.rating} stars over ${venue.ratingCount} reviews`,
       });
     }
     if (!fitsMeal(venue, ctx.meal)) {

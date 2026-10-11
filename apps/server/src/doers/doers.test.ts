@@ -130,7 +130,7 @@ describe('Doers', () => {
       expect(r).toEqual({ ok: true, detail: 'Invites sent to 4' });
       const text = dmsTo('user_dev')[0]!;
       expect(text).toMatch(
-        /^Alpha Pie, 7:30 PM, table for 4 under Ava\. Add it to your calendar: /,
+        /^✅ Booked: Alpha Pie, 7:30 PM, table for 4 under Ava\. Add it to your calendar: /,
       );
       const url = /https:\/\/bw\.test(\/ics\/\S+)/.exec(text)![1]!;
 

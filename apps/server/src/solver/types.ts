@@ -27,10 +27,12 @@ export interface SolverContext {
   style?: VenueStyle | null;
   /** Decided cuisine (poll winner or named in the message); other cuisines are out. */
   cuisine?: string | null;
+  /** Walking minutes a member may be from a venue; defaults to SOLVER.travel_limit_min. */
+  travelLimitMin?: number;
 }
 
 export type InfeasibleReason =
-  'closed' | 'meal' | 'style' | 'cuisine' | 'diet' | 'budget' | 'distance';
+  'closed' | 'meal' | 'style' | 'cuisine' | 'diet' | 'budget' | 'distance' | 'rating';
 
 export interface Infeasibility {
   venueId: string;

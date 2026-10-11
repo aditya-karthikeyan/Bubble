@@ -80,19 +80,17 @@ import {
 export const ONBOARDING_STEPS = [
   'diet_allergy',
   'budget',
-  'neighborhood',
   'favorites',
   'venmo',
 ] as const satisfies readonly ExtractHint[];
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
 const QUESTIONS: Record<OnboardingStep, string> = {
-  diet_allergy: "1/5 Anything you don't eat? Diet, allergies, halal, kosher, or just say none.",
-  budget: '2/5 Usual budget per person for dinner? Like $20 or $30.',
-  neighborhood: '3/5 What area are you usually in? Like Franklin St or Southpoint.',
-  favorites: '4/5 Two favorite spots around here?',
+  diet_allergy: "1/4 Anything you don't eat? Diet, allergies, halal, kosher, or just say none.",
+  budget: '2/4 Usual budget per person for dinner? Like $20 or $30.',
+  favorites: '3/4 Two favorite spots around here?',
   venmo:
-    '5/5 How should friends pay you back? Send your Venmo @, Cash App $, Zelle phone or ' +
+    '4/4 How should friends pay you back? Send your Venmo @, Cash App $, Zelle phone or ' +
     'email, or PayPal. Or say skip.',
 };
 
@@ -104,7 +102,6 @@ const PIN_TTL_MS = 6 * 3_600_000;
 const STEP_FACTS: Record<OnboardingStep, readonly FactType[]> = {
   diet_allergy: ['diet', 'allergy', 'religious_diet', 'accessibility'],
   budget: ['budget_max'],
-  neighborhood: ['neighborhood'],
   favorites: ['favorite_venue', 'other'],
   venmo: ['venmo_handle', 'payment_handle'],
 };
@@ -112,7 +109,6 @@ const STEP_FACTS: Record<OnboardingStep, readonly FactType[]> = {
 const STEP_WORDS: Record<OnboardingStep, RegExp> = {
   diet_allergy: /^(diet|allerg|food|eat)/,
   budget: /^budget/,
-  neighborhood: /^(area|neighbou?rhood)/,
   favorites: /^(favou?rite|spot|place)/,
   venmo: /^(venmo|payment|pay|cash|zelle|paypal)/,
 };
@@ -134,6 +130,8 @@ export interface BubbleServiceDeps {
   calendarLink?: (userId: string) => string | null;
   /** Signup page for people who are not registered yet (WEB_PUBLIC_URL landing page). */
   signupUrl?: string | null;
+  /** Base for crew join links (/join/<code>); the server serves that page. Falls back to signupUrl. */
+  joinBaseUrl?: string | null;
   /** The engine's "crew changed, rerun" hook (PlanEngine.handleMemberChange). */
   onCrewChanged?: (input: {
     chatId: string;
@@ -495,9 +493,27 @@ export class DbBubbleService implements BubbleService {
       return true;
     }
 
+    const joinCode = /^join\s+([a-z0-9][a-z0-9-]*)\s*[.!]?$/i.exec(text)?.[1];
+    if (joinCode) {
+      await this.joinByCode(user, joinCode, reply);
+      return true;
+    }
+    const newCrewName = parseNewCrewName(text);
+    if (newCrewName) {
+      await this.createCrewWithLink(user, newCrewName, reply);
+      return true;
+    }
     const crewNames = parseCrewDeclaration(text);
     if (crewNames) {
       await this.declareCrew(user, crewNames, reply);
+      return true;
+    }
+    // A plan-shaped message reaches the bubble only when the person has no active crew.
+    if (PLAN_LIKE.test(text) && !(await this.hasActiveCrew(user.id))) {
+      await reply(
+        'You\'re not in a crew yet 🫧 Reply "new crew" plus a name, like "new crew the boys", ' +
+          "and I'll give you a link to drop in your group chat. Once they tap it, just tell me about dinner.",
+      );
       return true;
     }
     if (text.length <= 80 && isNoSplit(text)) {
@@ -719,7 +735,10 @@ export class DbBubbleService implements BubbleService {
       case 'forget_me_confirm': {
         this.setPending(user.id, null);
         if (yes && Date.parse(pending.expiresAt) > this.now().getTime()) {
-          await reply('Done. Everything I knew about you is gone. Text me anytime to start over.');
+          const again = this.deps.signupUrl
+            ? ` To start over, sign up again here: ${this.deps.signupUrl}`
+            : ' Text me anytime to start over.';
+          await reply(`Done. Everything I knew about you is gone.${again}`);
           await this.forgetUser(user.id);
           return true;
         }
@@ -782,7 +801,7 @@ export class DbBubbleService implements BubbleService {
     // First message to a new person: no links, no media (Apple deliverability rule).
     const intro = fast
       ? `Hey ${user?.displayName ?? 'there'}, I'm your bubble 🫧 Your crew is planning food ` +
-        "right now, so three quick questions and you're in."
+        "right now, so two quick questions and you're in."
       : `Hey ${user?.displayName ?? 'there'}, I'm your bubble 🫧 I plan food with your crew ` +
         "so the group chat doesn't have to. Five quick questions, about a minute.";
     await reply(`${intro}\n\n${question(first, fast)}`);
@@ -991,7 +1010,7 @@ export class DbBubbleService implements BubbleService {
         'Two optional extras so plans fit your real day:',
         ...extras.map((e) => `• ${e}`),
         '',
-        "Next, tell me your crew: 'my crew is' plus names or numbers.",
+        "Next, make your crew: text 'new crew' plus a name (like 'new crew the boys') and I'll give you a link to drop in your group chat.",
       ].join('\n'),
     );
     const seconds = started
@@ -1005,7 +1024,7 @@ export class DbBubbleService implements BubbleService {
     userId: string,
     extracted: ExtractedFact[],
     step: ExtractHint,
-    rawText: string,
+    _rawText: string,
   ): Promise<Fact[]> {
     const out: Fact[] = [];
     const source = step === 'chat' ? 'chat' : 'onboarding';
@@ -1031,21 +1050,6 @@ export class DbBubbleService implements BubbleService {
           // Allergies wait for an explicit yes. Other onboarding answers are the person's own words.
           confirmed: type === 'allergy' ? false : source === 'onboarding',
           expiresAt: e.until_phrase ? resolveUntil(e.until_phrase, this.now()) : null,
-        }),
-      );
-    }
-    // A neighborhood answer the extractor could not read is still the person's own words.
-    if (step === 'neighborhood' && !out.length && !isSkip(rawText) && rawText.trim()) {
-      out.push(
-        this.facts.record({
-          userId,
-          type: 'neighborhood',
-          value: rawText.trim().slice(0, 80),
-          hard: false,
-          confidence: 0.6,
-          source,
-          confirmed: true,
-          expiresAt: null,
         }),
       );
     }
@@ -1166,6 +1170,55 @@ export class DbBubbleService implements BubbleService {
   }
 
   // -- crews -----------------------------------------------------------------
+
+  /** The link friends tap to land in the crew (signup page with the code), or null. */
+  private joinLink(crew: Group): string | null {
+    if (!crew.joinCode) return null;
+    const base = this.deps.joinBaseUrl ?? this.deps.signupUrl;
+    return base ? `${base}/join/${crew.joinCode}` : null;
+  }
+
+  private async hasActiveCrew(userId: string): Promise<boolean> {
+    return (await this.crews.crewsOf(userId)).some((c) => c.status === 'active');
+  }
+
+  /** "new crew the boys": a crew of one, plus a link for the rest. Active right away. */
+  private async createCrewWithLink(creator: User, name: string, reply: Reply): Promise<void> {
+    const crew = await this.crews.createCrew({ name, createdByUserId: creator.id, memberIds: [] });
+    const link = this.joinLink(crew);
+    const how = link
+      ? `Drop this in your group chat and they're in: ${link}`
+      : `Friends join by texting their bubble "join ${crew.joinCode}".`;
+    await reply(`${crew.name} is set 🫧 ${how}\nThen just tell me about dinner.`);
+    this.log.info({ groupId: crew.id, userId: creator.id }, 'crew created with join link');
+  }
+
+  /** "join boys-4821": straight in, confirmed; the organizer hears who joined. */
+  private async joinByCode(user: User, code: string, reply: Reply): Promise<void> {
+    const crew = await this.crews.crewByJoinCode(code);
+    if (!crew) {
+      await reply("I don't know that code. Ask whoever made the crew for their link.");
+      return;
+    }
+    const already = (await this.crews.membersOf(crew.id)).some((u) => u.id === user.id);
+    if (already) {
+      await reply(`You're already in ${crew.name}.`);
+      return;
+    }
+    await this.crews.addMember(crew.id, user.id);
+    const after = await this.crews.confirmMember(crew.id, user.id);
+    await reply(
+      `You're in ${after.name} 🫧 Anyone in it can text me "dinner tonight?" to start a plan.`,
+    );
+    if (after.createdByUserId && after.createdByUserId !== user.id) {
+      await this.replier(
+        after.createdByUserId,
+        `joined:${crew.id}:${user.id}`,
+      )(`${user.displayName} joined ${after.name}.`);
+    }
+    await this.deps.onCrewChanged?.({ chatId: after.chatId, userId: user.id, change: 'joined' });
+    this.log.info({ groupId: crew.id, userId: user.id }, 'joined crew by code');
+  }
 
   private async declareCrew(creator: User, names: CrewDeclaration, reply: Reply): Promise<void> {
     const found: User[] = [];
@@ -1331,11 +1384,12 @@ export class DbBubbleService implements BubbleService {
     const members = await this.crews.membersOf(crew.id);
     if (members.length < 2) return;
     const names = joinNames(members.map((u) => u.displayName));
+    const more = this.joinLink(crew) ? ` Add more with ${this.joinLink(crew)}.` : '';
     for (const u of members) {
       await this.replier(
         u.id,
         `active:${crew.id}`,
-      )(`${crew.name} is set: ${names}. Anyone can text "dinner tonight?" to start a plan.`);
+      )(`${crew.name} is set: ${names}.${more} Anyone can text "dinner tonight?" to start a plan.`);
     }
     this.log.info({ groupId: crew.id, members: members.length }, 'crew active');
   }
@@ -1441,6 +1495,21 @@ export interface CrewDeclaration {
   name: string | null;
 }
 
+const PLAN_LIKE =
+  /\b(dinner|lunch|brunch|breakfast|coffee|drinks|boba|dessert|eat|food|hungry|restaurant)\b/i;
+
+/** "new crew the boys" (a name, no people) -> the name. People or numbers mean a declaration. */
+export function parseNewCrewName(text: string): string | null {
+  const m =
+    /^(?:new|make|create|start)\s+(?:a\s+)?crew(?:\s+(?:called|named))?\s+(.+?)[.!]*$/i.exec(
+      text.trim(),
+    );
+  if (!m?.[1]) return null;
+  const body = m[1].trim();
+  if (!body || /[,+\d]|\band\b/i.test(body)) return null;
+  return body.replace(/^["']|["']$/g, '').slice(0, 40);
+}
+
 /** "my crew is Ava, Ben and +19195551234 called Thursday Eats" -> names + optional crew name. */
 export function parseCrewDeclaration(text: string): CrewDeclaration | null {
   const m =
@@ -1483,11 +1552,7 @@ export function isNo(text: string): boolean {
 }
 
 /** Late joiners answer only what changes tonight's decision. */
-const FAST_STEPS = [
-  'diet_allergy',
-  'budget',
-  'neighborhood',
-] as const satisfies readonly OnboardingStep[];
+const FAST_STEPS = ['diet_allergy', 'budget'] as const satisfies readonly OnboardingStep[];
 /** Plans a late joiner can still join (not yet locked). */
 const JOINABLE_STATES = ['DETECTED', 'GATHERING', 'DELIBERATING', 'DEADLOCK'] as const;
 

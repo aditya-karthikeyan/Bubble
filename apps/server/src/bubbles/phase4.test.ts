@@ -240,7 +240,7 @@ describe('Phase 4', () => {
   });
 
   describe('late joiner', () => {
-    it('asks at most three questions, then joins the crew and the live plan', async () => {
+    it('asks at most two questions, then joins the crew and the live plan', async () => {
       const plan = rt.plans.create({
         groupId: 'group_demo',
         chatId: 'crew:group_demo',
@@ -264,20 +264,18 @@ describe('Phase 4', () => {
 
       await dm(fay.id, 'hi');
       expect(textsTo(fay.id)[0]).toMatch(
-        /Your crew is planning food right now, so three quick questions/,
+        /Your crew is planning food right now, so two quick questions/,
       );
-      expect(textsTo(fay.id)[0]).toMatch(/1\/3 Anything you don't eat/);
+      expect(textsTo(fay.id)[0]).toMatch(/1\/2 Anything you don't eat/);
       await dm(fay.id, 'vegan');
-      expect(textsTo(fay.id).at(-1)).toMatch(/^2\/3 /);
+      expect(textsTo(fay.id).at(-1)).toMatch(/^2\/2 /);
       await dm(fay.id, '20');
-      expect(textsTo(fay.id).at(-1)).toMatch(/^3\/3 /);
-      await dm(fay.id, 'Carrboro');
       const after = textsTo(fay.id);
       expect(after.at(-2)).toMatch(
         /^You're in ✨ I'll plan around this: you eat vegan; your budget is up to \$20/,
       );
       expect(after.at(-1)).toMatch(/added you to .* Want in\? \(yes\/no\)$/);
-      expect(after.filter((t) => /\b\d\/\d\b/.test(t))).toHaveLength(3); // three questions only
+      expect(after.filter((t) => /\b\d\/\d\b/.test(t))).toHaveLength(2); // three questions only
 
       await dm(fay.id, 'yes');
       expect(changes).toContainEqual({
@@ -400,7 +398,7 @@ describe('Phase 4', () => {
 
     it('"forget me" leaves no row in any table keyed by that user, including held DMs', async () => {
       const hal = await rt.crews.createUser({ displayName: 'Hal', handle: '+19195550403' });
-      for (const t of ['hi', 'vegan', '30', 'Southpoint', 'skip', '@hal-v']) await dm(hal.id, t);
+      for (const t of ['hi', 'vegan', '30', 'skip', '@hal-v']) await dm(hal.id, t);
       await dm(hal.id, 'my crew is Ava');
       await dm('user_ava', 'yes');
       await dm(hal.id, 'sleeping'); // a later DM to Hal is held in a timer

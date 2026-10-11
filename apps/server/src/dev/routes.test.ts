@@ -73,6 +73,10 @@ describe('dev routes', () => {
     });
     expect(again.statusCode).toBe(409);
 
+    rt.plans.audit(body.planId, 'solver_run', {
+      byReason: { allergen: 1 },
+      byMember: { user_ben: { allergen: 1 } },
+    });
     const detail = await app.fastify.inject({
       method: 'GET',
       url: `/api/dev/plans/${body.planId}`,
@@ -85,7 +89,18 @@ describe('dev routes', () => {
     expect(await rt.bus.replayForToken(body.token)).toBeNull();
     expect((await rt.crews.membersOf('group_demo')).length).toBe(5);
     expect(rt.venues().length).toBeGreaterThan(20);
-    const d = detail.json() as { events: Array<{ type: string }> };
+    const d = detail.json() as {
+      events: Array<{ type: string }>;
+      audit: Array<{ kind: string; payload: Record<string, unknown> | null; createdAt: string }>;
+    };
+    const kinds = d.audit.map((a) => a.kind);
+    expect(kinds[0]).toBe('plan_created');
+    expect(kinds.at(-1)).toBe('solver_run');
+    expect(kinds.filter((k) => k === 'transition')).toHaveLength(8);
+    expect(d.audit.at(-1)?.payload).toEqual({
+      byReason: { allergen: 1 },
+      byMember: { user_ben: { allergen: 1 } },
+    });
     const types = new Set(d.events.map((e) => e.type));
     for (const t of [
       'round_complete',

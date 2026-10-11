@@ -11,12 +11,15 @@ import { loadConfig } from '../config.js';
 import { ledger } from '../db/schema.js';
 import { createRuntime, type Runtime } from '../runtime.js';
 import { VENUES_FIXTURE } from '../test-helpers.js';
+import type { VenueSource } from '../venues/places.js';
 import { BubbleworksEngine } from './plan-engine.js';
 
 const CHAT = 'crew:group_demo';
 const DEADLINES = { poll_ms: 10_000, private_ask_ms: 5_000, veto_window_ms: 3_000, call_ms: 8_000 };
 
-function harness(opts: { bubbles?: FakeBubbles } = {}) {
+function harness(
+  opts: { bubbles?: FakeBubbles; flow?: 'polls' | 'agent_first'; venueSource?: VenueSource } = {},
+) {
   let clock = Date.parse('2026-10-10T21:00:00.000Z'); // 17:00 New York, a Saturday
   const now = () => new Date(clock);
   const rt: Runtime = createRuntime(loadConfig({ NODE_ENV: 'test', SEED_ON_BOOT: 'true' }), {
@@ -41,6 +44,8 @@ function harness(opts: { bubbles?: FakeBubbles } = {}) {
     doers,
     webPublicUrl: 'https://page.test',
     now,
+    ...(opts.flow ? { flow: opts.flow } : {}),
+    ...(opts.venueSource ? { venueSource: opts.venueSource } : {}),
   });
   ref.engine = engine;
   const advance = async (ms: number) => {
@@ -131,10 +136,12 @@ describe('BubbleworksEngine', () => {
     expect(h.events.map((e) => e.type)).toContain('booking_confirmed');
     expect(h.doers.calls.map((c) => c.doer)).toEqual(['inviter', 'splitter', 'watcher']);
     expect(h.rt.timers.pending(planId)).toEqual([]);
-    const bookedText = h.messaging.sent.find(
-      (s) => s.kind === 'group_text' && 'input' in s && s.input.text.startsWith('Booked'),
-    );
-    expect(bookedText).toBeDefined();
+    // No separate "Booked" text from the engine: the ticket and the invite carry it.
+    expect(
+      h.messaging.sent.some(
+        (s) => s.kind === 'group_text' && 'input' in s && s.input.text.startsWith('Booked'),
+      ),
+    ).toBe(false);
   });
 
   it('closes the poll deadline with silent members represented or dropped', async () => {
@@ -150,11 +157,12 @@ describe('BubbleworksEngine', () => {
     await h.engine.handleHeadcount({ planId: planId!, userId: 'user_ben', in: true, at: h.at() });
     await h.engine.handleHeadcount({ planId: planId!, userId: 'user_chloe', in: true, at: h.at() });
     await h.advance(DEADLINES.poll_ms + 1);
-    // Both pizza places are over a budget at the table, so Ava (who named pizza) is asked first.
+    // Both pizza places are $2 over Chloe's budget: a small stretch keeps the pizza, so Chloe is
+    // asked first (privately), before anyone is asked to change the cuisine.
     expect(h.rt.plans.get(planId!)?.state).toBe('DEADLOCK');
     await h.engine.handleAskAnswer({
-      askId: h.engine.pendingAskFor('user_ava')!.askId,
-      userId: 'user_ava',
+      askId: h.engine.pendingAskFor('user_chloe')!.askId,
+      userId: 'user_chloe',
       answer: 'yes',
       rawText: 'yes',
       at: h.at(),
@@ -777,6 +785,189 @@ describe('BubbleworksEngine', () => {
       expect(asks).toHaveLength(1);
       expect('input' in asks[0]! ? asks[0]!.input.userId : '').toBe('user_chloe');
       expect(h.rt.timers.pending(planId!).map((t) => t.kind)).toEqual(['ask_timeout']);
+    });
+  });
+
+  describe('agent-first flow', () => {
+    const start = (text: string, extra: Parameters<typeof harness>[0] = {}) => {
+      h.caller.dispose();
+      h.rt.close();
+      h = harness({ flow: 'agent_first', ...extra });
+      return () =>
+        h.engine.handleIntent({
+          chatId: CHAT,
+          userId: 'user_ava',
+          messageId: 'm1',
+          text,
+          at: h.at(),
+        });
+    };
+    const statuses = (planId: string) =>
+      Object.fromEntries(h.rt.plans.members(planId).map((m) => [m.userId, m.status]));
+    const privateTexts = () => h.messaging.sent.filter((s) => s.kind === 'private_text');
+
+    it('books a live place from one message: no polls, a tap to join, nobody is asked', async () => {
+      const live: VenueSource = {
+        search: async (q) => [
+          {
+            id: 'venue_gp_live1',
+            name: 'Lantern',
+            cuisine: q.cuisine ?? 'other',
+            style: 'sit_down',
+            dietTags: ['vegetarian', 'halal'],
+            accessibilityTags: [],
+            priceLevel: 2,
+            typicalCostUsd: 18,
+            hours: Array.from({ length: 7 }, () => [{ open: 660, close: 1320 }]),
+            phone: '+19195550199',
+            location: { lat: 35.9132, lng: -79.0558 },
+            address: null,
+            neighborhood: null,
+            isDemo: false,
+          },
+        ],
+      };
+      const intent = start('hey i want to do a dinner w my group and we r feeling italian', {
+        venueSource: live,
+      });
+      h.bubbles.setPresence('user_eli', 'sleep');
+      const { planId } = await intent();
+      expect(h.messaging.sent.filter((s) => s.kind === 'poll')).toHaveLength(0);
+      const head = h.messaging.sent.find((s) => s.kind === 'group_text');
+      const text = head && 'input' in head ? head.input.text : '';
+      expect(text).toContain('Italian dinner');
+      expect(text).toContain('Tap 👍');
+      expect(h.rt.venues().some((v) => v.id === 'venue_gp_live1')).toBe(true);
+
+      // Three tap 👍; Eli is asleep and never answers, so his bubble stands in for him.
+      for (const u of ['user_ben', 'user_chloe', 'user_dev'])
+        await h.engine.handleHeadcount({ planId: planId!, userId: u, in: true, at: h.at() });
+      await h.advance(DEADLINES.poll_ms + 1);
+      const plan = h.rt.plans.get(planId!)!;
+      expect(plan.state).toBe('LOCKED');
+      expect(plan.chosenVenueId).toBe('venue_gp_live1');
+      expect(privateTexts()).toHaveLength(0);
+      const st = statuses(planId!);
+      expect(st['user_ben']).toBe('in');
+      expect(st['user_chloe']).toBe('in');
+      expect(['represented', 'dropped']).toContain(st['user_eli']);
+
+      await h.advance(DEADLINES.veto_window_ms + 1);
+      await h.settle();
+      expect(h.rt.plans.get(planId!)?.state).toBe('BOOKED');
+    });
+
+    it('waits for every invited member after one tap, then the poll deadline moves it on', async () => {
+      const intent = start('dinner with the group tonight');
+      const { planId } = await intent();
+      expect(h.rt.plans.get(planId!)?.state).toBe('GATHERING');
+      await h.engine.handleHeadcount({ planId: planId!, userId: 'user_ben', in: true, at: h.at() });
+      expect(h.rt.plans.get(planId!)?.state).toBe('GATHERING');
+      await h.advance(DEADLINES.poll_ms + 1);
+      expect(h.rt.plans.get(planId!)?.state).not.toBe('GATHERING');
+    });
+
+    it('two taps landing together lock once, with both counted and no late-joiner rerun', async () => {
+      // The headcount reaches every phone at once, so people in one room tap within a second.
+      // Each tap is handled concurrently; the tap that answers for the last person moves the plan.
+      const intent = start('dinner with the group tonight');
+      const { planId } = await intent();
+      for (const u of ['user_dev', 'user_eli'])
+        await h.engine.handleHeadcount({ planId: planId!, userId: u, in: false, at: h.at() });
+      await Promise.all(
+        ['user_ben', 'user_chloe'].map((u) =>
+          h.engine.handleHeadcount({ planId: planId!, userId: u, in: true, at: h.at() }),
+        ),
+      );
+      expect(h.rt.plans.get(planId!)?.state).toBe('LOCKED');
+      const st = statuses(planId!);
+      expect([st['user_ava'], st['user_ben'], st['user_chloe']]).toEqual(['in', 'in', 'in']);
+      const reasons = h.rt.plans
+        .auditFor(planId!)
+        .filter((a) => a.kind === 'transition')
+        .map((a) => (a.payload as { reason?: string }).reason);
+      expect(reasons.filter((r) => r === 'headcount and poll in')).toHaveLength(1);
+      expect(reasons.some((r) => r?.includes('late joiner'))).toBe(false);
+    });
+
+    it('asks the one person to stretch before changing the cuisine', async () => {
+      // The only stored Indian place is $22 and Chloe's budget is $20.
+      const intent = start('dinner with the group tonight, feeling indian');
+      const { planId } = await intent();
+      for (const u of ['user_ben', 'user_chloe', 'user_dev'])
+        await h.engine.handleHeadcount({ planId: planId!, userId: u, in: true, at: h.at() });
+      await h.advance(DEADLINES.poll_ms + 1);
+      expect(h.rt.plans.get(planId!)?.state).toBe('DEADLOCK');
+      const asks = privateTexts();
+      expect(asks).toHaveLength(1);
+      expect('input' in asks[0]! ? asks[0]!.input.userId : '').toBe('user_chloe');
+      expect('input' in asks[0]! ? asks[0]!.input.text : '').not.toContain('won the vote');
+      await h.engine.handleAskAnswer({
+        askId: h.engine.pendingAskFor('user_chloe')!.askId,
+        userId: 'user_chloe',
+        answer: 'yes',
+        rawText: 'yes',
+        at: h.at(),
+      });
+      const plan = h.rt.plans.get(planId!)!;
+      expect(plan.state).toBe('LOCKED');
+      expect(h.rt.venues().find((v) => v.id === plan.chosenVenueId)?.cuisine).toBe('indian');
+    });
+
+    it('still honors "out"', async () => {
+      const intent = start('dinner with the group tonight, feeling indian');
+      const { planId } = await intent();
+      for (const u of ['user_ben', 'user_chloe'])
+        await h.engine.handleHeadcount({ planId: planId!, userId: u, in: false, at: h.at() });
+      await h.engine.handleHeadcount({ planId: planId!, userId: 'user_dev', in: true, at: h.at() });
+      await h.advance(DEADLINES.poll_ms + 1);
+      // Ava, Dev, and Eli all fit the Indian place, so no one is asked anything.
+      expect(h.rt.plans.get(planId!)?.state).toBe('LOCKED');
+      expect(privateTexts()).toHaveLength(0);
+      const st = statuses(planId!);
+      expect(st['user_ben']).toBe('out');
+      expect(st['user_chloe']).toBe('out');
+      expect(st['user_dev']).toBe('in');
+    });
+  });
+
+  describe('start time', () => {
+    it('does not plan dinner for a dead hour just because calendars are free then', async () => {
+      // Everyone is busy 7:00 to 9:30 PM, so the free window is 10 PM, when Indian places are
+      // closed. The plan goes back to 7 PM, where there is somewhere to eat. (Chloe's budget is
+      // raised so the one Indian place fits everyone at 7 PM.)
+      h.caller.dispose();
+      h.rt.close();
+      h = harness({
+        bubbles: new FakeBubbles(
+          undefined,
+          PERSONA_FACTS.map((f) => (f.id === 'fact_chloe_budget' ? { ...f, value: '25' } : f)),
+        ),
+      });
+      for (const u of ['user_ava', 'user_ben', 'user_chloe', 'user_dev', 'user_eli']) {
+        h.bubbles.setBusy(u, [
+          { start: '2026-10-10T23:00:00.000Z', end: '2026-10-11T01:30:00.000Z' },
+        ]);
+      }
+      const { planId } = await h.engine.handleIntent({
+        chatId: CHAT,
+        userId: 'user_ava',
+        messageId: 'm1',
+        text: 'indian dinner tonight?',
+        at: h.at(),
+      });
+      expect(h.rt.plans.get(planId!)?.startAt).toBe('2026-10-10T23:00:00.000Z');
+    });
+    it('plans lunch tomorrow at 12:30, not at the dinner hour', async () => {
+      const { planId } = await h.engine.handleIntent({
+        chatId: CHAT,
+        userId: 'user_ava',
+        messageId: 'm1',
+        text: 'lunch tomorrow?',
+        at: h.at(),
+      });
+      // 12:30 EDT on 2026-10-11.
+      expect(h.rt.plans.get(planId!)?.startAt).toBe('2026-10-11T16:30:00.000Z');
     });
   });
 });

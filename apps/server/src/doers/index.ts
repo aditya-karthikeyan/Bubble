@@ -127,7 +127,7 @@ export class Doers implements DoerPorts {
     for (const u of people) {
       await this.dm(
         u,
-        `${s.venue.name}, ${when}, table for ${people.length} under ${s.reservationName}. ` +
+        `✅ Booked: ${s.venue.name}, ${when}, table for ${people.length} under ${s.reservationName}. ` +
           `Add it to your calendar: ${url}`,
         `${s.idempotencyKey}:${u.id}`,
       );

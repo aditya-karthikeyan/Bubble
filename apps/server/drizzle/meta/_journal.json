@@ -50,6 +50,20 @@
       "when": 1791686623648,
       "tag": "0006_bubble_answers",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1791691304125,
+      "tag": "0007_venue_rating",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791698226611,
+      "tag": "0008_crew_join_code",
+      "breakpoints": true
     }
   ]
 }

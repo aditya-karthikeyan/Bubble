@@ -13,6 +13,8 @@ export const SignupInput = z.object({
   name: z.string().trim().min(1).max(80),
   email: z.email(),
   phone: z.string().regex(/^\+[1-9]\d{7,14}$/, 'E.164, e.g. +15551234567'),
+  /** Join code from a crew's link ("boys-4821"): the new bubble lands in that crew. */
+  crewCode: z.string().trim().min(1).max(40).optional(),
 });
 export type SignupInput = z.infer<typeof SignupInput>;
 
@@ -22,6 +24,8 @@ export interface SignupResult {
   bubbleNumber: string;
   /** sms: deep link that opens Messages to the bubble with a first message ready to send. */
   smsLink: string | null;
+  /** The crew the code put them in, when a code came along and matched. */
+  crewName: string | null;
 }
 
 export async function signup(
@@ -57,5 +61,14 @@ export async function signup(
   const smsLink = deps.photon
     ? `sms:${bubbleNumber}&body=${encodeURIComponent('hi bubble')}`
     : null;
-  return { user, bubbleNumber, smsLink };
+  let crewName: string | null = null;
+  if (input.crewCode) {
+    const crew = await deps.crews.crewByJoinCode(input.crewCode);
+    if (crew) {
+      await deps.crews.addMember(crew.id, user.id);
+      const after = await deps.crews.confirmMember(crew.id, user.id);
+      crewName = after.name;
+    }
+  }
+  return { user, bubbleNumber, smsLink, crewName };
 }
