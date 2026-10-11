@@ -1,8 +1,11 @@
 /**
- * GET /watch/:secret: a stable, private page for the organizer's laptop. It frames the live
- * page of the newest plan (an active one first, else the most recently created) and follows
- * the next plan on its own; /watch/:secret/latest is what it polls; /watch/:secret/go redirects. The secret is
- * DEV_ROUTES_SECRET; without it the route is a 404, so members never get a working link.
+ * GET /watch/:secret: a stable, private link for the organizer's laptop. With WEB_PUBLIC_URL set
+ * it redirects to the website's /watch page (?s=<secret>&api=<SERVER_PUBLIC_URL>), which shows
+ * the live page's gathering view with no bubbles and switches to each new plan in place. Without
+ * it, a plain HTML shell frames the newest plan's live page instead. Both poll
+ * /watch/:secret/latest (the newest plan, an active one first); /watch/:secret/go redirects
+ * there once. The secret is DEV_ROUTES_SECRET; without it every route is a 404, so members never
+ * get a working link.
  */
 import type { FastifyInstance } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
@@ -13,8 +16,10 @@ export interface WatchRouteOptions {
   /** DEV_ROUTES_SECRET. Unset means every request is a 404. */
   secret: string | undefined;
   plans: Pick<PlanStore, 'findAllActive' | 'newest'>;
-  /** WEB_PUBLIC_URL, where the live page lives (/p/<token>). */
+  /** WEB_PUBLIC_URL, where the live page (/p/<token>) and the watch page (/watch) live. */
   webPublicUrl: string | undefined;
+  /** SERVER_PUBLIC_URL, passed to the web watch page as the server to poll and stream from. */
+  serverPublicUrl?: string | undefined;
 }
 
 const NO_PLAN_HTML =
@@ -83,14 +88,18 @@ export function registerWatchRoute(app: FastifyInstance, options: WatchRouteOpti
     return plan && base ? `${base}/p/${plan.pageToken}` : null;
   };
 
-  /** The organizer's page: a frame that follows the newest plan without a refresh. */
+  /** The organizer's page: the website's /watch page, else a frame shell, following new plans. */
   app.get<{ Params: { secret: string } }>('/watch/:secret', async (request, reply) => {
     if (!guard(request.params.secret)) {
       return reply.code(404).send({ ok: false, error: 'not found' });
     }
     reply.header('cache-control', 'no-store');
-    if (!options.webPublicUrl) {
-      return reply.code(503).send({ ok: false, error: 'WEB_PUBLIC_URL is not set' });
+    const web = options.webPublicUrl?.replace(/\/$/, '');
+    if (web) {
+      const query = new URLSearchParams({ s: request.params.secret });
+      const api = options.serverPublicUrl?.replace(/\/$/, '');
+      if (api) query.set('api', api);
+      return reply.redirect(`${web}/watch?${query.toString()}`, 302);
     }
     return reply.type('text/html; charset=utf-8').send(watchPageHtml(request.params.secret));
   });

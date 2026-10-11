@@ -9,8 +9,8 @@ const KEY = 'bubbleworks.watchSecret';
  * The organizer's "Watch live" taskbar button. It stays hidden until the site is opened once with
  * the server's watch secret in the URL fragment (`/#watch=<secret>`). The fragment never reaches
  * a server. The secret is kept in this browser only, the fragment is wiped from the address bar,
- * and `#watch=off` forgets it. The button opens the server's /watch route, which redirects to the
- * newest plan's live page.
+ * and `#watch=off` forgets it. The button opens the server's /watch route, which redirects to this
+ * site's /watch page: the live page that follows each new plan as it starts.
  */
 export function WatchLive() {
   const [secret, setSecret] = useState<string | null>(null);
