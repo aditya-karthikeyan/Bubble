@@ -11,7 +11,7 @@
  * Timing marks (structured logs): t_detect, t_typing, t_poll_posted, in ms since the message
  * reached the server (and lagMs: phone send time to receipt).
  */
-import { type PlanEngine } from '@bubbleworks/shared';
+import { type PlanEngine, type PollOption } from '@bubbleworks/shared';
 import type { Logger } from '../events/bus.js';
 import { dmChatId, type SpectrumMessaging } from './adapter.js';
 import {
@@ -118,6 +118,11 @@ export class PlanIntake {
     if (pollMessageId) {
       this.o.log.info({ planId, mark: 't_poll_posted', inCount: count }, 'timing');
     }
+  }
+
+  /** Engine rewrites a question before it goes out (cuisine options once the style is known). */
+  updatePoll(planId: string, pollId: string, options: PollOption[] | null): boolean {
+    return this.o.bundles.updatePoll(planId, pollId, options);
   }
 
   /** Engine signals the plan stopped collecting answers (decided, closed, cancelled). */

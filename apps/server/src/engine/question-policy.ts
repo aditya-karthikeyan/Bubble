@@ -100,6 +100,26 @@ export function decideCuisineQuestion(
   };
 }
 
+/**
+ * Cuisine poll options for the people who are in, after the style is known: every cuisine with
+ * at least one venue that fits all of them, best supported first, at most four.
+ */
+export function cuisineOptions(
+  feasible: Venue[],
+  members: SolverMember[],
+  ctx: SolverContext,
+): PollOption[] {
+  const scores = scoreAll(feasible, members, ctx);
+  const support = new Map<string, number>();
+  for (const s of scores) support.set(s.venueId, (support.get(s.venueId) ?? 0) + s.score);
+  const ranked = [...feasible].sort(
+    (a, b) => (support.get(b.id) ?? 0) - (support.get(a.id) ?? 0) || a.id.localeCompare(b.id),
+  );
+  return [...new Set(ranked.map((v) => v.cuisine))]
+    .slice(0, 4)
+    .map((key) => ({ key, label: cuisineLabel(key) }));
+}
+
 export const STYLE_OPTIONS: PollOption[] = [
   { key: 'sit_down', label: 'Sit-down' },
   { key: 'fast_food', label: 'Fast food / takeout' },

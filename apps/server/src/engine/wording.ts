@@ -110,3 +110,12 @@ export function cuisineSwitchAsk(cuisine: string, venueName: string): string {
 export function cuisineSwitchNotice(cuisine: string, venueName: string): string {
   return `${cuisine} won the vote, but no spot like that fits tonight. Checking with its voters about ${venueName}.`;
 }
+
+/** To the group when the style they voted fits nobody at the table. Never says who or why. */
+export function styleOverrideText(
+  voted: 'sit_down' | 'fast_food',
+  instead: 'sit_down' | 'fast_food',
+): string {
+  const name = (s: 'sit_down' | 'fast_food') => (s === 'fast_food' ? 'fast food' : 'sit-down');
+  return `Nothing ${name(voted)} works for everyone tonight, so here are ${name(instead)} options.`;
+}

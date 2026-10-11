@@ -259,6 +259,24 @@ export class BundleStore {
     return result.changes === 1;
   }
 
+  /**
+   * Rewrites a poll that has not gone out yet: new options, or null to drop it from the
+   * sequence. Returns false when the poll is unknown or already sent.
+   */
+  updatePoll(planId: string, pollId: string, options: PollOption[] | null): boolean {
+    const bundle = this.byPlan(planId);
+    const polls = bundle?.pendingPolls ?? [];
+    const index = polls.findIndex((p) => p.pollId === pollId);
+    if (!bundle || index < 0 || index < (bundle.pollIndex ?? 0)) return false;
+    const next = options
+      ? polls.map((p, i) => (i === index ? { ...p, options } : p))
+      : polls.filter((_, i) => i !== index);
+    this.sqlite
+      .prepare('UPDATE p2_bundles SET pending_poll = ? WHERE plan_id = ?')
+      .run(next.length ? JSON.stringify(next) : null, planId);
+    return true;
+  }
+
   registerPoll(pollId: string, planId: string): void {
     this.sqlite
       .prepare('INSERT OR REPLACE INTO p2_bundle_polls (poll_id, plan_id) VALUES (?, ?)')

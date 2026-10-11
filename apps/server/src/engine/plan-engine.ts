@@ -54,6 +54,7 @@ import { parseIntent } from './intent.js';
 import {
   cuisineSwitchAsk,
   cuisineSwitchNotice,
+  styleOverrideText,
   noFitText,
   TemplateAskWriter,
   thankYouText,
@@ -61,6 +62,7 @@ import {
 } from './wording.js';
 import {
   cuisineLabel,
+  cuisineOptions,
   decideCuisineQuestion,
   decideStartTime,
   decideStyleQuestion,
@@ -87,6 +89,8 @@ export interface BundleRequest {
 export interface BundleRenderer {
   renderBundle(decision: BundleRequest): Promise<unknown>;
   closePlan(planId: string): void;
+  /** Rewrite a poll that has not gone out yet; null drops it. */
+  updatePoll?(planId: string, pollId: string, options: PollOption[] | null): boolean;
 }
 
 export interface EngineDeps {
@@ -131,6 +135,8 @@ export class BubbleworksEngine implements PlanEngine {
   private readonly vetoed = new Map<string, Set<string>>();
   /** Plans whose unreachable cuisine was dropped without anyone to ask. */
   private readonly cuisineDropped = new Set<string>();
+  /** Plans whose style vote fit nobody at the table, moved to the other style (with a heads-up). */
+  private readonly styleOverride = new Map<string, VenueStyle>();
   private readonly t0 = new Map<string, number>();
 
   private planNow(): Date {
@@ -252,7 +258,17 @@ export class BubbleworksEngine implements PlanEngine {
 
     const polls: PlanPolls = {
       style: style.ask ? { pollId: newId('poll'), options: style.options } : null,
-      cuisine: cuisine.ask ? { pollId: newId('poll'), options: cuisine.options } : null,
+      // With a style question, cuisine always follows it (unless named); its options are
+      // provisional and get rebuilt for the people who are in once the style is decided.
+      cuisine:
+        cuisine.ask || (style.ask && !intent.cuisine)
+          ? {
+              pollId: newId('poll'),
+              options: cuisine.ask
+                ? cuisine.options
+                : cuisineOptions(preview.feasible, members, ctx),
+            }
+          : null,
     };
     this.polls.set(plan.id, polls);
     const closesAt = new Date(
@@ -1104,6 +1120,7 @@ export class BubbleworksEngine implements PlanEngine {
       return;
     }
     if (plan.state === 'GATHERING') {
+      this.rt.timers.cancel(planId, 'poll_deadline');
       plan = await this.rt.plans.transition(planId, 'DELIBERATING', {
         reason: 'headcount and poll in',
       });
@@ -1760,6 +1777,8 @@ export class BubbleworksEngine implements PlanEngine {
 
   /** Style from the message, else the style poll's leader, else no constraint. */
   private decidedStyle(plan: Plan): VenueStyle | null {
+    const override = this.styleOverride.get(plan.id);
+    if (override) return override;
     if (plan.intent.style) return plan.intent.style;
     const spec = this.pollSpec(plan.id)?.style;
     if (!spec) return null;
@@ -1817,9 +1836,85 @@ export class BubbleworksEngine implements PlanEngine {
     return { counts, decision: isPollDecided(counts, remaining), remaining };
   }
 
+  /**
+   * The style is decided: rebuild the cuisine poll from the people who are in, their limits,
+   * and that style, so every option has a real place behind it. If the style fits nobody at the
+   * table, say so and offer the other style's cuisines. One cuisine left: no poll. None at all:
+   * no poll, and deliberation's deadlock breaker asks the right people to give.
+   */
+  private async prepareCuisinePoll(plan: Plan): Promise<void> {
+    const polls = this.pollSpec(plan.id);
+    const spec = polls?.cuisine;
+    // Only the staged bundle (P2's intake) sends the cuisine poll after the style vote.
+    if (!polls || !spec || this.closedPolls.has(spec.pollId) || !this.deps.intake?.updatePoll)
+      return;
+    const participants = this.rt.plans
+      .members(plan.id)
+      .filter((m) => m.status === 'in' || m.status === 'represented');
+    const members = await this.solverMembers(
+      plan,
+      participants.map((m) => m.userId),
+      new Set(participants.filter((m) => m.status === 'represented').map((m) => m.userId)),
+    );
+    const startMinutes = plan.startAt
+      ? this.minutesOf(plan.startAt)
+      : (plan.intent.startMinutes ?? SOLVER.default_start_min);
+    const base = { ...this.ctx(plan, startMinutes), cuisine: null };
+    const vetoed = this.vetoed.get(plan.id) ?? new Set<string>();
+    const venues = this.rt.venues().filter((v) => !vetoed.has(v.id));
+    const fits = (style: VenueStyle | null) =>
+      filterCandidates(venues, members, { ...base, style }).feasible;
+
+    let feasible = fits(base.style ?? null);
+    if (feasible.length === 0 && base.style) {
+      const other: VenueStyle = base.style === 'fast_food' ? 'sit_down' : 'fast_food';
+      const instead = fits(other);
+      if (instead.length > 0) {
+        this.styleOverride.set(plan.id, other);
+        this.rt.plans.audit(plan.id, 'style_override', { from: base.style, to: other });
+        await this.groupText(plan, 'style_override', styleOverrideText(base.style, other));
+        feasible = instead;
+      }
+    }
+    const options = cuisineOptions(feasible, members, { ...base, style: this.decidedStyle(plan) });
+    this.log.info(
+      { planId: plan.id, style: this.decidedStyle(plan), options: options.map((o) => o.key) },
+      'cuisine options',
+    );
+    if (options.length < 2) {
+      // Nothing to choose between: drop the question and go straight to the search.
+      this.closedPolls.add(spec.pollId);
+      this.deps.intake?.updatePoll?.(plan.id, spec.pollId, null);
+      this.rt.plans.audit(plan.id, 'poll_skipped', {
+        pollId: spec.pollId,
+        options: options.map((o) => o.key),
+      });
+      return;
+    }
+    spec.options = options;
+    this.deps.intake?.updatePoll?.(plan.id, spec.pollId, options);
+    // The cuisine question gets a full answer window of its own.
+    this.rt.timers.schedule({
+      planId: plan.id,
+      kind: 'poll_deadline',
+      replace: true,
+      payload: {
+        pollId: spec.pollId,
+        options,
+        ...(polls.style
+          ? { stylePollId: polls.style.pollId, styleOptions: polls.style.options }
+          : {}),
+      },
+    });
+  }
+
   private async closePoll(plan: Plan, spec: PollSpec, leader: string | null): Promise<void> {
     this.closedPolls.add(spec.pollId);
     this.rt.plans.audit(plan.id, 'poll_closed', { pollId: spec.pollId, leader });
+    // Closing the style poll sends the cuisine poll next, so build its options first.
+    if (this.pollSpec(plan.id)?.style?.pollId === spec.pollId) {
+      await this.prepareCuisinePoll(plan);
+    }
     try {
       await this.deps.messaging.closePoll({ chatId: plan.chatId, pollId: spec.pollId });
     } catch (err) {
