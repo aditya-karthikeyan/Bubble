@@ -134,6 +134,12 @@ export class SpectrumMessaging implements MessagingPort {
   /** Last time each person texted their bubble, for the quiet-hours override. */
   private readonly lastInbound = new Map<string, number>();
   private readonly signupNudged = new Map<string, number>();
+  private crewPick: ((userId: string, text: string) => string | null) | null = null;
+
+  /** The intake's answer to "which crew?": a text naming a crew routes to that crew. */
+  setCrewPick(fn: (userId: string, text: string) => string | null): void {
+    this.crewPick = fn;
+  }
   /** Provider id -> the batch messageId it was delivered under, so an edit can name it. */
   private readonly deliveredAs = new Map<string, string>();
   private readonly rawText: Array<(userId: string, text: string, at: string) => boolean | void> =
@@ -531,6 +537,8 @@ export class SpectrumMessaging implements MessagingPort {
 
   /** The crew a DM belongs to: the one with a plan in flight, or any active crew if it reads like a plan. */
   private async planCrewChat(userId: string, text: string): Promise<string | null> {
+    const picked = this.crewPick?.(userId, text);
+    if (picked) return picked;
     const open = await this.o.openPlanCrew?.(userId);
     if (open) return `crew:${open}`;
     if (!looksLikePlan(text)) return null;

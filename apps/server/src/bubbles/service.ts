@@ -491,9 +491,27 @@ export class DbBubbleService implements BubbleService {
       return true;
     }
 
+    const joinCode = /^join\s+([a-z0-9][a-z0-9-]*)\s*[.!]?$/i.exec(text)?.[1];
+    if (joinCode) {
+      await this.joinByCode(user, joinCode, reply);
+      return true;
+    }
+    const newCrewName = parseNewCrewName(text);
+    if (newCrewName) {
+      await this.createCrewWithLink(user, newCrewName, reply);
+      return true;
+    }
     const crewNames = parseCrewDeclaration(text);
     if (crewNames) {
       await this.declareCrew(user, crewNames, reply);
+      return true;
+    }
+    // A plan-shaped message reaches the bubble only when the person has no active crew.
+    if (PLAN_LIKE.test(text) && !(await this.hasActiveCrew(user.id))) {
+      await reply(
+        'You\'re not in a crew yet 🫧 Reply "new crew" plus a name, like "new crew the boys", ' +
+          "and I'll give you a link to drop in your group chat. Once they tap it, just tell me about dinner.",
+      );
       return true;
     }
     if (text.length <= 80 && isNoSplit(text)) {
@@ -990,7 +1008,7 @@ export class DbBubbleService implements BubbleService {
         'Two optional extras so plans fit your real day:',
         ...extras.map((e) => `• ${e}`),
         '',
-        "Next, tell me your crew: 'my crew is' plus names or numbers.",
+        "Next, make your crew: text 'new crew' plus a name (like 'new crew the boys') and I'll give you a link to drop in your group chat.",
       ].join('\n'),
     );
     const seconds = started
@@ -1150,6 +1168,54 @@ export class DbBubbleService implements BubbleService {
   }
 
   // -- crews -----------------------------------------------------------------
+
+  /** The link friends tap to land in the crew (signup page with the code), or null. */
+  private joinLink(crew: Group): string | null {
+    if (!crew.joinCode) return null;
+    return this.deps.signupUrl ? `${this.deps.signupUrl}/join/${crew.joinCode}` : null;
+  }
+
+  private async hasActiveCrew(userId: string): Promise<boolean> {
+    return (await this.crews.crewsOf(userId)).some((c) => c.status === 'active');
+  }
+
+  /** "new crew the boys": a crew of one, plus a link for the rest. Active right away. */
+  private async createCrewWithLink(creator: User, name: string, reply: Reply): Promise<void> {
+    const crew = await this.crews.createCrew({ name, createdByUserId: creator.id, memberIds: [] });
+    const link = this.joinLink(crew);
+    const how = link
+      ? `Drop this in your group chat and they're in: ${link}`
+      : `Friends join by texting their bubble "join ${crew.joinCode}".`;
+    await reply(`${crew.name} is set 🫧 ${how}\nThen just tell me about dinner.`);
+    this.log.info({ groupId: crew.id, userId: creator.id }, 'crew created with join link');
+  }
+
+  /** "join boys-4821": straight in, confirmed; the organizer hears who joined. */
+  private async joinByCode(user: User, code: string, reply: Reply): Promise<void> {
+    const crew = await this.crews.crewByJoinCode(code);
+    if (!crew) {
+      await reply("I don't know that code. Ask whoever made the crew for their link.");
+      return;
+    }
+    const already = (await this.crews.membersOf(crew.id)).some((u) => u.id === user.id);
+    if (already) {
+      await reply(`You're already in ${crew.name}.`);
+      return;
+    }
+    await this.crews.addMember(crew.id, user.id);
+    const after = await this.crews.confirmMember(crew.id, user.id);
+    await reply(
+      `You're in ${after.name} 🫧 Anyone in it can text me "dinner tonight?" to start a plan.`,
+    );
+    if (after.createdByUserId && after.createdByUserId !== user.id) {
+      await this.replier(
+        after.createdByUserId,
+        `joined:${crew.id}:${user.id}`,
+      )(`${user.displayName} joined ${after.name}.`);
+    }
+    await this.deps.onCrewChanged?.({ chatId: after.chatId, userId: user.id, change: 'joined' });
+    this.log.info({ groupId: crew.id, userId: user.id }, 'joined crew by code');
+  }
 
   private async declareCrew(creator: User, names: CrewDeclaration, reply: Reply): Promise<void> {
     const found: User[] = [];
@@ -1315,11 +1381,12 @@ export class DbBubbleService implements BubbleService {
     const members = await this.crews.membersOf(crew.id);
     if (members.length < 2) return;
     const names = joinNames(members.map((u) => u.displayName));
+    const more = this.joinLink(crew) ? ` Add more with ${this.joinLink(crew)}.` : '';
     for (const u of members) {
       await this.replier(
         u.id,
         `active:${crew.id}`,
-      )(`${crew.name} is set: ${names}. Anyone can text "dinner tonight?" to start a plan.`);
+      )(`${crew.name} is set: ${names}.${more} Anyone can text "dinner tonight?" to start a plan.`);
     }
     this.log.info({ groupId: crew.id, members: members.length }, 'crew active');
   }
@@ -1423,6 +1490,21 @@ export class DbBubbleService implements BubbleService {
 export interface CrewDeclaration {
   members: string[];
   name: string | null;
+}
+
+const PLAN_LIKE =
+  /\b(dinner|lunch|brunch|breakfast|coffee|drinks|boba|dessert|eat|food|hungry|restaurant)\b/i;
+
+/** "new crew the boys" (a name, no people) -> the name. People or numbers mean a declaration. */
+export function parseNewCrewName(text: string): string | null {
+  const m =
+    /^(?:new|make|create|start)\s+(?:a\s+)?crew(?:\s+(?:called|named))?\s+(.+?)[.!]*$/i.exec(
+      text.trim(),
+    );
+  if (!m?.[1]) return null;
+  const body = m[1].trim();
+  if (!body || /[,+\d]|\band\b/i.test(body)) return null;
+  return body.replace(/^["']|["']$/g, '').slice(0, 40);
 }
 
 /** "my crew is Ava, Ben and +19195551234 called Thursday Eats" -> names + optional crew name. */

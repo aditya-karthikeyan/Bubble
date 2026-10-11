@@ -165,8 +165,10 @@ export function createMessaging(options: CreateMessagingOptions): Messaging {
         log,
         audit,
         bundleMode: config.MESSAGING_BUNDLE_MODE,
+        crews: runtime.crews,
         ...(attachOptions.isOnboarded ? { isOnboarded: attachOptions.isOnboarded } : {}),
       });
+      port.setCrewPick((userId, text) => intake!.crewPick(userId, text));
       intake.start();
       return intake;
     },

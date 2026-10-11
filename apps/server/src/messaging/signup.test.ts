@@ -57,6 +57,22 @@ describe('signup', () => {
     expect(again.user.id).toBe(first.user.id);
   });
 
+  it('a join code from a crew link puts the new person in that crew', async () => {
+    const crews = new FakeCrewDirectory();
+    const crew = await crews.createCrew({
+      name: 'the boys',
+      createdByUserId: 'user_ava',
+      memberIds: [],
+    });
+    const result = await signup(
+      { crews, photon: null },
+      { name: 'Dee', email: 'd@x.co', phone: '+15550000010', crewCode: crew.joinCode! },
+    );
+    expect(result.crewName).toBe('the boys');
+    expect((await crews.membersOf(crew.id)).map((u) => u.id)).toContain(result.user.id);
+    expect((await crews.crewById(crew.id))?.status).toBe('active');
+  });
+
   it('rejects a phone that is not E.164 and a bad email', async () => {
     const crews = new FakeCrewDirectory();
     await expect(

@@ -3,6 +3,7 @@
  * crew. Same semantics as the server implementation: a crew is pending until every member has
  * confirmed, and the creator counts as confirmed.
  */
+import { makeJoinCode, normalizeJoinCode } from '../join-code.js';
 import type { CrewDirectory } from '../ports.js';
 import { crewChatId, type Group, type GroupMember, type User } from '../types.js';
 import { DEMO_GROUP, DEMO_MEMBERS, PERSONAS } from './personas.js';
@@ -86,6 +87,11 @@ export class FakeCrewDirectory implements CrewDirectory {
     return [...this.crews.values()].find((c) => c.chatId === chatId) ?? null;
   }
 
+  async crewByJoinCode(code: string): Promise<Group | null> {
+    const want = normalizeJoinCode(code);
+    return [...this.crews.values()].find((c) => c.joinCode === want) ?? null;
+  }
+
   async membersOf(groupId: string): Promise<User[]> {
     return (this.members.get(groupId) ?? [])
       .map((m) => this.users.get(m.userId))
@@ -107,6 +113,7 @@ export class FakeCrewDirectory implements CrewDirectory {
       chatId: crewChatId(id),
       status: ids.length === 1 ? 'active' : 'pending',
       createdByUserId: input.createdByUserId,
+      joinCode: makeJoinCode(input.name, id),
       center: null,
       timezone: 'America/New_York',
       createdAt: now,

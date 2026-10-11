@@ -4,9 +4,11 @@
  */
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import {
-  crewChatId,
-  newId,
   User as UserSchema,
+  crewChatId,
+  makeJoinCode,
+  newId,
+  normalizeJoinCode,
   type CrewDirectory,
   type Group,
   type User,
@@ -79,6 +81,29 @@ export class DbCrewDirectory implements CrewDirectory {
     return groupById(this.db, groupId);
   }
 
+  async crewByJoinCode(code: string): Promise<Group | null> {
+    const row = this.db
+      .select({ id: groups.id })
+      .from(groups)
+      .where(eq(groups.joinCode, normalizeJoinCode(code)))
+      .get();
+    return row ? groupById(this.db, row.id) : null;
+  }
+
+  /** A code nobody else holds; the slug comes from the crew name, the digits are random. */
+  private freshJoinCode(name: string): string {
+    for (let i = 0; i < 20; i += 1) {
+      const code = makeJoinCode(name);
+      const taken = this.db
+        .select({ id: groups.id })
+        .from(groups)
+        .where(eq(groups.joinCode, code))
+        .get();
+      if (!taken) return code;
+    }
+    return makeJoinCode(name, newId('code'));
+  }
+
   async crewByChatId(chatId: string): Promise<Group | null> {
     const row = this.db
       .select({ id: groups.id })
@@ -120,6 +145,7 @@ export class DbCrewDirectory implements CrewDirectory {
           chatId: crewChatId(id),
           status: ids.length === 1 ? 'active' : 'pending',
           createdByUserId: input.createdByUserId,
+          joinCode: this.freshJoinCode(input.name),
           centerLat: null,
           centerLng: null,
           timezone: 'America/New_York',
