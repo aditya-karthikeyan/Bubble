@@ -9,6 +9,7 @@ import { registerDevRoutes } from './dev/routes.js';
 import { Doers } from './doers/index.js';
 import { parseCommand } from './engine/intent.js';
 import { HaikuAskWriter } from './engine/wording.js';
+import { demoPlanningClock } from './engine/demo-clock.js';
 import { BubbleworksEngine } from './engine/plan-engine.js';
 import { createMessaging, loadMessagingConfig } from './messaging/index.js';
 import { createRuntime } from './runtime.js';
@@ -112,6 +113,9 @@ async function main(): Promise<void> {
     doers,
     webPublicUrl: config.WEB_PUBLIC_URL ?? null,
     log: app.fastify.log,
+    ...(config.DEMO_MODE && config.DEMO_PLAN_CLOCK
+      ? { planningNow: demoPlanningClock(config.DEMO_PLAN_CLOCK) }
+      : {}),
     ...(process.env['ANTHROPIC_API_KEY']
       ? { askWriter: new HaikuAskWriter({ apiKey: process.env['ANTHROPIC_API_KEY'] }) }
       : {}),
