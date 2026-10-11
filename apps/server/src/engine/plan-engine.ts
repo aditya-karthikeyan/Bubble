@@ -246,9 +246,41 @@ export class BubbleworksEngine implements PlanEngine {
     );
     const busy: Record<string, (typeof members)[number]['busy']> = {};
     for (const m of members) busy[m.userId] = m.busy;
-    const time = decideStartTime(intent.startMinutes, busy, intent.date, this.tz, this.planNow());
-    const ctx = this.ctx(plan, time.startMinutes);
-    const preview = solve({ venues: this.venuePool(), members, ctx });
+    let time = decideStartTime(intent.startMinutes, busy, intent.date, this.tz, this.planNow());
+    let ctx = this.ctx(plan, time.startMinutes);
+    let preview = solve({ venues: this.venuePool(), members, ctx });
+    // A window where nothing is open is not a better window. When calendars push dinner to a
+    // time with no feasible place, fall back to the busiest-free window that does have one,
+    // closest to the usual dinner hour first.
+    if (preview.feasible.length === 0 && intent.startMinutes === null) {
+      const windows = Object.entries(time.freeCounts)
+        .map(([w, free]) => ({ w: Number(w), free }))
+        .filter((x) => x.w !== time.startMinutes)
+        .sort(
+          (a, b) =>
+            b.free - a.free ||
+            Math.abs(a.w - SOLVER.default_start_min) - Math.abs(b.w - SOLVER.default_start_min),
+        );
+      for (const { w } of windows) {
+        const alt = this.ctx(plan, w);
+        const altPreview = solve({ venues: this.venuePool(), members, ctx: alt });
+        if (altPreview.feasible.length > 0) {
+          this.log.info(
+            {
+              planId: plan.id,
+              from: time.startMinutes,
+              to: w,
+              feasible: altPreview.feasible.length,
+            },
+            'start time moved to a window where places are open',
+          );
+          time = { ...time, startMinutes: w, bumped: true };
+          ctx = alt;
+          preview = altPreview;
+          break;
+        }
+      }
+    }
     const style = decideStyleQuestion(preview.feasible, intent.style ?? null);
     const cuisine = decideCuisineQuestion(preview.feasible, members, ctx, intent.cuisine);
     this.log.info(

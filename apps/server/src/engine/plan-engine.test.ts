@@ -897,4 +897,33 @@ describe('BubbleworksEngine', () => {
       expect(st['user_dev']).toBe('in');
     });
   });
+
+  describe('start time', () => {
+    it('does not plan dinner for a dead hour just because calendars are free then', async () => {
+      // Everyone is busy 7:00 to 9:30 PM, so the free window is 10 PM, when Indian places are
+      // closed. The plan goes back to 7 PM, where there is somewhere to eat. (Chloe's budget is
+      // raised so the one Indian place fits everyone at 7 PM.)
+      h.caller.dispose();
+      h.rt.close();
+      h = harness({
+        bubbles: new FakeBubbles(
+          undefined,
+          PERSONA_FACTS.map((f) => (f.id === 'fact_chloe_budget' ? { ...f, value: '25' } : f)),
+        ),
+      });
+      for (const u of ['user_ava', 'user_ben', 'user_chloe', 'user_dev', 'user_eli']) {
+        h.bubbles.setBusy(u, [
+          { start: '2026-10-10T23:00:00.000Z', end: '2026-10-11T01:30:00.000Z' },
+        ]);
+      }
+      const { planId } = await h.engine.handleIntent({
+        chatId: CHAT,
+        userId: 'user_ava',
+        messageId: 'm1',
+        text: 'indian dinner tonight?',
+        at: h.at(),
+      });
+      expect(h.rt.plans.get(planId!)?.startAt).toBe('2026-10-10T23:00:00.000Z');
+    });
+  });
 });
