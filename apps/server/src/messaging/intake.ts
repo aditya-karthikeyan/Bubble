@@ -223,7 +223,9 @@ export class PlanIntake {
     // A reply to "which crew?" carries the plan message that was waiting on it.
     const picked = this.pendingPicks.get(m.userId);
     const resolvedPick = picked !== undefined && picked.chatId === m.chatId;
-    const text = resolvedPick ? picked.text : m.text;
+    // A short answer ("1", "the boys") stands for the message that was waiting; a full new plan
+    // message speaks for itself.
+    const text = resolvedPick && m.text.trim().length <= 40 ? picked.text : m.text;
     if (resolvedPick) this.pendingPicks.delete(m.userId);
 
     const marks = this.marks.get(m.userId);
