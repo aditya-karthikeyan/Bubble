@@ -27,4 +27,4 @@ One row per role. Update your row at the end of every phase.
 
 ## Line lock
 
-Holder of the real iMessage line: nobody (local development uses the Spectrum terminal provider).
+Holder of the real iMessage line: **Railway** (SPECTRUM_PROVIDER=imessage since 2026-10-11 01:19 UTC, P2 LINE LOCK). Nobody runs the imessage provider locally. DEMO_MODE=true on Railway for rehearsals.
