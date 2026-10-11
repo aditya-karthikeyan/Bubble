@@ -315,6 +315,12 @@ export class BubbleworksEngine implements PlanEngine {
     const spec = this.pollSpec(plan.id);
     if (!spec || spec.pollId !== input.pollId) return;
     const at = input.at;
+    // Voting on where to eat is saying you are coming: an undecided member who votes is in.
+    const member = this.rt.plans.members(plan.id).find((m) => m.userId === input.userId);
+    if (input.choices.length > 0 && (!member || member.status === 'invited')) {
+      await this.handleHeadcount({ planId: plan.id, userId: input.userId, in: true, at });
+      if (this.rt.plans.get(plan.id)?.state !== 'GATHERING') return;
+    }
     this.rt.db.transaction((tx) => {
       tx.delete(votes)
         .where(and(eq(votes.pollId, input.pollId), eq(votes.userId, input.userId)))
